@@ -1,0 +1,6 @@
+TECHO5 includes code derived from other open-source projects.
+
+internal/alsa
+  Derived from EchoLocal, https://github.com/ygelfand/echolocal
+  Copyright (c) 2026 Yuri Gelfand — MIT License
+  Files: alsa.go, playback.go, mixer.go (raw /dev/snd ioctl ALSA client).

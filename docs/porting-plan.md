@@ -10,11 +10,18 @@ red indicator from userspace, and the matching GPL kernel source drop.
 
 ## M1 — Voice daemon on cronos
 
-Port the EchoLocal daemon (`echod`, pure Go, MIT) to `cronos`:
+Step 1 — done: `cmd/audioprobe` (pure Go, `internal/alsa` from EchoLocal)
+captures and plays through the raw devices with no vendor HAL involvement.
+Channel map established: mic, mic copy, loopback L, loopback R. Build with
+`GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ./cmd/audioprobe`.
+
+Step 2 — port the EchoLocal daemon (`echod`, pure Go, MIT) to `cronos`:
 
 - New device layout: paths, board name, model string.
-- `hardware/mic`: open `pcmC0D22c` as S24_3LE, 4 channels, 16 kHz; pick or
-  mix channels for the wake word engine; re-open on the privacy switch.
+- `hardware/mic`: open `pcmC0D22c` as S24_3LE, 4 channels, 16 kHz; ch 0 is
+  the mic, ch 2/3 the playback reference for the canceller (the Dot has
+  7 mics + 2 refs, so `Mics`/`Refs` become 1 and 2 and the beamformer is
+  bypassed); re-open on the privacy switch.
 - `hardware/speaker`: `pcmC0D23p` at 48 kHz S16_LE stereo; volume through
   the MAX98396 `Digital Volume A` / `Speaker Volume A` controls.
 - `hardware/buttons` and `hardware/privacy`: `gpio-keys` (event6),

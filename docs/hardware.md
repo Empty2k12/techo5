@@ -60,6 +60,33 @@ This is the same shape EchoLocal drives on the Dot (S24_3LE capture, 48 kHz
 S16_LE stereo playback), so its raw-ioctl ALSA code should carry over with
 the device numbers and channel count changed.
 
+### Verified with `cmd/audioprobe` (raw ioctls, vendor HAL idle, satellite app stopped)
+
+- Capture opens at 320-frame periods × 8 and reads 3 s with no overruns.
+  Playback opens at 768 × 4 and plays with no underruns. Both devices are
+  free once the satellite app is stopped; the vendor HAL keeps only
+  `controlC0` open.
+- **Channel map of `pcmC0D22c`:**
+
+  | ch | content |
+  |---|---|
+  | 0 | microphone |
+  | 1 | bit-identical copy of ch 0 |
+  | 2 | playback loopback, **left** |
+  | 3 | playback loopback, **right** |
+
+  Proven by playing 1 kHz left / 1.5 kHz right while capturing: ch 2 and ch 3
+  decorrelate (corr ≈ 0), ch 0 and ch 1 stay identical to the bit in every
+  recording. The loopback pair is silent (exact zeros) whenever nothing plays
+  and does not depend on `Audio_ExtCodec_EchoRef_Switch`.
+- The quiet-room floor on the mic channel is about −69 dBFS RMS; a 0.3 FS
+  tone from the device's own speaker lands at about −17 dBFS RMS on the mic.
+- `ADC_A Left Mute = 1` did **not** change the captured audio, so the
+  `ADC_A` controls are not in the path that produces this stream as
+  configured, or the stream is a mono capture duplicated by the AFE. Whether
+  a second, independent microphone channel can be enabled is open.
+- Host-side analysis: `go run ./tools/wavstats file.wav`.
+
 Mixer (`tinymix`, 118 controls) — the ones that look relevant:
 
 - ADC (TLV320AIC3101): `ADC_A Digital Volume Control` (88 88), `ADC_A MICPGA Volume Ctrl` (40 40),
@@ -161,5 +188,7 @@ and `productid2` read `0` on the unit seen.
   after a button press.
 - Whether the AIC3101 needs any mixer setup beyond what the vendor HAL leaves
   behind at boot when the HAL is not running.
+- Why capture channels 0 and 1 are identical: mono ADC, AFE duplication, or a
+  second mic that needs routing. The `ADC_A` mute had no effect on it.
 - Which Amazon GPL kernel source drop matches the 4.9.337 LineageOS kernel
   and the stock LK `77c8c2e-20211019`.
