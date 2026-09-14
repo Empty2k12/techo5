@@ -2,29 +2,25 @@
 
 The order is chosen so that every milestone leaves a usable device.
 
-## M0 — Ground truth on the hardware
+## M0 — Ground truth on the hardware — done
 
-Boot LineageOS (or stock Fire OS 7) with root and record:
-
-- `/proc/asound/cards`, `/proc/asound/devices`, `tinymix` control list,
-  capture and playback formats that actually open.
-- Input devices (`getevent -pl`), GPIO and LED nodes under `/sys/class`.
-- The ambient light sensor path.
-- Which vendor daemons hold the audio and mic-mute lines.
-
-Deliverable: `docs/hardware.md` filled in, plus a `tools/` script that dumps
-all of this from a rooted shell.
+`tools/hwdump.sh` run on a LineageOS unit; findings in `docs/hardware.md`.
+Still open from M0: whether `privacy-enable-gpio` controls the mute and the
+red indicator from userspace, and the matching GPL kernel source drop.
 
 ## M1 — Voice daemon on cronos
 
 Port the EchoLocal daemon (`echod`, pure Go, MIT) to `cronos`:
 
 - New device layout: paths, board name, model string.
-- `hardware/mic`: open the cronos capture device with the right format and
-  channel map; re-open on the privacy switch.
-- `hardware/speaker`: playback device and mixer controls.
-- `hardware/buttons` and `hardware/privacy`: `gpio-privacy-button` and
-  `gpio-privacy-state`.
+- `hardware/mic`: open `pcmC0D22c` as S24_3LE, 4 channels, 16 kHz; pick or
+  mix channels for the wake word engine; re-open on the privacy switch.
+- `hardware/speaker`: `pcmC0D23p` at 48 kHz S16_LE stereo; volume through
+  the MAX98396 `Digital Volume A` / `Speaker Volume A` controls.
+- `hardware/buttons` and `hardware/privacy`: `gpio-keys` (event6),
+  `gpio-privacy-button` (event1) and `gpio-privacy-state` (event0);
+  drive `privacy-enable-gpio` (gpio-384) for mute.
+- Light sensor from `m_alsps_input` (event5, ABS_X = lux).
 - Drop the Dot-only LED ring; add the mute LED if reachable.
 - Install as an init service on LineageOS (`/system/etc/init/techo5.rc`)
   instead of the Fire OS `ledcontroller` takeover that EchoLocal uses on the Dot.
