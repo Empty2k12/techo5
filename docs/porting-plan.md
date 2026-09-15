@@ -247,8 +247,10 @@ worked with no Android userspace running. What it took, beyond the plan:
 - Custom boot logo (user request): the `logo` partition turned out empty; the
   picture is compiled into LK (hardware.md, "Boot logo"). `tools/linux/patch-lk-logo.py`
   builds an LK image with the TECHO5 mark (`logo/TECHO5_logo.png`) in the
-  wordmark's place, keyed onto black; flashing LK is not a one-command-recoverable
-  step, so it waits for the user's go. The daemon shows the same mark as a
+  wordmark's place, keyed onto black. Flashed to `lk` (p3) 2026-09-15: bricked
+  the boot (p3 is the stock LK that amonet's kaeru in `expdb` chains from; see
+  hardware.md "Boot logo"), recovered with amonet fastbrick. A second attempt
+  must patch the kaeru copy in `expdb` instead — not done, waits for the user. The daemon shows the same mark as a
   splash from its start until Home Assistant is listening, with the signal
   arcs pulsing outward both ways (`feature/display/splash.go`), so power-on
   reads as one identity through to the clock.

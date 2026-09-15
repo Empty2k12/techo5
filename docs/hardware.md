@@ -424,9 +424,22 @@ two battery pictures (408×216) and the full-screen over-temperature
 thermometer (960×480, landscape as stored; LK applies the panel rotation).
 LK knows each image's size from code, so a replacement must decompress to the
 same byte count. `tools/linux/patch-lk-logo.py` appends a new wordmark bundle
-after the LK image, repoints that one pointer and grows the header size; the
-LK copy in `expdb` (p7) is amonet's, not stock, and is left alone. `swdl` (p11)
-holds an Android boot image (Amazon's recovery/download image).
+after the LK image, repoints that one pointer and grows the header size.
+
+**Do not apply it to the `lk` partition (p3).** Tried 2026-09-15: p3 holds
+Amazon's *stock* LK (byte-identical to amonet's `bin/lk.bin`); amonet's kaeru
+bootloader is the patched LK copy in `expdb` (p7, `cronos-kaeru.bin`) and the
+tee payload in `tee1` chains into it at boot. With p3 enlarged, the chain did
+not engage: the stock LK ran alone — no boot of the unsigned image, and the
+button-combo fastboot answered `flash lk` with "restricted on locked hw".
+Recovery = re-run amonet's fastbrick (`fastboot flash brick fastbrick.img`
+from that stock fastboot); it rewrites p3 (stock lk), p7 (kaeru), tee1/tee2,
+preloader, flashes TWRP to recovery and reboots into TWRP; the boot slot,
+store and data were untouched. If the logo is ever changed, the bundle has to
+go into the kaeru copy in `expdb` (same LK layout, wordmark at the same
+offset), which kaeru's fastboot (reached via `rebootto bootloader`) can
+flash. `swdl` (p11) holds an Android boot image (Amazon's recovery/download
+image).
 
 ## Factory data (`/proc/idme`)
 
