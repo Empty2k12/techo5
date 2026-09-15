@@ -18,3 +18,5 @@ bluez-btmgmt
 # wpa_supplicant 2.9 comes from local v3.12 packages (see README.md, "Why these
 # choices"); apk resolves its libnl3 / dbus-libs / pcsc-lite-libs dependencies
 # from v3.24 and its libssl1.1 / libcrypto1.1 ones from the same local set.
+# WebRTC echo canceller for the techo5-aec helper (tools/aec).
+webrtc-audio-processing-1

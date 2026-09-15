@@ -18,6 +18,10 @@ type Microphone struct {
 	// during a reply competes with the room rather than with the reply.
 	Cancel bool `json:"cancel"`
 
+	// CancelEngine is which canceller does it: the built-in linear filter, or WebRTC's in a helper
+	// process where the image has it.
+	CancelEngine CancelEngine `json:"cancel_engine,omitempty"`
+
 	// Sensitivity is how far over the room's own floor, in dB, counts as something happening. Lower
 	// notices a chair being moved; higher waits for someone to speak.
 	Sensitivity int `json:"sensitivity"`
@@ -84,6 +88,35 @@ func (w MicrophoneWriter) Mixing(v Mixing) error {
 
 func (w MicrophoneWriter) Cancel(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Cancel = v })
+}
+
+func (w MicrophoneWriter) CancelEngine(v CancelEngine) error {
+	return w.st.Update(func(c *Config) { c.Microphone.CancelEngine = v })
+}
+
+// CancelEngine is which echo canceller runs.
+type CancelEngine string
+
+const (
+	// CancelBuiltin is the daemon's own linear filter: always there, 6% of a core while playing.
+	CancelBuiltin CancelEngine = "builtin"
+
+	// CancelWebRTC is WebRTC's canceller in the techo5-aec helper: linear filter plus a suppressor
+	// and noise suppression; falls back to the built-in one on an image without the helper.
+	CancelWebRTC CancelEngine = "webrtc"
+)
+
+// CancelEngines is the choice, for a select.
+func CancelEngines() []CancelEngine { return []CancelEngine{CancelBuiltin, CancelWebRTC} }
+
+func (e CancelEngine) Label() string {
+	switch e {
+	case CancelWebRTC:
+		return "WebRTC"
+	case CancelBuiltin, "":
+		return "Built-in"
+	}
+	return string(e)
 }
 
 func (w MicrophoneWriter) Sensitivity(db int) error {

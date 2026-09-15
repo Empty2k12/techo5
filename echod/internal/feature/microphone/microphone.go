@@ -25,6 +25,7 @@ type Microphone struct {
 	gain        *esphome.Number
 	leveling    *esphome.Switch
 	cancel      *esphome.Switch
+	engine      *esphome.Select
 	denoise     *esphome.Switch
 	sensitivity *esphome.Number
 }
@@ -65,6 +66,14 @@ func build() *Microphone {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		engine: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: "microphone_echo_canceller",
+				Name:     "Microphone echo canceller",
+				Icon:     "mdi:waveform",
+				Category: esphome.CategoryConfig,
+			},
+		},
 		denoise: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "microphone_noise_reduction",
@@ -96,7 +105,7 @@ func build() *Microphone {
 	}
 
 	for _, b := range []*esphome.Base{
-		&m.mixing.Base, &m.gain.Base, &m.leveling.Base, &m.cancel.Base, &m.denoise.Base,
+		&m.mixing.Base, &m.gain.Base, &m.leveling.Base, &m.cancel.Base, &m.engine.Base, &m.denoise.Base,
 		&m.sensitivity.Base,
 	} {
 		b.DeviceID = component.DeviceMicrophone
@@ -104,6 +113,7 @@ func build() *Microphone {
 
 	source := mic.Get()
 	component.Bind(m.mixing, mic.Mixings(), source.SetMixing, config.Set().Microphone().Mixing)
+	component.Bind(m.engine, config.CancelEngines(), setEngine, config.Set().Microphone().CancelEngine)
 
 	m.leveling.OnCommand = func(on bool) {
 		m.leveling.Set(on)
@@ -149,7 +159,16 @@ func build() *Microphone {
 func (m *Microphone) Name() string { return "microphone settings" }
 
 func (m *Microphone) Entities() []esphome.Entity {
-	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel, m.denoise, m.sensitivity}
+	return []esphome.Entity{m.mixing, m.gain, m.leveling, m.cancel, m.engine, m.denoise, m.sensitivity}
+}
+
+// setEngine applies a canceller choice and reports what the source settled on, which is the
+// built-in filter when the WebRTC helper is not on this image.
+func setEngine(e config.CancelEngine) config.CancelEngine {
+	if e == "" {
+		e = config.CancelBuiltin
+	}
+	return config.CancelEngine(mic.Get().SetCancelEngine(string(e)))
 }
 
 // Restore puts the knobs back. The analog gain is only published here: the capture service applies
@@ -166,6 +185,8 @@ func (m *Microphone) Restore(c config.Config) {
 	m.cancel.Set(c.Microphone.Cancel)
 	source.SetCancelling(c.Microphone.Cancel)
 	slog.Info("restored", "what", m.cancel.ObjectID, "using", c.Microphone.Cancel)
+
+	component.Restore(m.engine, c.Microphone.CancelEngine, setEngine)
 
 	m.denoise.Set(c.Microphone.Denoise)
 	source.SetDenoising(c.Microphone.Denoise)

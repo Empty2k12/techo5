@@ -40,6 +40,11 @@ const refHold = Rate / 4
 type canceller struct {
 	filter *aec.Canceller
 
+	// ext is WebRTC's canceller in a helper process (webrtc.go), used instead of filter while it is
+	// set and healthy. engine names which one the user asked for.
+	ext    *external
+	engine string
+
 	// ref and mono are reused every frame; decoding into them keeps the audio path free of allocation.
 	ref  []int16
 	mono []int16
@@ -64,7 +69,49 @@ func newCanceller() *canceller {
 		slog.Error("echo cancellation unavailable", "err", err)
 		return nil
 	}
-	return &canceller{filter: f}
+	return &canceller{filter: f, engine: "builtin"}
+}
+
+// setEngine picks the canceller: "builtin" is the LMS filter above, "webrtc" the helper process.
+// It reports what it settled on: webrtc falls back to builtin when the helper cannot start.
+func (c *canceller) setEngine(name string) string {
+	if c.ext != nil {
+		c.ext.Close()
+		c.ext = nil
+	}
+	c.engine = "builtin"
+	if name != "webrtc" {
+		return c.engine
+	}
+	e, err := startExternal("--ns", "low")
+	if err != nil {
+		slog.Warn("webrtc echo cancellation unavailable, using the built-in filter", "err", err)
+		return c.engine
+	}
+	c.ext, c.engine = e, "webrtc"
+	return c.engine
+}
+
+// process runs one block through whichever engine is on. A helper that has died is dropped for
+// the built-in filter, once, with a log line.
+func (c *canceller) process(mic, ref []int16) ([]int16, float64, error) {
+	if c.ext != nil {
+		if c.ext.Healthy() {
+			out, err := c.ext.Process(mic, ref)
+			if err == nil {
+				return out, c.ext.ERLE(), nil
+			}
+			slog.Warn("webrtc echo cancellation failed, using the built-in filter", "err", err)
+		}
+		c.ext.Close()
+		c.ext = nil
+		c.engine = "builtin"
+	}
+	out, err := c.filter.Process(mic, ref)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, c.filter.ERLE(), nil
 }
 
 // apply returns the center microphone with the echo removed, or nil when there is nothing playing and
@@ -96,15 +143,15 @@ func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
 	}
 
 	if !c.active.Swap(true) {
-		slog.Info("echo cancellation running", "taps", cancelTaps)
+		slog.Info("echo cancellation running", "engine", c.engine, "taps", cancelTaps)
 	}
 
-	out, err := c.filter.Process(mics[CenterMic], c.ref)
+	out, erleDB, err := c.process(mics[CenterMic], c.ref)
 	if err != nil {
 		slog.Error("echo cancellation failed", "err", err)
 		return nil
 	}
-	erle := int64(c.filter.ERLE() * 1000)
+	erle := int64(erleDB * 1000)
 	c.erle.Store(erle)
 	if erle > c.best.Load() {
 		c.best.Store(erle)
@@ -164,6 +211,27 @@ func (s *Source) SetCancelling(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cancelling = on
+}
+
+// SetCancelEngine chooses which canceller runs — "builtin" or "webrtc" — and reports what it
+// settled on. Serialised with the capture loop, since the engine is used from there.
+func (s *Source) SetCancelEngine(name string) string {
+	if s.cancel == nil {
+		return "builtin"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancel.setEngine(name)
+}
+
+// CancelEngine is which canceller is running.
+func (s *Source) CancelEngine() string {
+	if s.cancel == nil {
+		return "builtin"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancel.engine
 }
 
 // SetAdapting stops or resumes the canceller learning, while it goes on cancelling with what it has.
