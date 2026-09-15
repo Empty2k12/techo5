@@ -337,9 +337,21 @@ func (f *Feature) Play(station string) {
 	f.mu.Unlock()
 	component.CallService.Emit(component.Call{
 		Service: h.Service,
-		Data:    map[string]string{h.Field: station, h.SpeakerField: speaker},
+		Data:    map[string]string{h.Field: askFor(station), h.SpeakerField: speaker},
 	})
 	f.Changed.Emit(struct{}{})
+}
+
+// askFor is the station name to hand the finder: a list label like "101.1 WXYZ on iHeartRadio"
+// was written for Alexa, which took the whole phrase; a search wants just "101.1 WXYZ".
+func askFor(label string) string {
+	l := strings.TrimSpace(label)
+	for _, tail := range []string{" on iHeartRadio", " on iHeart", " on TuneIn", " on Tune In"} {
+		if strings.HasSuffix(strings.ToLower(l), strings.ToLower(tail)) {
+			return strings.TrimSpace(l[:len(l)-len(tail)])
+		}
+	}
+	return l
 }
 
 // Stop ends whatever the player is doing.
