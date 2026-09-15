@@ -170,6 +170,8 @@ def main():
     ap.add_argument("--apk", action="append", default=[], metavar="FILE.apk",
                     help="Alpine package to unpack into the rootfs (its files only; no install scripts)")
     ap.add_argument("--copy", action="append", default=[], metavar="SRC=DEST", help="extra file, mode 644")
+    ap.add_argument("--script", action="append", default=[], metavar="SRC=DEST",
+                    help="extra text file, mode 755, CRLF normalised (shell scripts from a Windows checkout)")
     ap.add_argument("--cmdline-append", default=None)
     ap.add_argument("--ramdisk-addr", type=lambda v: int(v, 0), default=None,
                     help="override the ramdisk load address in the header (e.g. 0x43400000)")
@@ -207,6 +209,11 @@ def main():
         dest = dest.strip("/")
         c.add_parents(dest)
         c.file(dest, open(src, "rb").read().replace(b"\r\n", b"\n"), 0o644)
+    for spec in a.script:
+        src, dest = spec.split("=", 1)
+        dest = dest.strip("/")
+        c.add_parents(dest)
+        c.file(dest, open(src, "rb").read().replace(b"\r\n", b"\n"), 0o755)
     init = open(a.init, "rb").read().replace(b"\r\n", b"\n")
     c.file("init", init, 0o755)
     adds = {}

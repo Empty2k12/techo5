@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -127,6 +128,11 @@ const lockWait = 5 * time.Second
 
 // has answers -C, where a non-zero exit is the answer rather than a failure.
 func has(rule []string) (bool, error) {
+	// Without a vendor firewall there is nothing to check and nothing to add; see iptablesRun.
+	if _, err := os.Stat(iptables); err != nil {
+		return true, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
 	defer cancel()
 
@@ -154,6 +160,12 @@ var (
 )
 
 func iptablesRun(args ...string) error {
+	// No vendor firewall means no DROP policy to open a hole in: the Linux image has no iptables at
+	// all, and every port is reachable already.
+	if _, err := os.Stat(iptables); err != nil {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
 	defer cancel()
 

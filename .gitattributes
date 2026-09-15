@@ -1,0 +1,14 @@
+# Shell scripts and everything that lands on the device must stay LF whatever
+# the checkout platform does; the rest follows the platform.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+tools/linux/init text eol=lf
+tools/linux/slotctl text eol=lf
+tools/linux/readmisc.sh text eol=lf
+tools/linux/rootfs/** text eol=lf
+tools/linux/*.txt text eol=lf
+tools/*.sh text eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.tflite binary

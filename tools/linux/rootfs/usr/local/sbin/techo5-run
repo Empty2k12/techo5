@@ -1,0 +1,23 @@
+#!/bin/sh
+# The daemon under busybox init (inittab respawn). Waits for the network, then
+# becomes techo5. init starts this again whenever it exits: after the daemon
+# installed an update and stepped aside for the new binary, or after a crash.
+# A trial binary that crashes is put back by the daemon's own next start (the
+# marker in /run/techo5/prop survives the restart), so the loop here only has
+# to be slow enough not to burn the CPU.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LOG=/data/techo5-linux/techo5.log
+
+n=0
+while [ $n -lt 90 ] && ! ip -4 addr show wlan0 2>/dev/null | grep -q inet; do
+	sleep 1; n=$((n+1))
+done
+sleep 1
+
+mkdir -p /data/misc/techo5/models
+if [ -f $LOG ] && [ "$(stat -c %s $LOG 2>/dev/null || echo 0)" -gt 5000000 ]; then
+	mv -f $LOG $LOG.1
+fi
+echo "techo5-run: starting $(/usr/local/bin/techo5 --version 2>/dev/null | head -1) at $(date)" >> $LOG
+exec /usr/local/bin/techo5 run >> $LOG 2>&1

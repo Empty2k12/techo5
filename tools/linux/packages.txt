@@ -17,3 +17,15 @@ wpa_supplicant-2.9-r8.apk
 libssl1.1-1.1.1o-r0.apk
 libcrypto1.1-1.1.1o-r0.apk
 libnl3-3.5.0-r0.apk
+#
+# e2fsprogs for the rescue initramfs (slotctl mkstore, fsck):
+e2fsprogs-1.47.4-r0.apk
+e2fsprogs-libs-1.47.4-r0.apk
+libblkid-2.42.3-r1.apk
+libuuid-2.42.3-r1.apk
+libcom_err-1.47.4-r0.apk
+#
+# runtime libraries wpa_supplicant 2.9 is linked against (from v3.24):
+dbus-libs-1.16.2-r2.apk
+pcsc-lite-libs-2.4.0-r4.apk
+libeconf-0.8.3-r0.apk           # needed by libblkid (mke2fs)

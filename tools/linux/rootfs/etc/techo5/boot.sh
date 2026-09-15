@@ -1,0 +1,120 @@
+#!/bin/sh
+# TECHO5 root filesystem: sysinit (see /etc/inittab).
+#
+# The initramfs hands over with /proc, /sys, /dev (tmpfs, populated by mdev),
+# /run, /tmp, /data (userdata) and /store (the slot store, read-only) already
+# mounted and the name of the booted slot in /run/techo5/slot. Everything here
+# is best effort and logged: nothing is allowed to keep the daemon from
+# starting.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LOGDIR=/data/techo5-linux
+log() { echo "techo5-boot: $*" > /dev/kmsg; echo "$(cut -d' ' -f1 /proc/uptime) $*" >> /run/boot.log; }
+. /lib/techo5-lib.sh
+
+# --- Mounts the initramfs normally provides, for a boot that did not come through it.
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys || mount -t sysfs sysfs /sys
+if ! mountpoint -q /dev; then
+	mount -t tmpfs -o mode=0755 tmpfs /dev
+	mkdir -p /dev/pts
+	mount -t devpts devpts /dev/pts
+fi
+mountpoint -q /run || mount -t tmpfs tmpfs /run
+mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp
+mountpoint -q /data || mount -t ext4 -o noatime /dev/mmcblk0p16 /data
+mountpoint -q /store || mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /store
+# The root is read-only; what needs writing lives on tmpfs or userdata.
+mount -t tmpfs tmpfs /var/log
+mount -t tmpfs tmpfs /var/tmp
+mkdir -p /run/lock /run/techo5 $LOGDIR /data/misc/techo5/models
+: > /run/boot.log
+
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mdev -s
+mkdir -p /dev/graphics
+[ -e /dev/fb0 ] && ln -sf /dev/fb0 /dev/graphics/fb0
+hostname -F /etc/hostname
+log "slot $(cat /run/techo5/slot 2>/dev/null || echo '?'): $(cat /etc/techo5-release 2>/dev/null)"
+
+# --- Screen: the clock as a placeholder until the daemon owns the panel (M4 step 4).
+if [ -x /usr/local/bin/fbprobe ]; then
+	fbprobe -hold 1000h > /dev/null 2>&1 &
+fi
+
+# --- Root shell on USB serial (techo5-console attaches to it).
+t5_usb_acm
+
+# --- Network. Credentials: the file on userdata, first written from Android's saved network.
+t5_wifi_conf $LOGDIR/wpa_supplicant.conf
+export UDHCPC_SCRIPT=/etc/techo5/udhcpc.sh
+t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
+
+if [ -n "$IP" ]; then
+	t5_dropbear $LOGDIR/dropbear
+	t5_ntp
+	ntpd -p "${NTP_SERVER:-pool.ntp.org}" > /dev/null 2>&1
+fi
+
+# --- Network keeper: bring Wi-Fi back if it is gone, and reboot after 15 minutes
+# without an address — an unattended unit must never sit unreachable.
+(
+	down=0
+	while true; do
+		sleep 60
+		if [ -n "$(t5_ip)" ]; then
+			down=0
+			continue
+		fi
+		down=$((down+1))
+		log "network: no address for $down min"
+		if [ $down -ge 15 ]; then
+			log "network: rebooting"
+			sync
+			reboot
+		fi
+		killall udhcpc wpa_supplicant 2>/dev/null
+		t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
+		if [ -n "$IP" ]; then
+			pidof dropbear >/dev/null || t5_dropbear $LOGDIR/dropbear
+		fi
+	done
+) &
+
+# --- Slot trial: this slot is committed once the daemon has been running for
+# five minutes without a restart — the same evidence the daemon itself takes
+# before it commits an update of its own. Until then every boot costs a try,
+# and a boot where that never happens within TRIAL_TIMEOUT seconds reboots on
+# its own: a slot whose daemon keeps dying must not sit there reachable but
+# useless, it must use up its tries and let the initramfs fall back.
+TRIAL_SETTLE=${TRIAL_SETTLE:-300}
+TRIAL_TIMEOUT=${TRIAL_TIMEOUT:-900}
+[ -r /etc/techo5/trial.conf ] && . /etc/techo5/trial.conf
+(
+	s=$(cat /run/techo5/slot 2>/dev/null)
+	[ -n "$s" ] || exit 0
+	case "$(cat /store/slots/$s.state 2>/dev/null)" in trial*) ;; *) exit 0;; esac
+	while true; do
+		sleep 15
+		now=$(cut -d. -f1 /proc/uptime)
+		pid=$(pidof techo5 | cut -d' ' -f1)
+		if [ -n "$pid" ]; then
+			started=$(awk '{print int($22/100)}' /proc/$pid/stat 2>/dev/null)
+			if [ -n "$started" ] && [ $((now-started)) -ge $TRIAL_SETTLE ]; then
+				log "slot $s: daemon up for $TRIAL_SETTLE s, committing"
+				slotctl commit >> /run/boot.log 2>&1
+				exit 0
+			fi
+		fi
+		if [ $now -ge $TRIAL_TIMEOUT ]; then
+			log "slot $s: daemon did not settle within $TRIAL_TIMEOUT s; rebooting to use up a try"
+			cp /run/boot.log $LOGDIR/boot.log 2>/dev/null
+			sync
+			reboot
+		fi
+	done
+) &
+
+cp /run/boot.log $LOGDIR/boot.log 2>/dev/null
+log "boot script done"

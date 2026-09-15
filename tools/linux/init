@@ -1,24 +1,31 @@
 #!/bin/busybox.static sh
-# TECHO5 first-boot init for the Linux image (porting plan M4, step 1).
+# TECHO5 initramfs init for the Linux image (porting plan M4).
 #
-# Runs as PID 1 from the initramfs. It does the minimum: populate /dev (the
-# kernel has no devtmpfs), clear the recovery bootloader message so the next
-# reboot is a normal Android boot, leave breadcrumbs and a boot log in the
-# spare area of the MISC partition (readable later from TWRP or Android with
-# tools/linux/readmisc.sh) and on userdata, paint the panel, offer a root shell
-# over USB serial (CDC ACM), try the vendor Wi-Fi module, and reboot into
-# Android on its own after a while unless told to stay. Everything is best
-# effort and logged; nothing here is permanent.
+# Runs as PID 1 from the initramfs in the `boot` partition. Two jobs:
 #
-# The interpreter is the static busybox so PID 1 does not depend on the
-# dynamic loader; everything after that uses the normal Alpine busybox.
+#  1. Boot a root filesystem slot from the store on the system partition
+#     (see slotctl): mount the store, let slotctl pick the slot and take one
+#     of its trial tries, bind-mount it and switch_root into its busybox init.
+#     This is the normal path and takes a few seconds.
+#
+#  2. Failing that — no store, no bootable slot, a `rescue` marker, or the
+#     slot's init not there — stay up as the rescue environment: root shell
+#     on USB serial, Wi-Fi with Android's saved credentials, dropbear, and the
+#     daemon from whatever slot (or LineageOS system) has a binary, so a
+#     broken unit is still reachable and still answers. Without a network it
+#     reboots after 15 minutes so an unattended unit never stays stuck.
+#
+# Breadcrumbs go to the spare area of the MISC partition (tools/linux/readmisc.sh)
+# and a boot log to userdata; everything is logged to the kernel log, which
+# pstore keeps across a reboot. The interpreter is the static busybox so PID 1
+# does not depend on the dynamic loader.
 
 BB=/bin/busybox.static
 MISC=/dev/mmcblk0p8          # static node from the initramfs, major 179
+STORE_DEV=/dev/mmcblk0p12    # system partition: the store (or a LineageOS system)
+DATA_DEV=/dev/mmcblk0p16     # userdata: daemon state, logs, Wi-Fi credentials
 STAY_MINUTES=${STAY_MINUTES:-15}
 
-# Everything this script prints goes to the kernel log, which pstore keeps
-# across a reboot (console-ramoops).
 exec > /dev/kmsg 2>&1
 CRUMB=0
 crumb() {
@@ -27,19 +34,18 @@ crumb() {
 	echo "techo5 crumb $CRUMB: $*"
 	printf 'TECHO5 %02d %s\n' "$CRUMB" "$*" | $BB dd of=$MISC bs=512 seek=$((7+CRUMB)) count=1 conv=notrunc,sync 2>/dev/null
 }
+log() { crumb "$*"; }
 crumb "init started, kernel $($BB uname -r) $($BB uname -m)"
 
 $BB mount -t proc proc /proc
 $BB mount -t sysfs sysfs /sys
-crumb "proc and sys mounted"
 
-# --- Recovery bootloader message: clear it first, so a crash later still
-# leaves the unit booting Android next time. Android writes "boot-recovery"
-# into the first 32 bytes of MISC for `reboot recovery`; recovery zeroes it.
-$BB dd if=/dev/zero of=$MISC bs=32 count=1 conv=notrunc 2>/dev/null && crumb "cleared bootloader message in MISC"
+# Recovery bootloader message: clear it first, so a crash later still leaves
+# the unit booting normally next time.
+$BB dd if=/dev/zero of=$MISC bs=32 count=1 conv=notrunc 2>/dev/null
 
 $BB mount -t tmpfs -o mode=0755 tmpfs /dev
-$BB mkdir -p /dev/pts /dev/graphics /run /tmp
+$BB mkdir -p /dev/pts /dev/graphics /run /tmp /store /data /android /newroot
 $BB mount -t devpts devpts /dev/pts
 $BB mount -t tmpfs tmpfs /run
 $BB mount -t tmpfs tmpfs /tmp
@@ -47,14 +53,13 @@ $BB mdev -s
 $BB mknod -m 600 /dev/mmcblk0p8 b 179 8 2>/dev/null
 [ -e /dev/fb0 ] && $BB ln -sf /dev/fb0 /dev/graphics/fb0
 echo 7 4 1 7 > /proc/sys/kernel/printk
-crumb "dev populated: $($BB ls /dev | $BB wc -l) nodes, fb0=$([ -e /dev/fb0 ] && echo yes || echo no), ttyGS0=$([ -e /dev/ttyGS0 ] && echo yes || echo no)"
+crumb "dev populated: $($BB ls /dev | $BB wc -l) nodes, fb0=$([ -e /dev/fb0 ] && echo yes || echo no)"
 
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-log() { echo "techo5-init: $*"; echo "$*" >> /tmp/boot.log; }
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+. /lib/techo5-lib.sh
 
-# --- Persistent log on userdata (ext4, the Android /data partition).
-mkdir -p /data /android
-if mount -t ext4 -o noatime /dev/mmcblk0p16 /data 2>/dev/null; then
+# --- Userdata: persistent log, daemon state, Wi-Fi credentials.
+if mount -t ext4 -o noatime $DATA_DEV /data 2>/dev/null; then
 	mkdir -p /data/techo5-linux
 	LOGDIR=/data/techo5-linux
 	crumb "userdata mounted"
@@ -62,203 +67,152 @@ else
 	LOGDIR=/tmp
 	crumb "userdata mount failed"
 fi
-mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /android 2>/dev/null && crumb "android system mounted" || crumb "android system mount failed"
-[ -d /android/system/vendor ] && ln -sfn /android/system/vendor /vendor
+
+# --- The system partition: a TECHO5 store, or still a LineageOS system.
+MODE=none
+if mount -t ext4 -o noatime $STORE_DEV /store 2>/dev/null; then
+	if [ -e /store/.techo5-store ]; then
+		MODE=store
+		crumb "store mounted: active=$(cat /store/active 2>/dev/null) a=$(cat /store/slots/a.state 2>/dev/null) b=$(cat /store/slots/b.state 2>/dev/null)"
+	else
+		umount /store
+		mount -t ext4 -o ro,noatime $STORE_DEV /android 2>/dev/null && MODE=android && crumb "android system mounted (no store)"
+	fi
+else
+	crumb "system partition mount failed"
+fi
 
 snapshot() {
 	{
-		echo "=== $(date) uptime $(cut -d' ' -f1 /proc/uptime)"
-		cat /tmp/boot.log
+		echo "=== $(date) uptime $(cut -d' ' -f1 /proc/uptime) mode $MODE"
 		echo "--- dmesg tail"; dmesg | tail -60
-		echo "--- ip link"; ip link 2>&1
-		echo "--- fb"; cat /sys/class/graphics/fb0/virtual_size 2>&1
-		echo "--- udc"; ls /sys/class/udc 2>&1; cat /sys/kernel/config/usb_gadget/g1/UDC 2>&1
+		echo "--- ip"; ip addr 2>&1
 		echo "--- mounts"; cat /proc/mounts
 		echo "--- mem"; head -3 /proc/meminfo
 	} > /tmp/snapshot 2>&1
-	cp /tmp/snapshot $LOGDIR/boot.log 2>/dev/null
+	cp /tmp/snapshot $LOGDIR/rescue.log 2>/dev/null
 	# also into MISC at byte offset 64 KiB, up to 120 KiB, so it survives without any filesystem
 	head -c 122880 /tmp/snapshot | dd of=$MISC bs=512 seek=128 conv=notrunc 2>/dev/null
 	sync
 }
+
+# --- Normal path: hand over to a slot.
+boot_slot() {
+	slot=$1
+	root=/store/slots/$slot
+	[ -x $root/sbin/init ] || [ -L $root/sbin/init ] || { crumb "slot $slot has no /sbin/init"; return 1; }
+	mount --bind $root /newroot || { crumb "bind mount of slot $slot failed"; return 1; }
+	mkdir -p /run/techo5
+	echo $slot > /run/techo5/slot
+	sync
+	# The store stays read-only under the running system; the root shares the flag.
+	mount -o remount,ro /store 2>/dev/null || crumb "store remount ro failed"
+	crumb "switching root to slot $slot ($(cat $root/etc/techo5-release 2>/dev/null))"
+	# Nothing from the initramfs may keep running: its files are about to go.
+	kill -9 -1 2>/dev/null
+	for m in store data run tmp dev sys proc; do
+		mkdir -p /newroot/$m
+		mount --move /$m /newroot/$m || crumb "moving /$m failed"
+	done
+	exec $BB switch_root /newroot /sbin/init
+	crumb "switch_root failed"
+	return 1
+}
+
+if [ $MODE = store ]; then
+	if [ -e /store/rescue ]; then
+		rm -f /store/rescue; sync
+		crumb "rescue marker found: staying in the initramfs this boot"
+	elif slot=$(STORE=/store slotctl next 2>/tmp/slotctl.err); then
+		crumb "slotctl: $(tr '\n' ' ' < /tmp/slotctl.err)"
+		boot_slot "$slot"
+		# only reached when the hand-over failed
+		mount -o remount,rw /store 2>/dev/null
+		umount /newroot 2>/dev/null
+	else
+		crumb "slotctl: $(tr '\n' ' ' < /tmp/slotctl.err)"
+	fi
+fi
+
+# --- Rescue environment.
+crumb "rescue mode ($MODE)"
 snapshot
 
-# --- Panel: paint the test screen with the clock ticking, as proof of life.
+# Panel: the test screen with the clock ticking, as proof of life.
 if [ -x /usr/local/bin/fbprobe ]; then
-	/usr/local/bin/fbprobe -hold ${STAY_MINUTES}m > /tmp/fbprobe.log 2>&1 &
-	sleep 2
-	crumb "fbprobe: $(head -c 200 /tmp/fbprobe.log | tr '\n' ' ')"
+	/usr/local/bin/fbprobe -hold 1000h > /tmp/fbprobe.log 2>&1 &
 fi
 
-# --- USB gadget: one CDC ACM serial function, root shell on it.
-# The 4.9.77 (TWRP) kernel has the legacy Android gadget (/sys/class/android_usb),
-# the 4.9.337 (LineageOS) kernel has configfs; support both.
-A=/sys/class/android_usb/android0
-if [ -d $A ]; then
-	echo 0 > $A/enable
-	echo 1d6b > $A/idVendor
-	echo 0104 > $A/idProduct
-	echo TECHO5 > $A/iManufacturer
-	echo "Echo Show 5 Linux" > $A/iProduct
-	echo techo5 > $A/iSerial
-	echo acm > $A/functions
-	[ -e $A/f_acm/instances ] && echo 1 > $A/f_acm/instances
-	if echo 1 > $A/enable; then
-		crumb "legacy android_usb gadget enabled (acm), state=$(cat $A/state 2>/dev/null)"
-	else
-		crumb "legacy android_usb gadget enable failed; functions=$(cat $A/functions 2>/dev/null)"
-	fi
-	(
-		while true; do
-			[ -e /dev/ttyGS0 ] || mdev -s
-			if [ -e /dev/ttyGS0 ]; then
-				setsid sh -c 'exec sh -l < /dev/ttyGS0 > /dev/ttyGS0 2>&1'
-			fi
-			sleep 2
-		done
-	) &
-elif mount -t configfs none /sys/kernel/config 2>/dev/null; then
-	G=/sys/kernel/config/usb_gadget/g1
-	mkdir -p $G && cd $G || true
-	echo 0x1d6b > idVendor
-	echo 0x0104 > idProduct
-	echo 0x0200 > bcdUSB
-	mkdir -p strings/0x409
-	echo "TECHO5" > strings/0x409/manufacturer
-	echo "Echo Show 5 Linux" > strings/0x409/product
-	echo "techo5" > strings/0x409/serialnumber
-	mkdir -p configs/c.1/strings/0x409
-	echo "acm" > configs/c.1/strings/0x409/configuration
-	mkdir -p functions/acm.usb0
-	ln -sf $G/functions/acm.usb0 configs/c.1/acm.usb0
-	UDC=$(ls /sys/class/udc | head -1)
-	if [ -n "$UDC" ]; then
-		echo "$UDC" > UDC && crumb "usb gadget bound to $UDC (acm)" || crumb "usb gadget bind to $UDC failed"
-	else
-		crumb "no UDC found; usb gadget not started"
-	fi
-	cd /
-	(
-		while true; do
-			[ -e /dev/ttyGS0 ] || mdev -s
-			if [ -e /dev/ttyGS0 ]; then
-				setsid sh -c 'exec sh -l < /dev/ttyGS0 > /dev/ttyGS0 2>&1'
-			fi
-			sleep 2
-		done
-	) &
-else
-	crumb "configfs mount failed; no usb serial"
-fi
-
-# --- Wi-Fi: load the vendor module from the Android system partition.
-# firmware_class.path=/vendor/firmware comes from the kernel command line.
-WLAN=/android/system/vendor/lib/modules/mt76x8_wlan.ko
-WIFI_OK=
-if [ -e "$WLAN" ]; then
-	if insmod $WLAN 2>/tmp/insmod.err; then
-		sleep 3
-		ip link show wlan0 >/dev/null 2>&1 && WIFI_OK=1 && crumb "mt76x8_wlan loaded, wlan0 present" || crumb "mt76x8_wlan loaded, no wlan0"
-	else
-		crumb "insmod mt76x8_wlan failed: $(cat /tmp/insmod.err)"
-	fi
-else
-	crumb "vendor wlan module not found at $WLAN"
-fi
-
-# --- Join the network Android already knows: its saved networks live in
-# /data/misc/wifi/WifiConfigStore.xml on userdata (SSID and pre-shared key as
-# XML strings). Build a wpa_supplicant config from the first PSK network, get
-# a lease with udhcpc, and start dropbear so the USB cable becomes optional.
-STORE=/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml   # Android 11
-[ -r "$STORE" ] || STORE=/data/misc/wifi/WifiConfigStore.xml         # older Android
-if [ -n "$WIFI_OK" ] && [ -x /sbin/wpa_supplicant ] && [ -r "$STORE" ]; then
-	xmlval() { sed -n "s/.*<string name=\"$1\">\(.*\)<\/string>.*/\1/p" "$STORE" | head -1 | sed 's/&quot;//g; s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g'; }
-	SSID=$(xmlval SSID); PSK=$(xmlval PreSharedKey)
-	if [ -n "$SSID" ] && [ -n "$PSK" ]; then
-		mkdir -p /run/wpa
-		printf 'ctrl_interface=/run/wpa\nnetwork={\n\tssid="%s"\n\tpsk="%s"\n}\n' "$SSID" "$PSK" > /run/wpa.conf
-		chmod 600 /run/wpa.conf
-		ip link set wlan0 up
-		wpa_supplicant -B -i wlan0 -c /run/wpa.conf -P /run/wpa.pid > /tmp/wpa.log 2>&1
-		# the vendor driver's first full scan alone takes several seconds; allow a minute
-		n=0; while [ $n -lt 60 ]; do
-			wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break
-			sleep 1; n=$((n+1))
-		done
-		if wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED'; then
-			udhcpc -i wlan0 -n -q -t 8 -s /usr/share/udhcpc/default.script > /tmp/udhcpc.log 2>&1
-			IP=$(ip -4 addr show wlan0 | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
-			crumb "wifi joined '$SSID', ip ${IP:-none}"
-			if [ -n "$IP" ] && [ -x /usr/sbin/dropbear ]; then
-				mkdir -p $LOGDIR/dropbear /etc/dropbear
-				for t in rsa ed25519; do
-					[ -e $LOGDIR/dropbear/dropbear_${t}_host_key ] || dropbearkey -t $t -f $LOGDIR/dropbear/dropbear_${t}_host_key >/dev/null 2>&1
-					ln -sf $LOGDIR/dropbear/dropbear_${t}_host_key /etc/dropbear/dropbear_${t}_host_key
-				done
-				# test phase: key in /root/.ssh/authorized_keys (baked into the image), and
-				# root with an empty password (-B) as the fallback until a real policy exists
-				printf 'root::0:0:root:/root:/bin/sh\n' > /etc/passwd
-				printf 'root::0:0:99999:7:::\n' > /etc/shadow
-				chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
-				dropbear -R -B -p 22 > /tmp/dropbear.log 2>&1 && crumb "dropbear listening on $IP:22" || crumb "dropbear failed to start"
-			fi
-		else
-			crumb "wifi: wpa_supplicant did not reach COMPLETED for '$SSID' ($(wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep wpa_state))"
+# Root shell on USB serial.
+t5_usb_acm
+(
+	while true; do
+		[ -e /dev/ttyGS0 ] || mdev -s
+		if [ -e /dev/ttyGS0 ]; then
+			setsid sh -c 'exec sh -l < /dev/ttyGS0 > /dev/ttyGS0 2>&1'
 		fi
-	else
-		crumb "wifi: no PSK network found in WifiConfigStore"
-	fi
+		sleep 2
+	done
+) &
+
+# Vendor tree: from a slot when there is one, else from the LineageOS system.
+VENDOR=
+for d in /store/slots/$(cat /store/active 2>/dev/null) /store/slots/a /store/slots/b /android/system; do
+	[ -e "$d/vendor/lib/modules/mt76x8_wlan.ko" ] && { VENDOR=$d/vendor; break; }
+done
+if [ -n "$VENDOR" ]; then
+	ln -sfn $VENDOR /vendor
+	crumb "vendor tree: $VENDOR"
+else
+	crumb "no vendor tree found; no Wi-Fi"
 fi
 
-# --- Clock: no RTC worth trusting on this boot; take NTP once the network is up.
+IP=
+if [ -n "$VENDOR" ]; then
+	t5_wifi_conf $LOGDIR/wpa_supplicant.conf
+	t5_wifi_up $VENDOR/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
+fi
 if [ -n "$IP" ]; then
-	ntpd -n -q -p pool.ntp.org > /tmp/ntpd.log 2>&1 && crumb "clock set: $(date)" || crumb "ntp failed"
+	# root with an empty password (-B) as the fallback next to the baked-in key: this is the rescue
+	printf 'root::0:0:root:/root:/bin/sh\n' > /etc/passwd
+	printf 'root::0:0:99999:7:::\n' > /etc/shadow
+	chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
+	t5_dropbear $LOGDIR/dropbear -B
+	t5_ntp
 fi
 
-# --- Audio codec: a bare boot leaves the AIC3101 mic path unrouted (Android's
-# HAL normally does this). Route DIF1 into the ADC and set the mic gain the way
-# LineageOS leaves it; leave the amplifier switch alone (toggling it silences
-# the speaker until reboot) — the daemon clears the amp's safe mode itself.
-A=/usr/local/bin/audioprobe
-if [ -x $A ]; then
-	$A -set-int 'ADC_A Left Ip Select ADC_A DIF1_L switch=1' -seconds 1 -no-capture >/dev/null 2>&1
-	$A -set-int 'ADC_A Right Ip Select ADC_A DIF1_R switch=1' -seconds 1 -no-capture >/dev/null 2>&1
-	$A -set-int 'ADC_A MICPGA Volume Ctrl=40' -seconds 1 -no-capture >/dev/null 2>&1
-	crumb "mic routed: $($A -seconds 1 2>&1 | grep -o 'ch0: rms.*')"
-fi
-
-# --- The daemon: the same static binary the Android install put in /system/bin,
-# with its identity, key and wake-word models under /data/misc/techo5.
-DAEMON=/android/system/bin/techo5
-if [ -n "$IP" ] && [ -x $DAEMON ]; then
+# The daemon, from the same place as the vendor tree, so a rescue boot still answers.
+DAEMON=
+for f in ${VENDOR%/vendor}/usr/local/bin/techo5 ${VENDOR%/vendor}/bin/techo5; do
+	[ -x "$f" ] && { DAEMON=$f; break; }
+done
+if [ -n "$IP" ] && [ -n "$DAEMON" ]; then
 	killall fbprobe 2>/dev/null
+	mkdir -p /data/misc/techo5/models
 	(setsid $DAEMON run >> $LOGDIR/techo5.log 2>&1 &)
 	sleep 3
 	if pidof techo5 >/dev/null; then
-		crumb "techo5 daemon running (pid $(pidof techo5)); staying up"
+		crumb "daemon running from $DAEMON (pid $(pidof techo5)); staying up"
 		touch /tmp/stay
 	else
-		crumb "techo5 daemon failed to start: $(tail -2 $LOGDIR/techo5.log | tr '\n' ' ')"
+		crumb "daemon failed to start: $(tail -2 $LOGDIR/techo5.log | tr '\n' ' ')"
 	fi
 fi
+[ -n "$IP" ] && touch /tmp/stay
 
 snapshot
-crumb "ready; reboot to Android in ${STAY_MINUTES} min unless /tmp/stay exists"
+crumb "rescue ready; reboot in ${STAY_MINUTES} min unless /tmp/stay exists"
 
-# --- Keep logging, then reboot into Android unless asked to stay.
 i=0
 while true; do
 	sleep 30
 	i=$((i+1))
 	snapshot
-	if [ -e /tmp/stay ]; then continue; fi
+	[ -e /tmp/stay ] && continue
 	if [ $((i*30)) -ge $((STAY_MINUTES*60)) ]; then
-		crumb "time is up, rebooting into Android"
-		snapshot
-		umount /android 2>/dev/null
-		umount /data 2>/dev/null
+		crumb "no network after ${STAY_MINUTES} min; rebooting"
 		sync
+		umount /store /android /data 2>/dev/null
 		$BB reboot -f
 	fi
 done

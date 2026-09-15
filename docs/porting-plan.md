@@ -224,14 +224,58 @@ worked with no Android userspace running. What it took, beyond the plan:
   `recovery`, the LineageOS boot image on disk to restore Android.
 - wpa_supplicant 2.11 cannot associate through the vendor driver (RSN
   capability mismatch, see `tools/linux/README.md`); 2.9 can.
-- A bare boot leaves the codec unrouted: init selects the DIF1 inputs and sets
-  the mic gain (the daemon should own this).
-- The daemon's firewall helper expects Android's iptables; harmless on Linux.
+- A bare boot leaves the codec unrouted: init selected the DIF1 inputs and set
+  the mic gain; the daemon does the same at capture start (`mic.routeInputs`),
+  so the rootfs boot script leaves the codec to it.
+- The daemon's firewall helper expected Android's iptables; off Android it now
+  stands down.
 - `reboot recovery` is marked in the RTC spare register, not MISC; a failed
   boot ends in the watchdog and a normal boot; the bootloader's boot counter
   (idme) eventually parks the unit in fastboot, which is reachable and fine.
 - Custom boot logo (user request): the `logo` partition (1 MB) holds what LK
   paints; replace it later with a TECHO5 image.
+
+### Status 2026-09-15, later: step 5 done — persistent rootfs with slots
+
+The bench unit now boots a persistent Alpine root filesystem from the eMMC
+`system` partition (LineageOS's system is gone from that unit; the LineageOS
+zip and boot image on disk can put it back through TWRP). Layout, tools and
+the update/rollback story are in `tools/linux/README.md`; the short version:
+
+- `system` (p12) is an ext4 **store** holding two rootfs slots as plain
+  directories plus one-line state files. The kernel has no overlayfs or
+  squashfs and repartitioning under amonet's LK is not a one-command undo, so
+  directories on one partition are the A/B mechanism.
+- The initramfs in `boot` **is the rescue**: it mounts the store, lets
+  `slotctl next` pick the slot (taking one trial try), bind-mounts it and
+  `switch_root`s in ~3.7 s. No store, no bootable slot, or a `rescue` marker
+  → it stays up as before (USB shell, Wi-Fi, SSH, daemon from any slot).
+- The rootfs runs busybox init: `etc/techo5/boot.sh` once (devices, USB
+  serial, Wi-Fi from the saved credentials, NTP, dropbear, trial watcher,
+  network keeper), `techo5-run` (the daemon) and `techo5-console` respawned.
+  Root is read-only; state is on userdata (`/data/misc/techo5` unchanged, so
+  Home Assistant saw the same device come back), the LineageOS `vendor` tree
+  is copied into the slot, wpa_supplicant 2.9 and the rest come from `apk`
+  run **on the device** (`mkrootfs.sh`, driven by `deploy-rootfs.sh`).
+- **Trial semantics** mirror the daemon's: a new slot gets three boot tries
+  and commits itself once the daemon has run five minutes; a slot whose daemon
+  never settles reboots after 15 minutes to spend a try, and after the third
+  the initramfs falls back to the last good slot. The daemon's own in-place
+  updater keeps working inside a slot: `layout.Dir` follows the executable off
+  Android, and Android properties (the trial marker) live as files in
+  `/run/techo5/prop`. Android-only setup (resolver override, cert dirs, the
+  vendor firewall) stands down when there is no `/system/bin/setprop`.
+- Verified: slot a booted, joined Wi-Fi in 12 s, HA reconnected to the same
+  "Bench Show" entry, an announcement played, the slot committed at 315 s;
+  then slot b installed from the running system and the switch/commit cycle.
+
+Lessons from the conversion: the rescue image must carry every library
+wpa_supplicant 2.9 is linked against (dbus-libs, pcsc-lite-libs — the first
+image without them silently had no Wi-Fi, diagnosed over the USB serial
+console) and `libeconf` for mke2fs; under busybox init a respawn entry must
+not `setsid` (it forks, the entry "exits", init spawns another shell every
+cycle); an `&&` chain ending in a backgrounded reboot dies with the SSH
+session.
 
 ### Steps
 
@@ -262,9 +306,11 @@ worked with no Android userspace running. What it took, beyond the plan:
    clock/voice/media screens, touch from `goodix-ts` (event3), backlight from
    `/sys/class/leds/lcd-backlight`, light sensor from event5. Screen state exposed
    as ESPHome entities. Retire ShowAssist and the `echo-show` dashboard for this device.
-5. **Rootfs on eMMC**: move from initramfs to a persistent Alpine on `system`
-   (3 GB) with an A/B or rollback story that fits the existing updater's trial
-   semantics; the initramfs stays as the rescue environment.
+5. **Rootfs on eMMC** — done 2026-09-15 (above): a persistent Alpine on
+   `system` in two slots with a boot-count trial that fits the updater's trial
+   semantics; the initramfs stays as the rescue environment. Still open: the
+   daemon's manifest could carry a rootfs tarball so a slot update rides the
+   same Home Assistant update entity as a binary update.
 6. **Bluetooth** (earbuds, user requirement 2026-09-15): rebuild the kernel with
    `CONFIG_BT` + `hci_vhci`, bridge `/dev/stpbt`, BlueZ + `bluez-alsa` (or
    PipeWire) as an A2DP source; route the daemon's playback to the earbuds when

@@ -37,7 +37,7 @@ Items marked *unverified* have not been confirmed on a unit by this project.
 | boot | p9 | 16 MB |
 | recovery | p10 | 16 MB |
 | swdl | p11 | 32 MB |
-| system | p12 | 3.0 GB (LineageOS uses ~1.0 GB) |
+| system | p12 | 3.0 GB (LineageOS uses ~1.0 GB; on a converted unit the TECHO5 rootfs store, see `tools/linux/README.md`) |
 | cache | p13 | 256 MB |
 | persist | p14 | 16 MB |
 | metadata | p15 | 40 MB |
@@ -46,6 +46,12 @@ Items marked *unverified* have not been confirmed on a unit by this project.
 `boot` is a plain 16 MB Android boot image, which is enough for a kernel plus
 a small initramfs. The LineageOS kernel command line already carries
 `androidboot.selinux=permissive` and `androidboot.veritymode=disabled`.
+
+The 4.9.337 kernel's filesystems (relevant to where a Linux rootfs can live):
+ext2/3/4, vfat, fuse, ubifs, loop devices — no squashfs, no overlayfs, no
+f2fs, no devtmpfs. `/dev/rtc0` exists but holds 2010 at boot; the image takes
+NTP once up and writes the RTC back. `/proc/idme/bootcount` read 50 on the
+bench unit after the Linux boots, while the bootloader still booted normally.
 
 Images pulled from the bench unit on 2026-09-15 (kept outside the repo in
 `D:\platform-tools\echoshow\`): `boot-lineage-18.1-20260904-cronos.img`

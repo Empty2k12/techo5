@@ -5,28 +5,72 @@ package layout
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-// Where echod and its state live. Dir and StateDir are the device's own (device_dot.go,
+// Where echod and its state live. AndroidDir and StateDir are the device's own (device_dot.go,
 // device_cronos.go); everything else hangs off them.
-const (
-	Binary   = Dir + "/" + BinaryName
-	KeyPath  = StateDir + "/psk"
-	NamePath = StateDir + "/name"
+//
+// Dir is settled at start rather than compiled in: on Android it is AndroidDir, the path the init
+// service runs, but the same binary also runs on the Linux image (tools/linux), where there is no
+// /system and the daemon lives wherever its supervisor started it. There it is the directory of the
+// running executable, so the in-place updater and its trial still replace the right file.
+var (
+	Dir    = installDir()
+	Binary = Dir + "/" + BinaryName
 
 	// PrevBinary is the binary an update replaced, kept until the new one has proved itself. Its
 	// presence at boot is what says a trial never finished, so nothing may leave one lying around.
 	// OldBinary is where a proven update files it, one generation back.
 	PrevBinary = Binary + ".prev"
 	OldBinary  = Binary + ".old"
+)
+
+const (
+	KeyPath  = StateDir + "/psk"
+	NamePath = StateDir + "/name"
 
 	// UpdatingPath holds the version being tried, so a rollback can say which one it took out. It is
 	// under /data because the boot hook reads it after a restore has already remounted /system back to
 	// read-only.
 	UpdatingPath = StateDir + "/updating"
+
+	// LinuxDir is where the Linux image installs the daemon, and the fallback when the executable's
+	// own path cannot be read.
+	LinuxDir = "/usr/local/bin"
+
+	// setprop is what marks an Android userspace: the property service is the one thing every Android
+	// has and no plain Linux does.
+	setprop = "/system/bin/setprop"
 )
+
+// OnAndroid reports whether an Android userspace is running around the daemon. Off Android — the
+// Linux image, or a workstation — there are no properties, no init services and no vendor firewall,
+// and everything that would speak to them stands down.
+func OnAndroid() bool {
+	_, err := os.Stat(setprop)
+	return err == nil
+}
+
+func installDir() string {
+	if OnAndroid() {
+		return AndroidDir
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return LinuxDir
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	dir := filepath.Dir(exe)
+	if dir == "." || dir == "" {
+		return LinuxDir
+	}
+	return dir
+}
 
 // BackupSuffix marks the vendor binary an install displaced, and Backup is where it is kept.
 const (

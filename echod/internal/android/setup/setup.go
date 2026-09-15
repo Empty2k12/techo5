@@ -18,6 +18,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/android/dns"
 	"github.com/HuskerMinion/techo5/echod/internal/android/prop"
 	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // Action is one change and why echod wants it.
@@ -51,15 +52,27 @@ var common = []Action{
 	{
 		Name:   "point the resolver at the nameservers the platform knows",
 		Reason: "there is no /etc/resolv.conf, so Go's resolver has nowhere to look",
-		Do:     func() error { dns.Use(); return nil },
+		Do:     android(func() error { dns.Use(); return nil }),
 	},
 	{
 		Name:   "point the verifier at the platform's root certificates",
 		Reason: "crypto/x509 reads the Android store only in a GOOS=android build, and this one is linux",
 		// SSL_CERT_DIR replaces the directories crypto/x509 scans, never the files it reads, so a device
 		// carrying /etc/ssl/certs/ca-certificates.crt keeps every root it already had.
-		Do: func() error { return os.Setenv("SSL_CERT_DIR", certDirs) },
+		Do: android(func() error { return os.Setenv("SSL_CERT_DIR", certDirs) }),
 	},
+}
+
+// android limits an action to an Android userspace. The Linux image has a resolv.conf from DHCP and
+// Alpine's root certificates where Go looks for them, so the same actions there would only take
+// working defaults away.
+func android(do func() error) func() error {
+	return func() error {
+		if !layout.OnAndroid() {
+			return nil
+		}
+		return do()
+	}
 }
 
 // certDirs are the directories a GOOS=android build would have scanned: the platform's roots, and any
@@ -124,8 +137,12 @@ func apply(what string, actions []Action) {
 	slog.Info(what+" applied", "actions", len(actions), "failed", failed)
 }
 
-// bootCompleted reports whether the boot finished before bootWait ran out.
+// bootCompleted reports whether the boot finished before bootWait ran out. Off Android there is no
+// framework to wait for: the supervisor started the daemon when the device was ready.
 func bootCompleted(ctx context.Context) bool {
+	if !layout.OnAndroid() {
+		return true
+	}
 	tick := time.NewTicker(bootPoll)
 	defer tick.Stop()
 	giveUp := time.After(bootWait)

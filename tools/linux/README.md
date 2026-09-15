@@ -1,60 +1,124 @@
 # Linux image for cronos (porting plan M4)
 
-An Android boot image that carries the LineageOS 4.9.337 kernel and an Alpine
-armv7 initramfs instead of Android. Flashed to the `boot` partition it boots to
-the TECHO5 daemon with no Android userspace; TWRP stays in `recovery` as the
-rescue, and the LineageOS `boot` image restores Android.
+The Echo Show 5 boots Linux with no Android userspace: the LineageOS 4.9.337
+kernel with a small Alpine initramfs in the `boot` partition, and a persistent
+Alpine (armv7) root filesystem on the eMMC `system` partition. TWRP stays in
+`recovery`; the LineageOS `boot` image plus its zip restore Android if ever
+needed.
 
-State on 2026-09-15: boots in 12 s to a root shell on USB (CDC ACM), joins the
-Wi-Fi network Android had saved, starts dropbear and the daemon; a full voice
-turn works. Everything still lives in the initramfs (13 MB of the 16 MB slot).
+State on 2026-09-15: boots to the daemon from a rootfs slot, Wi-Fi with the
+credentials Android had saved, dropbear, NTP; the initramfs doubles as the
+rescue environment; rootfs updates go through two slots with a boot-count
+trial that mirrors the daemon's own update trial.
+
+## Layout
+
+```
+boot      (p9, 16 MB)   kernel + initramfs (tools/linux/init): picks a slot, or rescue
+system    (p12, 3 GB)   the "store", ext4, label techo5-store — mounted at /store
+  .techo5-store          marker (a LineageOS system partition has none)
+  active                 slot to boot next: a | b
+  slots/a, slots/b       two complete root filesystems (plain directories)
+  slots/<x>.state        good | trial <tries left> | bad
+  rescue                 present → the next boot stays in the initramfs (one boot)
+userdata  (p16, 3.9 GB) /data — daemon state (/data/misc/techo5), logs, Wi-Fi
+                         config and dropbear host keys (/data/techo5-linux)
+recovery  (p10)         TWRP, untouched
+```
+
+The booted slot is a bind mount of `/store/slots/<x>`; the store, and with it
+the root, is mounted read-only. Everything that writes to it (`slotctl`, the
+daemon's in-place updater) remounts it writable and back. `/etc/resolv.conf`
+and `/etc/dropbear` point at `/run` and `/data`.
+
+Inside the rootfs: busybox init (`etc/inittab`) runs `etc/techo5/boot.sh`
+once (devices, USB serial, Wi-Fi, clock, SSH, the slot-trial watcher, a
+network keeper that reboots after 15 minutes without an address), then keeps
+`techo5-run` (the daemon) and `techo5-console` (root shell on the USB COM
+port) alive. The daemon is `/usr/local/bin/techo5`; the LineageOS `vendor`
+tree (Wi-Fi/BT modules, firmware, audio tuning) is copied in as `/vendor`.
+
+## Updates and rollback
+
+`slotctl` (in both the initramfs and the rootfs) owns the slots:
+
+```
+slotctl status                      # slots, states, active and booted
+slotctl install rootfs.tar.gz       # → inactive slot, "trial 3", made active
+slotctl commit                      # booted slot → good (boot.sh does this itself)
+slotctl rollback                    # booted slot → bad, boot the other (good) one
+slotctl switch a|b                  # boot this one next (a bad slot goes back on trial)
+slotctl rescue [off]                # stay in the initramfs at the next boot
+```
+
+A fresh slot has three boot tries. The initramfs takes one at every boot;
+`boot.sh` commits the slot once the daemon has been running for five minutes
+without a restart — the same evidence the daemon takes before it commits one
+of its own updates. A slot that never commits is marked bad after its third
+boot and the other slot boots; with no good slot the initramfs stays up as
+the rescue (USB shell, Wi-Fi, SSH, and the daemon from whichever slot has a
+binary), so the unit is always reachable. The daemon's own updater keeps
+working unchanged inside a slot: it replaces `/usr/local/bin/techo5` in place
+(`layout.Dir` follows the executable off Android) and its trial marker lives
+in `/run/techo5/prop`, the file-backed stand-in for Android properties.
+
+Kernel/initramfs updates are separate: they are a `fastboot flash boot`
+(or `dd` to p9), not a slot.
 
 ## Build
 
-Inputs (kept out of the repo; see `packages.txt` for the exact Alpine packages):
+Inputs (kept out of the repo, `D:\platform-tools\echoshow\linux-image`):
 
 - `boot-lineage-18.1-20260904-cronos.img` — LineageOS boot image (kernel + header)
-- `alpine-minirootfs-3.24.1-armv7.tar.gz`
-- `busybox-static-1.37.0-r31.apk` — PID 1 runs on the static busybox
-- the packages in `packages.txt`, downloaded from `dl-cdn.alpinelinux.org`
-- `bin/fbprobe-arm`, `bin/audioprobe-arm`, `bin/rebootto-arm` (Go, `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0`)
-- an SSH public key for `/root/.ssh/authorized_keys`
+- `alpine-minirootfs-3.24.1-armv7.tar.gz`, `busybox.static` (from `busybox-static-1.37.0-r31.apk`)
+- `apks/`, `apks312/` — the packages in `packages.txt` (initramfs) and the
+  wpa_supplicant 2.9 set (both)
+- `vendor/system-vendor-cronos-lineage-18.1-20260904.tar.gz` — `vendor/` from the
+  LineageOS system partition (taken from the bench unit before it was wiped)
+- `techo5_ed25519` / `.pub` — the SSH key
+
+Boot image (kernel + rescue initramfs):
 
 ```
-python3 tools/linux/mkimage.py --kernel-image boot-lineage-18.1-20260904-cronos.img \
-  --rootfs alpine-minirootfs-3.24.1-armv7.tar.gz \
-  --apk apks312/wpa_supplicant-2.9-r8.apk --apk apks312/libssl1.1-1.1.1o-r0.apk \
-  --apk apks312/libcrypto1.1-1.1.1o-r0.apk --apk apks312/libnl3-3.5.0-r0.apk \
-  --apk apks/dropbear-2026.91-r0.apk --apk apks/zlib-1.3.2-r0.apk \
-  --apk apks/utmps-libs-0.1.3.3-r0.apk --apk apks/skalibs-libs-2.15.0.0-r0.apk \
-  --apk apks/iw-6.17-r0.apk --apk apks/wireless-tools-30_pre9-r5.apk --apk apks/wireless-tools-libs-30_pre9-r5.apk \
-  --init tools/linux/init \
-  --add busybox.static=/bin/busybox.static \
-  --add bin/fbprobe-arm=/usr/local/bin/fbprobe --add bin/audioprobe-arm=/usr/local/bin/audioprobe \
-  --add bin/rebootto-arm=/usr/local/bin/rebootto \
-  --copy techo5_ed25519.pub=/root/.ssh/authorized_keys \
-  --compress xz --cmdline-append techo5=linux -o techo5-linux-boot.img
+bash tools/linux/build-image.sh -o techo5-linux-boot.img
+fastboot flash boot techo5-linux-boot.img && fastboot continue
 ```
 
-In Git Bash set `MSYS_NO_PATHCONV=1` and use Windows-style paths, or the
-`x=/bin/y` arguments get rewritten.
-
-Flash and boot:
+Root filesystem: built **on the device** with `apk`, because the host has no
+armv7 chroot and a real package database is what makes `apk add bluez` and the
+like possible later. `deploy-rootfs.sh` builds the daemon and tools for
+armv7, ships them with the inputs and `tools/linux/rootfs/` (the overlay) and
+`packages-rootfs.txt`, runs `mkrootfs.sh` there, and can install the result:
 
 ```
-fastboot flash boot techo5-linux-boot.img
-fastboot continue
+bash tools/linux/deploy-rootfs.sh --version v0.1.5 [--install [--reboot]]
 ```
 
-From Android: `adb reboot bootloader` first. From the Linux image:
-`rebootto bootloader`. Restore Android with
-`fastboot flash boot boot-lineage-18.1-20260904-cronos.img`.
+First conversion of a unit (once; erases LineageOS on `system`):
+
+```
+# on the device, from the initramfs (rescue) with the daemon stopped
+slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it
+slotctl install /data/techo5-linux/techo5-rootfs-<version>.tar.gz
+reboot
+```
+
+Git Bash on Windows is the expected shell for the host scripts; they pass
+Windows paths to python and normalise line endings on the way to the device.
 
 ## Why these choices
 
 - **Boot slot, not recovery.** amonet's LK boots 64-bit kernels only from
   `boot`; from `recovery` even the stock LineageOS image fails silently and the
   watchdog falls back to `boot`. TWRP's 32-bit kernel is what makes `recovery` work.
+- **Directories as slots, not partitions.** The kernel has ext4 and loop but
+  no overlayfs or squashfs, and repartitioning the eMMC under amonet's LK is
+  not something a single fastboot command undoes. Two directories on one ext4
+  partition give A/B with `tar` and `mv` and keep everything inspectable from
+  the rescue shell; 3 GB holds many 130 MB slots.
+- **busybox init, not OpenRC.** Three services and a boot script; the
+  daemon's supervisor only has to restart it, which is what the Android init
+  did too (`techo5.rc` is not oneshot for the same reason).
 - **wpa_supplicant 2.9, not 2.11.** The vendor `mt76x8` driver writes its own RSN
   element (capabilities 0) into the association request; 2.11 advertises 16
   replay counters (0x000c) in the handshake, hostapd on the access points sees the
@@ -62,19 +126,12 @@ From Android: `adb reboot bootloader` first. From the Linux image:
 - **Static busybox as `/init`'s interpreter**, breadcrumbs in the spare area of
   MISC (`readmisc.sh`), boot log on userdata: the image explains its own failures.
 - **Wi-Fi credentials come from Android's saved networks** on userdata
-  (`/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml`), so nothing is
-  typed and nothing leaves the device.
-
-## What init does
-
-`/init` populates `/dev` (no devtmpfs in this kernel), mounts userdata and the
-Android system partition read-only (for the vendor Wi-Fi module, firmware and
-the daemon binary), paints the panel, brings up USB serial, loads Wi-Fi, joins
-the network, sets the clock, routes the microphone, starts dropbear and the
-daemon. Without a network it reboots into Android after 15 minutes so an
-unattended unit never stays stuck; `touch /tmp/stay` cancels that.
+  (`/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml`), copied once into
+  `/data/techo5-linux/wpa_supplicant.conf`; nothing is typed and nothing leaves
+  the device.
 
 ## Next
 
-Persistent rootfs on the `system` partition, the daemon's own display layer,
-and (after a kernel rebuild with `CONFIG_BT`) Bluetooth. See `docs/porting-plan.md`.
+The daemon's own display layer (fbdev; `fbprobe` paints the placeholder clock
+until then), Bluetooth after a kernel rebuild with `CONFIG_BT`, a custom boot
+logo in the `logo` partition. See `docs/porting-plan.md`.
