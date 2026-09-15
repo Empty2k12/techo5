@@ -33,6 +33,7 @@ type Config struct {
 	Diag       Diag       `json:"diag"`
 	Media      Media      `json:"media"`
 	Sendspin   Sendspin   `json:"sendspin"`
+	Screen     Screen     `json:"screen"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -46,6 +47,7 @@ func Defaults() Config {
 		Diag:       defaultDiag(),
 		Media:      defaultMedia(),
 		Sendspin:   defaultSendspin(),
+		Screen:     defaultScreen(),
 
 		// Only the stop word. The slots are absent until something chooses one, and Slot fills in the
 		// defaults for whichever have not been.
@@ -74,6 +76,7 @@ func (w Writer) Microphone() MicrophoneWriter { return MicrophoneWriter(w) }
 func (w Writer) Ring() RingWriter             { return RingWriter(w) }
 func (w Writer) Update() UpdateWriter         { return UpdateWriter(w) }
 func (w Writer) Bluetooth() BluetoothWriter   { return BluetoothWriter(w) }
+func (w Writer) Screen() ScreenWriter         { return ScreenWriter(w) }
 func (w Writer) Diag() DiagWriter             { return DiagWriter(w) }
 func (w Writer) Media() MediaWriter           { return MediaWriter(w) }
 func (w Writer) Sendspin() SendspinWriter     { return SendspinWriter(w) }

@@ -132,6 +132,7 @@ Windows paths to python and normalise line endings on the way to the device.
 
 ## Next
 
-The daemon's own display layer (fbdev; `fbprobe` paints the placeholder clock
-until then), Bluetooth after a kernel rebuild with `CONFIG_BT`, a custom boot
-logo in the `logo` partition. See `docs/porting-plan.md`.
+Touch and auto-brightness for the daemon's screen (it paints the clock and the
+conversation itself since v0.1.5; `fbprobe -hold 1m` remains for a bare-panel
+check), Bluetooth after a kernel rebuild with `CONFIG_BT`, a custom boot logo
+in the `logo` partition. See `docs/porting-plan.md`.

@@ -162,6 +162,10 @@ type conversation struct {
 	grace   *time.Timer
 
 	reply reply
+
+	// shown is what a screen is told: the phase and the words so far. Reset when a turn opens, so a
+	// new turn never shows the last one's answer.
+	shown State
 }
 
 // graceStart is how long to wait for a stopped run to close before starting the next one anyway.
@@ -320,6 +324,8 @@ func (c *conversation) handle(e event) {
 		if e.text != "" {
 			slog.Info("heard", "slot", c.slot+1, "text", e.text)
 			c.log.Heard(e.text)
+			c.shown.Heard = e.text
+			Changed.Emit(c.shown)
 		}
 		c.turn.Heard(e.text)
 		if c.phase == phaseListening {
@@ -330,6 +336,8 @@ func (c *conversation) handle(e event) {
 		slog.Info("replying", "slot", c.slot+1, "text", e.text)
 		c.log.Replied(e.text)
 		c.turn.Replying(e.text)
+		c.shown.Reply = e.text
+		Changed.Emit(c.shown)
 		if c.phase == phaseListening {
 			c.think()
 		}
@@ -543,6 +551,7 @@ func (c *conversation) start(n nextTurn) {
 	recording.Get().Opens(c.turn.ID(), slot)
 	c.send("start", func() error { return c.vs.StartTurn(phrase, audioSettings()) })
 
+	c.shown = State{}
 	c.enter(phaseListening)
 	c.turn.Listening()
 	c.reply = reply{}
@@ -666,6 +675,8 @@ func (c *conversation) showPhase(override string) {
 func (c *conversation) enter(p phase) {
 	c.phase = p
 	c.visible.Store(int32(p))
+	c.shown.Phase = p.String()
+	Changed.Emit(c.shown)
 }
 
 // startPending opens the turn that was held back, if there is one.

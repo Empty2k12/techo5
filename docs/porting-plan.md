@@ -302,10 +302,18 @@ session.
 3. **Daemon**: run `techo5` from the initramfs — audio is already raw ALSA, so
    it should work unchanged; verify the DL1 hold trick and the amp safe-mode
    clear still apply on a non-Android boot.
-4. **Display layer** in the daemon: a framebuffer renderer (Go, no GPU) for the
-   clock/voice/media screens, touch from `goodix-ts` (event3), backlight from
-   `/sys/class/leds/lcd-backlight`, light sensor from event5. Screen state exposed
-   as ESPHome entities. Retire ShowAssist and the `echo-show` dashboard for this device.
+4. **Display layer** in the daemon — started 2026-09-15: `hardware/screen` maps the
+   framebuffer (three pages, page-flipped so a frame is never seen half drawn) and drives
+   the backlight; `feature/display` draws the screens itself with the Go fonts — a big
+   clock and date when idle, "Listening…" with a breathing bar, "Thinking…" with the
+   transcript, then transcript and reply lingering twelve seconds after the turn — and
+   exposes the screen to Home Assistant as a brightness-only light (`light.<name>_screen`,
+   saved in the config as `screen`). The conversation publishes its phase and words on
+   `voice.Changed` for it. Still to do in this step: touch from `goodix-ts` (event3) for
+   an on-screen volume/mute and later pairing UI; auto-brightness from the light sensor
+   (`m_alsps_input`, event5 — the IIO device on this board is the auxadc, not the ALS);
+   media metadata once the player carries any; then retire ShowAssist and the
+   `echo-show` dashboard for this device.
 5. **Rootfs on eMMC** — done 2026-09-15 (above): a persistent Alpine on
    `system` in two slots with a boot-count trial that fits the updater's trial
    semantics; the initramfs stays as the rescue environment. Still open: the

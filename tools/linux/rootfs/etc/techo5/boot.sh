@@ -38,10 +38,8 @@ mkdir -p /dev/graphics
 hostname -F /etc/hostname
 log "slot $(cat /run/techo5/slot 2>/dev/null || echo '?'): $(cat /etc/techo5-release 2>/dev/null)"
 
-# --- Screen: the clock as a placeholder until the daemon owns the panel (M4 step 4).
-if [ -x /usr/local/bin/fbprobe ]; then
-	fbprobe -hold 1000h > /dev/null 2>&1 &
-fi
+# --- Screen: the daemon paints it (feature/display); the bootloader's logo stays until then.
+# `fbprobe -hold 1m` is still there for a bare-panel check from the console.
 
 # --- Root shell on USB serial (techo5-console attaches to it).
 t5_usb_acm
