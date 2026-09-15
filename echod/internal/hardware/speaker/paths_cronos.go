@@ -79,19 +79,20 @@ func DetectOutput() Output {
 // volume is in.
 const VolumeSteps = config.VolumeSteps
 
-// volumeCurves maps a volume step to attenuation in dB. The Dot's vendor speaker curve is reused
-// as a sensible shape; the top few steps are pulled down because audioprobe found 0.3 FS already
-// loud on this amplifier as the HAL leaves it.
+// volumeCurves maps a volume step to attenuation in dB: the Dot's vendor speaker curve, which
+// reaches unity at the top. A first version capped the top at -6 dB because a 0.3 FS test tone
+// had sounded loud; in the room, speech at that cap was too quiet (2026-09-14), so the full range
+// is back and the step is the listener's to choose.
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
-		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
-		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+		-90, -33, -30, -26, -25, -23, -21, -19, -17, -16,
+		-14, -13, -12, -10, -9, -8, -7, -5, -5, -4,
+		-4, -4, -4, -3, -3, -3, -3, -3, -2, -1, 0,
 	},
 	OutputHeadphone: {
-		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
-		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
-		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+		-90, -33, -30, -26, -25, -23, -21, -19, -17, -16,
+		-14, -13, -12, -10, -9, -8, -7, -5, -5, -4,
+		-4, -4, -4, -3, -3, -3, -3, -3, -2, -1, 0,
 	},
 }
 
