@@ -446,8 +446,8 @@ func (p *Player) fill(buf []byte) {
 			p.mono[j] = float32(clamp(l)) / full * makeup
 			continue
 		}
-		binary.LittleEndian.PutUint16(buf[i*2:], uint16(int16(float32(clamp(l))*gain)))
-		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(int16(float32(clamp(r))*gain)))
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(limit(float32(l)*OutputBoost*gain)))
+		binary.LittleEndian.PutUint16(buf[(i+1)*2:], uint16(limit(float32(r)*OutputBoost*gain)))
 	}
 	if !tuned {
 		return
@@ -644,6 +644,29 @@ func mix(into, add []int16) []int16 {
 		into[i] = clamp(int32(into[i]) + int32(s))
 	}
 	return into
+}
+
+// limit is a soft clipper for the boosted output: linear to kneeAt, then the remaining headroom is
+// approached asymptotically, so a loud passage compresses rather than cracks. Below the knee it is
+// exactly what clamp would have produced.
+func limit(v float32) int16 {
+	const (
+		kneeAt   = 24576 // 0.75 of full scale
+		headroom = full - kneeAt
+	)
+	a := v
+	if a < 0 {
+		a = -a
+	}
+	if a <= kneeAt {
+		return int16(v)
+	}
+	over := a - kneeAt
+	a = kneeAt + headroom*over/(over+headroom)
+	if v < 0 {
+		return int16(-a)
+	}
+	return int16(a)
 }
 
 func clamp(v int32) int16 {

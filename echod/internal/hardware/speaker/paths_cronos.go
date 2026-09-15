@@ -122,3 +122,8 @@ const MediaService = "vendor.audio-hal"
 // driver did at probe — which it never repeats, leaving the speaker silent until a reboot
 // (found 2026-09-14). The amplifier is left as the kernel brought it up.
 const AmpSwitch = ""
+
+// OutputBoost is make-up gain on everything the speaker plays, before the volume curve and the
+// limiter. Home Assistant's speech peaks well below full scale and this amplifier, as the kernel
+// leaves it, is quiet at unity: the top of the dial was heard as "medium" (2026-09-15). +6 dB.
+const OutputBoost = 2.0

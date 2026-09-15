@@ -140,3 +140,6 @@ const MediaService = "media"
 
 // AmpSwitch gates the speaker.
 const AmpSwitch = "Ext_Speaker_Amp_Switch"
+
+// OutputBoost is make-up gain on the output; the Dot's vendor tuning already carries its own.
+const OutputBoost = 1.0
