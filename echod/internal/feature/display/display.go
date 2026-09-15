@@ -252,15 +252,17 @@ func (d *Display) lux(float64) {
 // records and wakes the loop.
 func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
+	newHeard := s.Heard != "" && s.Heard != d.view.Heard
 	d.view = s
 	d.viewAt = time.Now()
 	// A question about the weather brings the forecast page up once the answer is done, for a
 	// while, and then the screen goes back to whatever it was showing.
-	if s.Heard != "" && aboutWeather(s.Heard) {
+	if newHeard && aboutWeather(s.Heard) {
 		d.weatherArmed = true
 	}
-	// "Show the front door": the camera goes up at once, while the assistant answers.
-	if s.Heard != "" {
+	// "Show the front door": the camera goes up at once, while the assistant answers. Once per
+	// sentence: the state repeats the transcript on every phase change.
+	if newHeard {
 		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
 			go home.Get().ShowCamera(entity, cameraVoiceShow)
 		}
