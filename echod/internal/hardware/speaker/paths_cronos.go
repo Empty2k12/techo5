@@ -1,0 +1,105 @@
+//go:build !dot
+
+package speaker
+
+import (
+	"math"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+)
+
+// Output is one of the device's audio outputs. The Echo Show 5 has a speaker and no jack, so
+// OutputHeadphone exists only so the shared code compiles; DetectOutput never returns it.
+type Output string
+
+const (
+	OutputSpeaker   Output = "speaker"
+	OutputHeadphone Output = "headphone"
+)
+
+// The playback ring. The MediaTek I2S0dl1 driver accepts any geometry at hw_params and then
+// faults in mtk_pcm_I2S0dl1_copy when writes run past its DMA buffer: 1024 x 4 (16 KB) panicked
+// the kernel, 768 x 4 (12 KB, the vendor HAL's period at twice its depth) plays cleanly.
+const (
+	period  = 768
+	periods = 4
+)
+
+// A mixer write, as the shared player applies it.
+type kctl struct {
+	name  string
+	value string
+	level int32
+	blob  []byte
+}
+
+// On cronos the MAX98396 amplifier and the AIC3101 codec are left configured by the vendor HAL at
+// boot, and audioprobe plays through them with no mixer writes at all: the playback stream is
+// driven at unity and the volume curve is applied in software. There is nothing to route, so the
+// sequences are empty. AmpSwitch (Ext_Speaker_Amp_Switch, on the MediaTek AFE) is still gated.
+var initSequence = []kctl{}
+
+var pathSequence = map[Output][]kctl{
+	OutputSpeaker:   {},
+	OutputHeadphone: {},
+}
+
+var headphoneOff = []kctl{}
+
+// jackState is where a headphone switch would be; there is none, so the read fails and the speaker
+// is assumed.
+const jackState = "/sys/class/switch/h2w/state"
+
+// jackPoll is how often the jack switch is sampled.
+const jackPoll = 500 * time.Millisecond
+
+// DetectOutput picks the output to use. A missing switch means no jack detection, so assume the
+// speaker.
+func DetectOutput() Output {
+	b, err := os.ReadFile(jackState)
+	if err != nil || strings.TrimSpace(string(b)) == "0" {
+		return OutputSpeaker
+	}
+	return OutputHeadphone
+}
+
+// VolumeSteps is the number of volume steps. The range is config's, since that is what a stored
+// volume is in.
+const VolumeSteps = config.VolumeSteps
+
+// volumeCurves maps a volume step to attenuation in dB. The Dot's vendor speaker curve is reused
+// as a sensible shape; the top few steps are pulled down because audioprobe found 0.3 FS already
+// loud on this amplifier as the HAL leaves it.
+var volumeCurves = map[Output][VolumeSteps + 1]float64{
+	OutputSpeaker: {
+		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
+		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
+		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+	},
+	OutputHeadphone: {
+		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
+		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
+		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+	},
+}
+
+// mute is the attenuation the curves use for step 0.
+const mute = -90
+
+// gainForStep converts a volume step to a linear gain using the output's curve.
+func gainForStep(out Output, step int) float32 {
+	curve, ok := volumeCurves[out]
+	if !ok {
+		curve = volumeCurves[OutputSpeaker]
+	}
+	step = max(0, min(step, VolumeSteps))
+
+	db := curve[step]
+	if db <= mute {
+		return 0
+	}
+	return float32(math.Pow(10, db/20))
+}
