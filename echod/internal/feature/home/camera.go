@@ -36,6 +36,8 @@ type CameraView struct {
 	Until  time.Time
 	Frame  *image.RGBA // the latest frame, scaled to fit; nil until the first arrives
 	Error  string      // why there is no frame, when there is none
+
+	span time.Duration // how long it was asked for; Until is restarted from the first frame
 }
 
 // Cameras is the configured list.
@@ -61,7 +63,7 @@ func (f *Feature) ShowCamera(entity string, d time.Duration) {
 	}
 	f.mu.Lock()
 	fresh := f.cam.Entity != entity || time.Now().After(f.cam.Until)
-	f.cam = CameraView{Entity: entity, Name: name, Until: time.Now().Add(d), Frame: f.cam.Frame}
+	f.cam = CameraView{Entity: entity, Name: name, Until: time.Now().Add(d), Frame: f.cam.Frame, span: d}
 	if fresh {
 		f.cam.Frame = nil
 	}
@@ -96,6 +98,12 @@ func (f *Feature) fetchFrames(entity string) {
 			if err != nil {
 				f.cam.Error = err.Error()
 			} else {
+				// The time on screen counts from the first picture, not from the request: some
+				// cameras take a while to start a stream, and a view that closes as it opens
+				// is no view at all.
+				if f.cam.Frame == nil {
+					f.cam.Until = time.Now().Add(f.cam.span)
+				}
 				f.cam.Frame, f.cam.Error = frame, ""
 			}
 		}
