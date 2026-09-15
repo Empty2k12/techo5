@@ -421,7 +421,12 @@ session.
    and the running image has `/dev/kd_camera_hw`, `/dev/camera-isp`,
    `/dev/camera-sysram` with the ISP probed at boot. So nothing to patch; what
    remains is all userspace: select the sensor through the imgsensor ioctls,
-   configure the ISP pass-through, get one raw frame. `build-kernel.sh` keeps
+   configure the ISP pass-through, get one raw frame. STARTED 2026-09-15 late:
+   `docs/camera-research.md` — `cmd/camprobe` drives the sensor driver from
+   Linux (it selects and powers the OV02B10; the run failed only because the
+   privacy latch was engaged: "Mute on will not init sensor"); the ISP driver
+   exposes raw register access, IRQ waits and the IMGO DMA ring, but its
+   register map is not in the tree — finding it is the next step. `build-kernel.sh` keeps
    KPATCHED=1 for a patched branch should that ever be needed.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
