@@ -35,13 +35,17 @@ the daemon now run side by side, and the daemon survives a reboot.
 
 Still to do for M1:
 
-- Provisioning: name, key and wake models are placed by hand today (`/data/misc/techo5/`);
-  an installer should do it, and the device should be named for its room.
-- Retire the VACA satellite side of ShowAssist on this device (it now hears silence through
-  the null HAL) so only one satellite is registered, and decide what the screen shows (M2).
+- Done since: `tools/install-cronos.ps1` provisions a Show in one run (binary, init service,
+  null HAL, name, key, wake models, key layout); the bench unit is named "Bench Show" with
+  the `bench_show_` entity prefix and ShowAssist's satellite is disabled ("Bench Show
+  Screen"); the Alexa microWakeWord model is installed from esphome/micro-wake-word-models.
 - Understand the second capture channel (identical copy of the mic) and whether a second mic
   exists.
-- Volume: the curve reaches unity at the top; pick the default step by ear.
+- Volume: even the top of the curve (unity) was heard as a little quiet in the room. The next
+  step up is the amplifier's own gain, `Speaker Volume A` (MAX98396, 8 of 17 as the HAL leaves
+  it); raise it carefully and re-measure headroom before making it the default.
+- Releases: the update check looks at this repository's GitHub releases; none exist yet, so it
+  logs a failed check until the first `manifest.json` is published.
 
 The port covers:
 
@@ -65,6 +69,13 @@ satellite and a media player, exactly like the Dots, while Android keeps
 running the screen.
 
 ## M2 — Display layer
+
+Baseline in place (2026-09-14): ShowAssist stays on the screen as a display-only web view of
+the `echo-show` dashboard (its own satellite role is disabled), and the dashboard reacts to the
+daemon: a card driven by `assist_satellite.<name>_assist_satellite` shows "Listening…",
+"Thinking…" with the transcript, then transcript and reply while the answer plays; the Now
+Playing and volume tiles and the station chips target the daemon's `media_player`. All of that
+is Home Assistant configuration, no device code.
 
 Pick one and keep it thin:
 
