@@ -23,10 +23,11 @@ update.
 
 ## Status
 
-Early, but talking. The ported daemon (`echod/`) runs on a Show, appears in Home Assistant
-as an ESPHome voice satellite, and completes voice turns: wake word on the device,
-transcription and reply through Home Assistant, speech from the speaker. It is started by hand
-on a bench unit with Android's framework stopped; see `docs/porting-plan.md` for what is left.
+Early, but talking. The ported daemon (`echod/`) runs on a Show as an init service beside
+LineageOS, appears in Home Assistant as an ESPHome voice satellite, and completes voice turns:
+wake word on the device, transcription and reply through Home Assistant, speech from the
+speaker. The next step is a Linux-only image where the daemon also owns the screen; see
+`docs/porting-plan.md`.
 
 For daily use the working path on this hardware is still:
 

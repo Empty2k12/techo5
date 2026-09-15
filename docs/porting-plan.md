@@ -123,13 +123,22 @@ verified on the bench unit:
   reimplementing most of `primary_display.c` against undocumented CMDQ tokens.
 
 Conclusion: driving this vendor stack from userspace is a poor investment. The
-clean way to a daemon-owned panel is the mainline **DRM/KMS** driver for MT8163
-(`mediatek-drm`): standard atomic modeset with dumb buffers, no CMDQ, no compat
-guessing. That belongs in the Linux image (M4). So the display layer is folded
-into M4, and until then the screen stays on ShowAssist (below).
+display layer is folded into M4, and until then the screen stays on ShowAssist (below).
+
+**Resolved later the same day (2026-09-15): the plain Linux framebuffer works once
+Android is out of the picture.** Booted into TWRP, `cmd/fbprobe` mapped `fb0`
+(5.5 MB, 480×960×32 bpp, two pages) and painted the panel. The LineageOS kernel
+reports `smem_len = 0` only because it is built with `CONFIG_FREE_FB_BUFFER`: the
+display driver frees the boot framebuffer the first time the Android compositor
+configures its own overlay layers. Nothing in a Linux boot triggers that, so the
+same kernel keeps its framebuffer there. Details in `docs/hardware.md` (Display).
+So the daemon-owned screen is **fbdev on the downstream kernel**, drawn by the
+daemon itself — no DRM, no compositor, no Android. Mainline `mediatek-drm` was
+checked and is not needed (and, see M4, mainline is ruled out anyway by Wi-Fi).
 
 `internal/mtkdisp`, `cmd/dispprobe` and `cmd/fbprobe` are kept as the record of
-the vendor path and a working probe of the panel geometry, capture and registers.
+the vendor path and a working probe of the panel geometry, capture and registers;
+`fbprobe` is the seed of the display layer.
 
 ### Interim screen (in place since 2026-09-14)
 
@@ -142,18 +151,91 @@ the daemon's `media_player`. All of that is Home Assistant configuration, no
 device code. Screen state (on/off, brightness) can later be exposed through the
 same ESPHome device so Home Assistant sees one device, not two.
 
-## M3 — Slim the OS
+## M3 — Slim the OS (skipped)
 
-With the daemon and kiosk carrying the load, remove what Android no longer
-needs: launcher, dialer, messaging, browser, gallery, music, setup wizard,
-print spooler. Measure boot time and idle memory before and after. Consider a
-custom LineageOS build from the same device tree with those packages removed.
+Superseded by M4 on 2026-09-15: with fbdev proven and the daemon already owning
+audio, going straight to a Linux-only image is less work than trimming Android.
 
-## M4 — Beyond Android (optional, later)
+## M4 — Linux-only image (the end state)
 
-A Linux-only image on the downstream kernel: Alpine or Buildroot rootfs, the
-Go daemon, a Wayland compositor with a WPE WebKit kiosk. This is the leanest
-end state but the largest effort, and depends on M0 answers about audio.
+Decided 2026-09-15: the end device boots a Linux image with no Android userspace
+at all — the downstream kernel, a small Alpine (armv7) rootfs, the daemon owning
+mic, speaker, wake word, ESPHome API **and the screen** (fbdev, see M2), Wi-Fi
+through the vendor driver, and Bluetooth for earbuds. M3 (slimming Android) is
+skipped; Android stays only as the fallback in the `boot` partition until the
+Linux image is trusted.
+
+### Kernel: downstream 4.9, not mainline
+
+Surveyed 2026-09-15, all details in `docs/hardware.md` (Kernels, Wi-Fi/Bluetooth):
+
+- Mainline (bengris32 `linux-mtk`, branch `mt8163/7.0`, March 2026) has MT8163
+  `mediatek-drm` and cronos device trees, but the cronos tree is a skeleton (eMMC,
+  USB, keys, light sensor — no panel, touch, audio codecs or SDIO), and the
+  mainline `mt76` driver has **no MT7668 Wi-Fi** support at all (only its
+  Bluetooth half, `btmtksdio`). Wi-Fi alone rules mainline out.
+- Two downstream kernels exist for cronos, both from `amazon-oss/android_kernel_amazon_mt8163`:
+  - `cronos/lineage-18.1`: **4.9.337, arm64** with 32-bit userspace — what LineageOS
+    boots and what the daemon is validated on. Wi-Fi/BT are vendor modules shipped
+    in LineageOS `/vendor/lib/modules` (`mt76x8_wlan.ko`, `mt76x8_bt.ko`) and load
+    with a plain `insmod`. USB gadget (configfs: ACM, RNDIS, FunctionFS) built in.
+  - `cm-14.1`: **4.9.77, 32-bit ARM** — what TWRP and the postmarketOS
+    `amazon-checkers` port boot (touch driver, audio codecs and the MT7668 combo
+    glue built in, but the Wi-Fi/BT drivers themselves are out-of-tree).
+- **Choice: `cronos/lineage-18.1`.** Same kernel as the Android fallback, the audio
+  quirks are already mapped, and the Wi-Fi/BT modules exist as binaries, so the
+  first Linux boot needs no kernel build at all. `cm-14.1` stays the fallback if
+  the arm64 kernel misbehaves outside Android.
+- A kernel rebuild is still needed later, for Bluetooth: neither kernel has
+  `CONFIG_BT`. The vendor BT driver exposes `/dev/stpbt` (raw H4 packets), not a
+  Linux HCI device, so BlueZ needs the kernel BT core plus either `hci_vhci` (a
+  small userspace bridge stpbt ↔ vhci) or `hci_uart` H4 over a pty. Rebuilding
+  means also rebuilding the vendor Wi-Fi/BT modules (sources: the LineageOS
+  vendor tree / `gitlab.com/echo-pmos/amazon-checkers-vendor`, `amazon/wlan` and
+  `amazon/bluetooth`). WSL Ubuntu 24.04 is on the build host; toolchain not yet
+  installed (needs sudo).
+
+### Bootloader facts that shape the plan
+
+- amonet's LK (kaeru 2.0.0) does **not** implement `fastboot boot`; every test
+  image has to be flashed. Use the `recovery` slot (16 MB) for Linux images and
+  keep the Android `boot` untouched as the fallback. Backups of all three:
+  `D:\platform-tools\echoshow\{recovery-twrp-cronos,boot-lineage-18.1-20260904-cronos,lk-amonet-cronos}.img`.
+- `fastboot reboot` after `adb reboot bootloader` lands back in fastboot;
+  `fastboot continue` boots normally.
+- Kernel + initramfs must fit 16 MB: the LineageOS kernel is 7.4 MB gzip, so the
+  initramfs has ~8 MB. Enough for Alpine's minirootfs (3.2 MB gz) plus the daemon
+  (~4 MB gz, or lzma/xz which the kernel accepts). The real rootfs can live on
+  `system`/`userdata` later; a self-contained initramfs is the first target.
+
+### Steps
+
+1. **First Linux boot** (no kernel build): LineageOS kernel + an initramfs built
+   from Alpine 3.24 armv7 minirootfs with a tiny init that mounts the essentials,
+   brings up USB gadget (ACM serial + RNDIS or FunctionFS adbd) for access, paints
+   the panel with `fbprobe`, and drops to a shell. Flash to `recovery`,
+   `adb reboot recovery`. Failure mode: if init never runs, MISC may keep the
+   recovery bootloader message and the unit loops into recovery — recovery is
+   volume-down at power-up into fastboot, then `fastboot flash recovery` the TWRP
+   backup. Do this with the unit at hand.
+2. **Wi-Fi**: mount the LineageOS `system` partition read-only, `insmod` the
+   vendor `mt76x8_wlan.ko` with `firmware_class.path` pointing at its `vendor/firmware`,
+   `wpa_supplicant` + DHCP. Then SSH (dropbear) replaces the USB cable.
+3. **Daemon**: run `techo5` from the initramfs — audio is already raw ALSA, so
+   it should work unchanged; verify the DL1 hold trick and the amp safe-mode
+   clear still apply on a non-Android boot.
+4. **Display layer** in the daemon: a framebuffer renderer (Go, no GPU) for the
+   clock/voice/media screens, touch from `goodix-ts` (event3), backlight from
+   `/sys/class/leds/lcd-backlight`, light sensor from event5. Screen state exposed
+   as ESPHome entities. Retire ShowAssist and the `echo-show` dashboard for this device.
+5. **Rootfs on eMMC**: move from initramfs to a persistent Alpine on `system`
+   (3 GB) with an A/B or rollback story that fits the existing updater's trial
+   semantics; the initramfs stays as the rescue environment.
+6. **Bluetooth** (earbuds, user requirement 2026-09-15): rebuild the kernel with
+   `CONFIG_BT` + `hci_vhci`, bridge `/dev/stpbt`, BlueZ + `bluez-alsa` (or
+   PipeWire) as an A2DP source; route the daemon's playback to the earbuds when
+   connected. Pairing driven from the on-screen UI.
+7. Second unit rollout with the installer rewritten for the Linux image.
 
 ## Ground rules
 

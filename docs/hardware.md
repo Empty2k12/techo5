@@ -21,7 +21,7 @@ Items marked *unverified* have not been confirmed on a unit by this project.
 | Camera | main + sub camera on I²C 0, mechanical lens cover on `gpio-499` (`SW_CAMERA_LENS_COVER`) |
 | Buttons | volume up (`gpio-393`), volume down (`gpio-394`), mic-mute (`gpio-404`) |
 | Bootloader | Amazon LK; stock build `77c8c2e-20211019_182552`, amonet replaces it with `44072a3-20240709_162755`; preloader `29ba1b5-20210311_160043` |
-| Kernel | Linux **4.9.337** (LineageOS build), Linaro GCC 6.3 |
+| Kernel | Linux **4.9.337** arm64 (LineageOS build) or **4.9.77** 32-bit ARM (TWRP build); see [Kernels](#kernels) |
 | Stock OS | Fire OS 7 (Android 9 based) |
 
 ## Partitions (eMMC)
@@ -46,6 +46,74 @@ Items marked *unverified* have not been confirmed on a unit by this project.
 `boot` is a plain 16 MB Android boot image, which is enough for a kernel plus
 a small initramfs. The LineageOS kernel command line already carries
 `androidboot.selinux=permissive` and `androidboot.veritymode=disabled`.
+
+Images pulled from the bench unit on 2026-09-15 (kept outside the repo in
+`D:\platform-tools\echoshow\`): `boot-lineage-18.1-20260904-cronos.img`
+(md5 `ade8a5e0…`), `recovery-twrp-cronos.img` (`fc6abbcf…`), `lk-amonet-cronos.img`
+(`d4688deb…`). Boot image header v0, page 2048, tags at `0x48000000`:
+
+| Image | Kernel | Load | Ramdisk | Load | Command line in header |
+|---|---|---|---|---|---|
+| LineageOS boot | 7.4 MB gzip arm64 `Image`, DTB appended | `0x40080000` | 0.8 MB gzip | `0x69244e00` | `bootopt=64S3,32N2,64N2 console=ttyMT0,921600n1 firmware_class.path=/vendor/firmware androidboot.selinux=permissive buildvariant=userdebug` |
+| TWRP recovery | 6.8 MB ARM `zImage`, DTB appended | `0x40008000` | 9.1 MB lzma | `0x43400000` | `bootopt=64S3,32N2,32N2 buildvariant=eng` |
+
+LK appends the rest (`lcm=…`, `vram=7340032`, `fps=5964`, `bl_level=90`,
+`androidboot.*`, `firmware_class.path=/vendor/firmware` on the recovery boot too).
+
+## Kernels
+
+Two downstream 4.9 kernels boot this board; both come from
+`github.com/amazon-oss/android_kernel_amazon_mt8163` and both have their full
+`/proc/config.gz` saved under `docs/dumps/`.
+
+| | LineageOS boot | TWRP recovery |
+|---|---|---|
+| Branch | `cronos/lineage-18.1` (also `lineage-18.1`, `lineage-22.2`) | `cm-14.1` (32-bit; `diff/cm-14.1` carries the cronos diff) |
+| Version | 4.9.337, `armv8l` (arm64 kernel, 32-bit userspace, `CONFIG_COMPAT`) | 4.9.77, `armv7l`, built 2025-11-28 |
+| Config | `dumps/cronos-lineage-kernel-4.9.337.config` | `dumps/cronos-twrp-kernel-4.9.77.config` |
+| Framebuffer | `CONFIG_FREE_FB_BUFFER=y` (see Display) | not set |
+| Wi-Fi / BT | `CONFIG_MTK_COMBO` off; vendor modules `mt76x8_wlan.ko`, `mt76x8_bt.ko` in LineageOS `/vendor/lib/modules`, loaded by `init.insmod.sh` | `CONFIG_MTK_COMBO=y`, chip `MT7668`, `CONFIG_MTK_COMBO_BT=y`, `CONFIG_WLAN_VENDOR_MEDIATEK=y` — but the driver itself is out of tree, so no SDIO driver binds in TWRP |
+| Audio | vendor `mt-snd-card` (validated with the daemon) | same card, all 24 PCM devices present; `audioprobe` captures and plays (with the DL1 hold) |
+| Touch | `gt9xx` | `CONFIG_TOUCHSCREEN_GTP9XX=y` |
+| Bluetooth core | `# CONFIG_BT is not set` | `# CONFIG_BT is not set` |
+| Console/fbcon | `# CONFIG_VT is not set` | `# CONFIG_VT is not set` |
+| USB gadget | configfs with ACM, serial, RNDIS, mass storage, FunctionFS | (TWRP uses FunctionFS adb) |
+| initramfs | gzip, lzma, xz, lz4 | gzip, lzma, xz |
+| devtmpfs | not set (needs an init that populates `/dev` or `mdev`) | — |
+
+`cm-14.1` is the branch r0rt1z2 keeps for the 32-bit TWRP and the postmarketOS
+`amazon-checkers` port (cronos support added 2026-05-13: device trees, ST7701S
+panel driver, `gpio-privacy`, codecs, `cronos.config`). The `lineage-18.1`
+family is what LineageOS ships. The Linux image (porting plan M4) uses the
+LineageOS kernel.
+
+The mainline effort, `github.com/bengris32/linux-mtk` branch `mt8163/7.0`
+(last touched 2026-03-30), has an MT8163 `mediatek-drm` (mmsys, OVL, RDMA, DSI,
+mutex…), `mt8163-afe-pcm` audio and a family of Amazon device trees including
+`mt8163-amazon-cronos.dts` (v4.1/v4.2/v4.3 variants) — but the cronos tree only
+enables eMMC, USB peripheral, GPIO keys and the light sensor. No panel, touch,
+codec or SDIO node yet, and mainline `mt76` has no MT7668 Wi-Fi (its SDIO table
+is MT7663 only; `btmtksdio` does list MT7668). Not usable for this project.
+
+## Wi-Fi and Bluetooth (MT7668)
+
+- SDIO on `mmc1` (`11250000.mmc`), vendor `0x037a`: function 1 device `0x7608`
+  (Wi-Fi), function 2 device `0x7668` (Bluetooth). On LineageOS the drivers
+  `wlan` and `btmtk_sdio` bind to them.
+- Firmware in LineageOS `/vendor/firmware`: `WIFI_RAM_CODE_MT7668.bin`,
+  `WIFI_RAM_CODE2_SDIO_MT7668.bin`, `mt7668_patch_e2_hdr.bin`,
+  `EEPROM_MT7668.bin`, `TxPwrLimit_MT76x8.dat`, `wifi.cfg`. No WMT daemon is
+  involved: `init.insmod.sh` insmods the two modules and `wpa_supplicant` runs
+  on `wlan0`.
+- Driver sources: the LineageOS vendor tree, mirrored as
+  `gitlab.com/echo-pmos/amazon-checkers-vendor` (`amazon/wlan/mediatek/driver/mt76x8`,
+  `amazon/bluetooth/mediatek/mt76xx/driver/mt76x8/sdio`).
+- The Bluetooth driver does **not** register a Linux HCI device. It creates the
+  character device `/dev/stpbt` (plus `/dev/stpbtfwlog`) carrying raw H4 packets
+  (leading type byte `0x01` command, `0x02` ACL, `0x04` event), which Android's
+  vendor libbt talks to. For BlueZ the kernel needs `CONFIG_BT` and a bridge:
+  `hci_vhci` (a userspace process copying stpbt ↔ `/dev/vhci`) or `hci_uart`
+  H4 over a pty. Neither kernel has `CONFIG_BT`, so this needs a rebuild.
 
 ## Audio
 
@@ -244,11 +312,19 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
   `amazon-oss/android_kernel_amazon_mt8163`, branch `lineage-18.1`). The overlay
   engine OVL0 has 4 layers; the primary path runs OVL0 → RDMA0 → DSI, driven by
   the GCE command queue (CMDQ). Register window is physical `0x14007000`–`0x14018000`.
-- **The Linux framebuffer cannot be used.** `/dev/graphics/fb0` reports
-  `smem_len = 0`: the driver owns the backing buffer (reserved region at
-  physical `0x5f900000`, 7 MB) and only feeds it to the overlay, so `mmap` on fb0
-  returns `EINVAL` at every size, with or without SurfaceFlinger. `cmd/fbprobe`
-  is the probe.
+- **The Linux framebuffer works outside Android.** Under LineageOS
+  `/dev/graphics/fb0` reports `smem_len = 0` and `mmap` returns `EINVAL` at every
+  size, with or without SurfaceFlinger. Booted into TWRP (the 4.9.77 kernel)
+  the same node reports `smem_len = 5529600` (480×960, 32 bpp, line 1920 bytes,
+  virtual 480×1920, pixel order R0 G8 B16 A24), `cmd/fbprobe` maps 3.6 MB and
+  paints the panel with `FBIOPAN_DISPLAY` (verified 2026-09-15). The difference
+  is `CONFIG_FREE_FB_BUFFER=y` in the LineageOS kernel: `primary_display.c`
+  frees the boot framebuffer (reserved region at physical `0x5f900000`, 7 MB)
+  the first time a frame config arrives with no layer still pointing at it —
+  i.e. once the Android compositor has its own buffers on the overlay — and
+  from then on every fbdev path returns `-EPERM`/`-EINVAL`. A Linux boot never
+  sends that frame config, so the LineageOS kernel keeps its framebuffer too.
+  The panel is portrait; `fbprobe` composes 960×480 landscape and rotates 90°.
 - **The display-manager API works up to the commit step.** `/dev/mtk_disp_mgr`
   takes MediaTek's 32-bit compat ioctls (`'O'` magic). `internal/mtkdisp` speaks
   them: create the primary session (id `0x10000`), read info (480×960, `vram` 7 MB,
@@ -270,9 +346,7 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
   session join does not reproduce. Conclusion: paint the panel from the mainline
   `mediatek-drm` KMS driver in the Linux image, not from this vendor stack. See
   `docs/porting-plan.md` (M2/M4).
-- TWRP paints this panel with a tiny userspace, which confirms the kernel and
-  DSI work outside Android; it uses the same fbdev path but on a boot where the
-  driver leaves the framebuffer mappable.
+- TWRP paints this panel with a tiny userspace through exactly this fbdev path.
 
 ## Factory data (`/proc/idme`)
 
@@ -287,10 +361,17 @@ and `productid2` read `0` on the unit seen.
   hold all three buttons until the screen shows `=> FASTBOOT mode`, connect
   USB, run the fastbrick payload. The exploit reboots the device into TWRP.
   Never interrupt it.
-- Fastboot reports `product: CRONOS`; `unlock_status` flips to `true` afterwards.
-- TWRP works over `adb shell twrp ...` (format data, wipe, install zip).
-  TWRP running at all is the proof that the kernel, display and touch work
-  outside Android: it is the same downstream kernel with a small userspace.
+- Fastboot reports `product: CRONOS`, `version: 0.5`, `kaeru-version: 2.0.0`;
+  `unlock_status` flips to `true` afterwards. `max-download-size` is 109 MB.
+- amonet's LK does **not** implement `fastboot boot` ("unknown command"): test
+  images must be flashed (`fastboot flash recovery …`). After
+  `adb reboot bootloader`, `fastboot reboot` lands back in fastboot; use
+  `fastboot continue` to boot normally. Volume-down at power-up enters fastboot
+  (`TW_HACKED_BL_BUTTON`).
+- TWRP works over `adb shell twrp ...` (format data, wipe, install zip) and is
+  a 4.9.77 32-bit kernel (`cm-14.1` branch) with a small userspace; `adb shell`
+  in TWRP is root, and `/dev/snd`, `/dev/input`, `/dev/graphics/fb0` are all
+  usable there (the bench for non-Android experiments).
 
 ## LineageOS 18.1 (unofficial, r0rt1z2)
 
@@ -319,5 +400,8 @@ and `productid2` read `0` on the unit seen.
   behind at boot when the HAL is not running.
 - Why capture channels 0 and 1 are identical: mono ADC, AFE duplication, or a
   second mic that needs routing. The `ADC_A` mute had no effect on it.
-- Which Amazon GPL kernel source drop matches the 4.9.337 LineageOS kernel
-  and the stock LK `77c8c2e-20211019`.
+- Whether the arm64 LineageOS kernel boots a non-Android initramfs as cleanly
+  as the 32-bit TWRP kernel does (first M4 boot will tell).
+- Whether the DL1 SRAM-ring panic and the amplifier safe-mode cap also apply
+  on the 4.9.77 kernel (`audioprobe` with the default hold worked there;
+  nothing else measured).
