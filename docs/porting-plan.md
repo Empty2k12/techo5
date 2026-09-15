@@ -389,8 +389,14 @@ session.
    `tools/linux/build-aec.sh` in WSL under QEMU. MEASURED (same announcement
    through the speaker, ERLE as the daemon reports it): WebRTC best 31.3 dB,
    25.5 dB at the end of the sentence; built-in best 26.6 dB, 18.8 dB at the
-   end. WebRTC is the default engine. Not yet measured: wake word during
-   music (double talk). Oddity to look at: with earbuds connected and the
+   end. But in use, the wake word over a playing station was markedly harder
+   to catch with WebRTC (its suppressor clamps the talker in double talk, as
+   the Show 8 author measured) and clearly better with the built-in linear
+   filter, so **Built-in is the default**; WebRTC stays selectable. The
+   canceller's "playing" gate had to drop to -76 dBFS with a one-second hold:
+   a radio at a quiet volume sits at -50 dBFS on the loopback and flapped the
+   -60 dBFS gate every second. The wake threshold gets 0.10 of slack while the
+   canceller runs. "Music during a turn" is set to Pause on the bench. Oddity to look at: with earbuds connected and the
    codec fed silence, the built-in filter still reported 17–19 dB of ERLE, so
    the loopback channel carried something — check what the FPGA loops back
    when the DAC input is silence.

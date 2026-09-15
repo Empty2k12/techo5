@@ -44,10 +44,11 @@ const (
 
 	DefaultCancel = true
 
-	// WebRTC's canceller where the image has the helper (measured 2026-09-15 on cronos: 31 dB
-	// best against 27 for the built-in filter, and it holds better through the tail); the
-	// select settles on the built-in one elsewhere.
-	DefaultCancelEngine = CancelWebRTC
+	// The built-in filter. WebRTC's removes more of the music (31 dB against 27, measured on
+	// cronos 2026-09-15) but its suppressor also clamps a voice talking over the music, and the
+	// wake word was markedly harder to catch with it; the linear filter leaves the voice alone.
+	// WebRTC stays a choice for when a clean recording matters more than the wake word.
+	DefaultCancelEngine = CancelBuiltin
 
 	// Measured on a quiet room: 0.8 dB at the 99th percentile of frames, so this is well clear of the
 	// room itself and is really about brief small sounds — a chair, a keyboard.
