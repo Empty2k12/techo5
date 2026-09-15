@@ -90,8 +90,8 @@ func Fetch(ctx context.Context, url string) ([]int16, error) {
 // plays, and each is brought to the same RMS target with peaks soft-limited. The dial scales from
 // there.
 const (
-	// speechTargetRMS is the level speech is normalised to, as a fraction of full scale (-14 dBFS).
-	speechTargetRMS = 0.2
+	// speechTargetRMS is the level speech is normalised to, as a fraction of full scale (-18 dBFS).
+	speechTargetRMS = 0.126
 	// speechMaxGain caps how far a very quiet clip is lifted, so silence and noise are not amplified
 	// without limit (+18 dB).
 	speechMaxGain = 8.0

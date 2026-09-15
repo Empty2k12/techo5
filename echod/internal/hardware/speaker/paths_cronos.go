@@ -87,18 +87,18 @@ const VolumeSteps = config.VolumeSteps
 // volumeCurves maps a volume step to attenuation in dB. With the amplifier out of safe mode this
 // speaker is loud: the Dot's vendor curve, which reaches unity and bunches its top half into 8 dB,
 // put "fricking loud" at half the dial in a small room (2026-09-15). This curve is linear in dB
-// instead: 1.5 dB a step up to half the dial (−40 → −19 dB), 1 dB a step above it (→ −4 dB), so
-// half is a conversation and the top is room-loud rather than painful.
+// instead: about 1.5 dB a step up to half the dial (−45 → −24 dB), 1.2 dB a step above it
+// (→ −6 dB), so half is a quiet conversation and the top is room-loud rather than painful.
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -40, -38.5, -37, -35.5, -34, -32.5, -31, -29.5, -28,
-		-26.5, -25, -23.5, -22, -20.5, -19, -18, -17, -16, -15,
-		-14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4,
+		-90, -45, -43.5, -42, -40.5, -39, -37.5, -36, -34.5, -33,
+		-31.5, -30, -28.5, -27, -25.5, -24, -22.8, -21.6, -20.4, -19.2,
+		-18, -16.8, -15.6, -14.4, -13.2, -12, -10.8, -9.6, -8.4, -7.2, -6,
 	},
 	OutputHeadphone: {
-		-90, -40, -38.5, -37, -35.5, -34, -32.5, -31, -29.5, -28,
-		-26.5, -25, -23.5, -22, -20.5, -19, -18, -17, -16, -15,
-		-14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4,
+		-90, -45, -43.5, -42, -40.5, -39, -37.5, -36, -34.5, -33,
+		-31.5, -30, -28.5, -27, -25.5, -24, -22.8, -21.6, -20.4, -19.2,
+		-18, -16.8, -15.6, -14.4, -13.2, -12, -10.8, -9.6, -8.4, -7.2, -6,
 	},
 }
 

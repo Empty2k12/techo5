@@ -88,6 +88,10 @@ Push $Rc /data/local/tmp/techo5.rc
 $sys = @'
 set -e
 mount -o remount,rw /
+# A binary installed by hand supersedes any update trial: without this the next start would take
+# the trial marker as a crashed update and put the previous binary back over the new one.
+rm -f /system/bin/techo5.prev /data/misc/techo5/updating
+setprop echolocal.trial ""
 cp /data/local/tmp/techo5.new /system/bin/techo5 && chmod 755 /system/bin/techo5 && chcon u:object_r:system_file:s0 /system/bin/techo5
 sed -i "s/\r$//" /data/local/tmp/techo5.rc
 cp /data/local/tmp/techo5.rc /system/etc/init/techo5.rc && chmod 644 /system/etc/init/techo5.rc && chcon u:object_r:system_file:s0 /system/etc/init/techo5.rc
