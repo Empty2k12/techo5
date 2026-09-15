@@ -21,3 +21,6 @@ const (
 
 // adcs are the four converters the seven microphones arrive on.
 var adcs = []string{"A", "B", "C", "D"}
+
+// MediaService is the init service that holds the capture device on a fresh boot.
+const MediaService = "media"

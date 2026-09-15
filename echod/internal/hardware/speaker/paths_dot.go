@@ -134,3 +134,6 @@ const (
 
 // DRAMHold is unused on the Dot: its DL1 driver's SRAM ring works.
 const DRAMHold = ""
+
+// MediaService is the init service that owns Android's audio HAL on Fire OS.
+const MediaService = "media"

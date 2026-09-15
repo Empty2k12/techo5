@@ -35,9 +35,6 @@ const (
 // FrameSamples is the frame size handed to listeners, 20 ms at 16 kHz.
 const FrameSamples = Rate / 50
 
-// MediaService is the init service that holds the capture device on a fresh boot.
-const MediaService = "media"
-
 const (
 	acquireRetry    = 250 * time.Millisecond
 	acquireAttempts = 8

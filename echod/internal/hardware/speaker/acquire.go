@@ -10,8 +10,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
 )
 
-// MediaService is the init service that owns Android's audio HAL.
-const MediaService = "media"
 
 const (
 	acquireRetry    = 250 * time.Millisecond

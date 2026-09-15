@@ -112,3 +112,6 @@ func gainForStep(out Output, step int) float32 {
 	}
 	return float32(math.Pow(10, db/20))
 }
+
+// MediaService is the init service that owns Android's audio HAL on LineageOS.
+const MediaService = "vendor.audio-hal"
