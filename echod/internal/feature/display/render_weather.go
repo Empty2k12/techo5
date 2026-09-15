@@ -31,7 +31,7 @@ func (r *renderer) weatherPage(s scene) {
 	if big == "" && len(days) > 0 {
 		big = fmt.Sprintf("%.0f°", days[0].High)
 	}
-	r.text(r.clock, big, r.margin+170, 235, cream)
+	r.text(r.big, big, r.margin+170, 225, cream)
 	r.text(r.body, conditionWords(cond), r.margin, 300, sunPale)
 	if len(days) > 0 {
 		r.text(r.small, fmt.Sprintf("High %.0f°   Low %.0f°", days[0].High, days[0].Low), r.margin, 345, dim)

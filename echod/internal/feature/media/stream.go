@@ -120,11 +120,15 @@ func (m *Stream) Duck(on bool) {
 
 	if on {
 		if config.Get().Media.OnTurn == config.OnTurnPause {
+			// Once per turn: a second wake or a follow-up would suspend again, and the single
+			// release at the end would leave a hold behind — a stream that never plays again.
 			m.mu.Lock()
+			already := m.duckHeld
 			m.duckHeld = true
 			m.mu.Unlock()
-
-			m.Suspend()
+			if !already {
+				m.Suspend()
+			}
 			return
 		}
 

@@ -144,15 +144,9 @@ func (f *Feature) nameStream(url string) {
 			}
 		}
 	}
-	if name == "" {
-		if i := strings.Index(url, "://"); i > 0 {
-			host := url[i+3:]
-			if j := strings.IndexAny(host, "/:"); j > 0 {
-				host = host[:j]
-			}
-			name = host
-		}
-	}
+	// No host fallback: Home Assistant proxies streams through itself, so the host would be its
+	// own address, which is not a station. Unknown stays unknown and the page falls back to the
+	// "last station" text or what was tapped.
 	f.mu.Lock()
 	if f.url == url {
 		f.urlName = name
