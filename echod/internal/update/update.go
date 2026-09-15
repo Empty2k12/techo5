@@ -106,6 +106,15 @@ func Start() (onTrial, rebooting bool) {
 	}
 
 	if was, _ := prop.Get(layout.TrialProp); was != "" {
+		if len(layout.AnimationScripts) == 0 {
+			// No boot hook exists on this device to put the old binary back, so a reboot would only
+			// run the same binary again. Do the rollback here: the previous binary goes back in place,
+			// this process gets out of the way, and init starts it.
+			slog.Error("this binary was already tried this boot and never settled, putting the previous one back",
+				"trial", was, "prev", prev)
+			rollback()
+			return true, true
+		}
 		slog.Error("this binary was already tried this boot and never settled, rebooting to go back",
 			"trial", was, "prev", prev)
 		reboot()
@@ -162,6 +171,50 @@ func RolledBack() string {
 		slog.Error("clearing the rollback property failed", "err", err)
 	}
 	return was
+}
+
+// Stopped is a trial binary going away on purpose — a stop or restart asked for by an operator, not a
+// crash. It clears the trial marker so the next start is a first start again: without this, stopping
+// the daemon once during its trial would be read as the update having died, and rolled back.
+func Stopped() {
+	if !OnTrial() {
+		return
+	}
+	if err := prop.Set(layout.TrialProp, ""); err != nil {
+		slog.Error("clearing the trial property failed", "err", err)
+	}
+}
+
+// rollback puts the previous binary back over the one on trial, for a device with no boot hook to do
+// it. The version that was tried is left in the rollback property so Home Assistant hears about it.
+func rollback() {
+	version := "unknown"
+	if b, err := os.ReadFile(layout.UpdatingPath); err == nil {
+		version = strings.TrimSpace(string(b))
+	}
+
+	if err := writable(true); err != nil {
+		slog.Error("remounting to roll back failed", "err", err)
+		return
+	}
+	defer func() {
+		if err := writable(false); err != nil {
+			slog.Error("remounting read-only failed", "err", err)
+		}
+	}()
+
+	if err := os.Rename(prev, layout.Binary); err != nil {
+		slog.Error("rolling back failed", "from", prev, "to", layout.Binary, "err", err)
+		return
+	}
+	_ = os.Remove(layout.UpdatingPath)
+	if err := prop.Set(layout.TrialProp, ""); err != nil {
+		slog.Error("clearing the trial property failed", "err", err)
+	}
+	if err := prop.Set(layout.RolledBackProp, version); err != nil {
+		slog.Error("recording the rollback failed", "err", err)
+	}
+	slog.Warn("rolled back", "version", version, "binary", layout.Binary)
 }
 
 // reboot asks init for a clean one, which unwinds the services it started rather than dropping the

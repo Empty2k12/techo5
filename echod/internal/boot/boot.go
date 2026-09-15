@@ -81,6 +81,8 @@ func Run(ctx context.Context) error {
 	err := run(ctx, group, &restarting)
 
 	slog.Info("stopping", "restarting", restarting)
+	// A stop on purpose is not a failed trial; a crash never reaches here.
+	update.Stopped()
 	_ = prop.Set(layout.StateProp, "stopped")
 	return err
 }

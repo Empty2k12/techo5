@@ -85,19 +85,19 @@ func DetectOutput() Output {
 const VolumeSteps = config.VolumeSteps
 
 // volumeCurves maps a volume step to attenuation in dB: the Dot's vendor speaker curve shape,
-// sitting 6 dB below it. With the amplifier out of safe mode this speaker is loud: half the dial
+// sitting 8 dB below it. With the amplifier out of safe mode this speaker is loud: half the dial
 // at the unity-topped curve was "fricking loud" in a small room (2026-09-15), so the whole range
 // is pulled down and the top of the dial is room-loud rather than painful.
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
-		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
-		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+		-90, -41, -38, -34, -33, -31, -29, -27, -25, -24,
+		-22, -21, -20, -18, -17, -16, -15, -13, -13, -12,
+		-12, -12, -12, -11, -11, -11, -11, -11, -10, -9, -8,
 	},
 	OutputHeadphone: {
-		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
-		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
-		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
+		-90, -41, -38, -34, -33, -31, -29, -27, -25, -24,
+		-22, -21, -20, -18, -17, -16, -15, -13, -13, -12,
+		-12, -12, -12, -11, -11, -11, -11, -11, -10, -9, -8,
 	},
 }
 
@@ -129,6 +129,6 @@ const MediaService = "vendor.audio-hal"
 const AmpSwitch = ""
 
 // OutputBoost is make-up gain on everything the speaker plays, before the volume curve and the
-// limiter. Home Assistant's speech peaks well below full scale and this amplifier, as the kernel
-// leaves it, is quiet at unity: the top of the dial was heard as "medium" (2026-09-15). +6 dB.
+// limiter. Unity: the quiet output that once seemed to need it was the amplifier's safe mode
+// (see initSequence), and speech has its own normaliser.
 const OutputBoost = 1.0

@@ -51,6 +51,9 @@ func TestBothHooksExitCleanlyAndNeverCallLedctrl(t *testing.T) {
 // The rollback has to leave the device in the state everything else expects: the binary back, /system
 // read-only again, and the failure recorded where echod will find it.
 func TestRollbackRestoresAndReports(t *testing.T) {
+	if len(layout.AnimationScripts) == 0 {
+		t.Skip("this device has no vendor boot hooks; rollback is done in-process by update.Start")
+	}
 	script := Script(layout.StartAnimation)
 
 	for _, want := range []string{

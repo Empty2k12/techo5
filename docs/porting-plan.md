@@ -45,12 +45,12 @@ Still to do for M1:
   step up is the amplifier's own gain, `Speaker Volume A` (MAX98396, 8 of 17 as the HAL leaves
   it); raise it carefully and re-measure headroom before making it the default.
 - Releases: `tools/release.ps1` builds a versioned daemon, writes `manifest.json` with
-  `cmd/mkmanifest` and publishes a GitHub release; v0.1.0 is out and the bench unit runs it.
-  The daemon's updater (the `update` entity in Home Assistant) follows the latest release and
-  replaces `/system/bin/techo5` in place; the first real round trip happens with v0.1.1.
-- Speech loudness: replies and announcements are normalised to −14 dBFS RMS with a peak
-  limiter. That is the room-level ceiling for this amplifier as the kernel configures it
-  (see hardware.md); heard as adequate.
+  `cmd/mkmanifest` and publishes a GitHub release. The daemon's updater (the `update` entity in
+  Home Assistant) follows the latest release and replaces `/system/bin/techo5` in place; the
+  v0.1.0 → v0.1.1 round trip was done from Home Assistant's update button on 2026-09-15, with
+  init restarting the daemon into the new binary and the previous one kept for rollback.
+- Loudness: the amplifier's safe mode was the cap (see hardware.md); the daemon clears it,
+  speech is normalised to −14 dBFS RMS, and the volume curve sits 6 dB under the Dot's.
 
 The port covers:
 
