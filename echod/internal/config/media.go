@@ -7,6 +7,11 @@ type Media struct {
 
 	// DuckDB is how far down, in dB, when it carries on. Negative.
 	DuckDB int `json:"duck_db"`
+
+	// DuckOnNearMiss lowers a playing track for a few seconds when the wake word was nearly heard and
+	// did not fire. Over loud playback that is the only useful move left: the word already said cannot
+	// be rescued, but the music can be out of the way for the next one.
+	DuckOnNearMiss bool `json:"duck_on_near_miss"`
 }
 
 // OnTurn is what a turn does to music.
@@ -36,12 +41,16 @@ const (
 
 	// Far enough down that a reply wins, not so far that the track sounds stopped.
 	DefaultDuckDB = -15
+
+	// On: a near miss over playback is somebody about to say it again.
+	DefaultDuckOnNearMiss = true
 )
 
 func defaultMedia() Media {
 	return Media{
-		OnTurn: DefaultOnTurn,
-		DuckDB: DefaultDuckDB,
+		OnTurn:         DefaultOnTurn,
+		DuckDB:         DefaultDuckDB,
+		DuckOnNearMiss: DefaultDuckOnNearMiss,
 	}
 }
 
@@ -53,4 +62,8 @@ func (w MediaWriter) OnTurn(v OnTurn) error {
 
 func (w MediaWriter) DuckDB(db int) error {
 	return w.st.Update(func(c *Config) { c.Media.DuckDB = db })
+}
+
+func (w MediaWriter) DuckOnNearMiss(v bool) error {
+	return w.st.Update(func(c *Config) { c.Media.DuckOnNearMiss = v })
 }

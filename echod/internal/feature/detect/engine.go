@@ -64,6 +64,11 @@ type Engine struct {
 	// OnDetect runs on a detection, off the audio path.
 	OnDetect func(slot int)
 
+	// OnNearMiss runs when an utterance peaked over NearMiss and fell away without firing, with the peak
+	// it reached, off the audio path. A near miss is the only sign the device gets that somebody tried
+	// and was not heard, which is the one moment when getting out of their way is worth something.
+	OnNearMiss func(slot int, peak float64)
+
 	// OnReady runs once per slot, the first time its model produces a score. That is the first moment
 	// the wake word could be detected at all: these are streaming models with a window to fill, and
 	// openWakeWord gives nothing until it has about two seconds of audio. Loading is not hearing, and
@@ -419,6 +424,10 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 		if s.peak >= NearMiss && now.Sub(s.peakAt) > NearMissSettle {
 			slog.Info("wake near miss", "slot", n+1, "id", s.model.ID, "peak", s.peak,
 				"cutoff", cutoff, "dropped", source.Dropped())
+			if e.OnNearMiss != nil {
+				i, peak := n, s.peak
+				safe.Go("wake near miss", func() { e.OnNearMiss(i, peak) })
+			}
 			s.peak = 0
 		}
 		return

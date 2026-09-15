@@ -121,6 +121,10 @@ func (v *Voice) Ready() bool { return v.vs.Subscribed() }
 // the conversation's decision, not the caller's.
 func (v *Voice) Start(slot int) { v.turn.Start(slot) }
 
+// Busy reports whether a turn is running, for anything that has to leave the speaker alone while one
+// is.
+func (v *Voice) Busy() bool { return v.turn.Busy() }
+
 // Action is the action button: it gives up on whatever is happening, or starts something if nothing
 // is. Cancelling is the more useful half — it is the way out of a turn that is waiting on a pipeline
 // that is not going to answer.

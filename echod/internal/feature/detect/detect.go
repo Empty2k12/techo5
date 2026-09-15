@@ -32,6 +32,9 @@ type Detect struct {
 	engine *Engine
 	busy   *wakeBusy
 	stop   *esphome.Number
+
+	// ducker gets the music out of the way after an utterance that nearly fired; see nearmiss.go.
+	ducker *ducker
 }
 
 var (
@@ -76,6 +79,8 @@ func newDetect() *Detect {
 	}
 
 	d := &Detect{engine: e, busy: newWakeBusy(led.Get().Busy(), e.Ready)}
+	d.ducker = newDucker()
+	d.ducker.watch(e)
 	d.stop = newStopEntity(d)
 	e.OnReady = d.busy.scored
 

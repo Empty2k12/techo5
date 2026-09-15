@@ -52,6 +52,10 @@ type Player struct {
 	// asp is the driver's tuning: on applies it, off sends the signal as it came.
 	asp *esphome.Switch
 
+	// nearMiss ducks a playing track for a few seconds after a wake word that nearly fired, so the
+	// next try is heard; see feature/detect/nearmiss.go.
+	nearMiss *esphome.Switch
+
 	// layers are sounds the device makes on its own, for as long as they are left set. More than one,
 	// because a bed with a texture over it — crickets under wind — is worth having and the native API
 	// has no entity that holds more than one value.
@@ -143,11 +147,20 @@ func build() *Player {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		nearMiss: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "duck_on_near_miss",
+				Name:     "Duck after a near miss",
+				Icon:     "mdi:volume-low",
+				Category: esphome.CategoryConfig,
+			},
+		},
 	}
 	p.layers = noiseLayers()
 
 	// The player itself stays on the device: it is what people reach for. These are how it behaves.
-	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base}
+	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base,
+		&p.nearMiss.Base}
 	for _, sel := range p.layers {
 		bases = append(bases, &sel.Base)
 	}
@@ -188,6 +201,14 @@ func build() *Player {
 		}
 	}
 
+	p.nearMiss.OnCommand = func(v bool) {
+		p.nearMiss.Set(v)
+		if err := config.Set().Media().DuckOnNearMiss(v); err != nil {
+			slog.Error("saving a setting failed", "setting", p.nearMiss.ObjectID, "err", err)
+		}
+		slog.Info("setting changed", "setting", p.nearMiss.ObjectID, "using", v)
+	}
+
 	p.duck.OnCommand = func(v float32) {
 		p.duck.Set(v)
 		if err := config.Set().Media().DuckDB(int(v)); err != nil {
@@ -223,7 +244,7 @@ func build() *Player {
 func (p *Player) Name() string { return "media player" }
 
 func (p *Player) Entities() []esphome.Entity {
-	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp}
+	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp, p.nearMiss}
 	for _, sel := range p.layers {
 		out = append(out, sel)
 	}
@@ -239,6 +260,9 @@ func (p *Player) Restore(c config.Config) {
 	component.Restore(p.resampling, c.Speaker.Resampling, speaker.Get().SetResampling)
 
 	component.Restore(p.onTurn, c.Media.OnTurn, func(v config.OnTurn) config.OnTurn { return v })
+
+	p.nearMiss.Set(c.Media.DuckOnNearMiss)
+	slog.Info("restored", "what", p.nearMiss.ObjectID, "using", c.Media.DuckOnNearMiss)
 
 	p.duck.Set(float32(c.Media.DuckDB))
 	slog.Info("restored", "what", p.duck.ObjectID, "using", c.Media.DuckDB)

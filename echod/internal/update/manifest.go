@@ -52,8 +52,10 @@ type Binary struct {
 
 const flatArch = "arm64"
 
-// arch is a variable so a test can stand somewhere other than the machine it runs on.
-var arch = runtime.GOARCH
+// arch is a variable so a test can stand somewhere other than the machine it runs on. archSuffix
+// separates builds that share an architecture but not a device: the Dot and the Show are both arm,
+// and each other's binaries would start and then drive the wrong hardware.
+var arch = runtime.GOARCH + archSuffix
 
 // manifestTimeout bounds the fetch. Home Assistant asks for this on connect and after every selection
 // change, so it has to fail quickly rather than hold up a configuration reply.
