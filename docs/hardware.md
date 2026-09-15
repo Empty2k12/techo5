@@ -139,9 +139,10 @@ powers up again, so a control changed under a running daemon shows only after th
 closed and reopened. `Speaker Volume A` is not a usable gain: 5 and 8 sound identical and 14
 mutes the output.
 
-Speech from Home Assistant is normalised to −14 dBFS RMS before the volume curve
-(`media.Normalize`/`SpeechGain`). The cronos volume curve sits 6 dB below the Dot's, since half
-the dial at unity was too loud for a small room once safe mode was off.
+Speech from Home Assistant is normalised to −18 dBFS RMS before the volume curve
+(`media.Normalize`/`SpeechGain`). The cronos volume curve is linear in dB: −45 dB at step 1,
+−24 dB at half the dial, −6 dB at the top (`paths_cronos.go`). Tuned by ear in a small room
+on 2026-09-15 across v0.1.1–v0.1.4; half the dial was judged "perfect" for conversation.
 
 ### Do not toggle `Ext_Speaker_Amp_Switch`
 
