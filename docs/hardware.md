@@ -169,7 +169,31 @@ the device numbers and channel count changed.
 - `ADC_A Left Mute = 1` did **not** change the captured audio, so the
   `ADC_A` controls are not in the path that produces this stream as
   configured, or the stream is a mono capture duplicated by the AFE. Whether
-  a second, independent microphone channel can be enabled is open.
+  a second, independent microphone channel can be enabled was open until
+  2026-09-15 — **answered, see "Two microphones" below.**
+
+### Two microphones, and why the stream showed one
+
+The array is **two** microphones, not four: `idme` holds calibration for
+`miccal.0` and `miccal.1` only, and the device tree has one enabled
+TLV320AIC3101 at I²C `0x18` (with a second address, `0x19`, in its `reg` as
+`adc1`, and a separate disabled node). The codec's stereo ADC takes them on
+`DIF1_L` / `DIF1_R`. Its output does not go to the MediaTek AFE at all: an
+**FPGA** on SPI (`/soc/spi@1100a000/spi@0`, compatible `amzn-mtk,spi-audio-pltfm`,
+"FPGA Revision = 208", `fpga-cdone-gpio`) packs the two microphones and the
+two playback-loopback channels into the 4-channel frames that Amazon's
+`amzn-mt-spi-pcm` driver reads over SPI — which is why the codec's mute
+control never touched the stream and why the ring geometry is what it is.
+
+The bit-identical ch 1 was the **driver**: with the device-tree property
+`amzn,mic-downmix` present, `amzn-mt-spi-pcm.c` replaces ch 0 and ch 1 of
+every frame with their average (`(s0 + s1) / 2`). The LineageOS device trees
+(all eleven appended to the kernel) carry it, so Amazon's own build shipped
+the Show 5 downmixed too. Deleting the property with
+`tools/linux/patch-dtb.py` — no kernel rebuild — makes the driver probe with
+`mic_downmix=0` and the stream carries the two microphones separately
+(verified: correlation 0.95, difference −66 dBFS RMS, no longer identical).
+The bench unit boots `techo5-linux-boot-nodownmix.img` since 2026-09-15.
 - Host-side analysis: `go run ./tools/wavstats file.wav`.
 
 Mixer (`tinymix`, 118 controls) — the ones that look relevant:

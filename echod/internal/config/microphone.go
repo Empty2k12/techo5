@@ -11,7 +11,7 @@ type Microphone struct {
 	// Leveling brings the mix up to the level recognition expects.
 	Leveling bool `json:"leveling"`
 
-	// Mixing is how the seven microphones are combined. Which one wins depends on the room.
+	// Mixing is how the microphones are combined. Which one wins depends on the room.
 	Mixing Mixing `json:"mixing"`
 
 	// Cancel subtracts what the speaker is playing from what the microphones hear, so a wake word
@@ -34,8 +34,6 @@ const (
 
 	// Analog gain on the array in dB, where the vendor ran it.
 	DefaultMicGain = 20
-
-	DefaultMixing = MixCenter
 
 	// Home Assistant no longer levels what a satellite sends, so the device does.
 	DefaultLeveling = true
@@ -104,6 +102,10 @@ const (
 	// anything else has to beat.
 	MixCenter Mixing = "center"
 
+	// MixAll is the plain average of every microphone: no steering, a little less of what only one
+	// of them hears. On a two-microphone device it is what the vendor's driver did in the kernel.
+	MixAll Mixing = "all"
+
 	// MixDelaySum aligns all seven microphones to a steered direction and averages them.
 	MixDelaySum Mixing = "delay-sum"
 
@@ -117,6 +119,8 @@ func (m Mixing) Label() string {
 	switch m {
 	case MixCenter:
 		return "Center mic"
+	case MixAll:
+		return "All microphones"
 	case MixDelaySum:
 		return "Delay and sum"
 	case MixBeamformer:

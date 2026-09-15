@@ -77,12 +77,21 @@ Inputs (kept out of the repo, `D:\platform-tools\echoshow\linux-image`):
   LineageOS system partition (taken from the bench unit before it was wiped)
 - `techo5_ed25519` / `.pub` — the SSH key
 
-Boot image (kernel + rescue initramfs):
+Boot image (kernel + rescue initramfs). The kernel comes from the LineageOS
+boot image with one device-tree edit: `amzn,mic-downmix` removed, so the
+capture driver hands over both microphones instead of their average
+(`docs/hardware.md`, "Two microphones"):
 
 ```
-bash tools/linux/build-image.sh -o techo5-linux-boot.img
+python tools/linux/patch-dtb.py boot-lineage-18.1-20260904-cronos.img \
+  boot-lineage-18.1-20260904-cronos-nodownmix.img \
+  --delete /soc/spi@1100a000/spi@0 amzn,mic-downmix     # MSYS_NO_PATHCONV=1 in Git Bash
+KERNEL_IMAGE=.../boot-lineage-18.1-20260904-cronos-nodownmix.img \
+  bash tools/linux/build-image.sh -o techo5-linux-boot.img
 fastboot flash boot techo5-linux-boot.img && fastboot continue
 ```
+
+`patch-dtb.py` needs `pip install fdt`.
 
 Root filesystem: built **on the device** with `apk`, because the host has no
 armv7 chroot and a real package database is what makes `apk add bluez` and the

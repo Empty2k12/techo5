@@ -224,6 +224,15 @@ worked with no Android userspace running. What it took, beyond the plan:
   `recovery`, the LineageOS boot image on disk to restore Android.
 - wpa_supplicant 2.11 cannot associate through the vendor driver (RSN
   capability mismatch, see `tools/linux/README.md`); 2.9 can.
+- The "second capture channel" question is answered (hardware.md, "Two
+  microphones"): the Show 5 has two microphones behind an FPGA on SPI, and the
+  kernel driver averaged them into both slots because the device tree says
+  `amzn,mic-downmix`. `tools/linux/patch-dtb.py` deletes the property from the
+  eleven device trees appended to the kernel, `build-image.sh` takes the
+  patched boot image through `KERNEL_IMAGE`, and the daemon now treats the
+  stream as two microphones (`Mics = 2`) with an "All microphones" mix as the
+  cronos default — what the factory driver did, one layer up where the
+  canceller and anything smarter can see both channels.
 - A bare boot leaves the codec unrouted: init selected the DIF1 inputs and set
   the mic gain; the daemon does the same at capture start (`mic.routeInputs`),
   so the rootfs boot script leaves the codec to it.

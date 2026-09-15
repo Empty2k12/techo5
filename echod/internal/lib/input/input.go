@@ -172,8 +172,21 @@ func (d *Device) Abs(code uint16) (AbsInfo, error) {
 	var info AbsInfo
 	// _IOR('E', 0x40 + code, struct input_absinfo): 24 bytes, read direction.
 	req := uintptr(0x80184540 + uint32(code))
-	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, d.f.Fd(), req, uintptr(unsafe.Pointer(&info))); e != 0 {
-		return info, fmt.Errorf("input: EVIOCGABS %#x on %s: %w", code, d.Path, e)
+	// Through the raw connection, not File.Fd(): Fd() puts the descriptor into blocking mode and
+	// takes it out of the runtime's poller, after which Close no longer wakes a blocked Read — a
+	// reader waiting for a touch that never comes would hang the shutdown.
+	rc, err := d.f.SyscallConn()
+	if err != nil {
+		return info, fmt.Errorf("input: %s: %w", d.Path, err)
+	}
+	var errno syscall.Errno
+	if err := rc.Control(func(fd uintptr) {
+		_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, fd, req, uintptr(unsafe.Pointer(&info)))
+	}); err != nil {
+		return info, fmt.Errorf("input: %s: %w", d.Path, err)
+	}
+	if errno != 0 {
+		return info, fmt.Errorf("input: EVIOCGABS %#x on %s: %w", code, d.Path, errno)
 	}
 	return info, nil
 }

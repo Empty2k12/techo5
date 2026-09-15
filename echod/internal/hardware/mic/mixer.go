@@ -23,6 +23,27 @@ type Mixer interface {
 // Center is the middle microphone alone.
 type Center struct{}
 
+// Average is every microphone summed and divided: no steering, so nothing to get wrong, and a
+// little gain against whatever only one of them hears.
+type Average struct{}
+
+func (Average) Mix(mics [][]int16) []int16 {
+	if len(mics) == 0 || len(mics[0]) == 0 {
+		return nil
+	}
+	out := make([]int16, len(mics[0]))
+	for i := range out {
+		acc := 0
+		for _, m := range mics {
+			if i < len(m) {
+				acc += int(m[i])
+			}
+		}
+		out[i] = int16(acc / len(mics))
+	}
+	return out
+}
+
 func (Center) Mix(mics [][]int16) []int16 {
 	if len(mics) <= CenterMic {
 		return nil
@@ -41,7 +62,12 @@ type mix struct {
 var mixes = sync.OnceValue(func() []mix {
 	out := []mix{
 		{config.MixCenter, func() Mixer { return Center{} }},
-		{config.MixDelaySum, func() Mixer { return NewBeamformer() }},
+		{config.MixAll, func() Mixer { return Average{} }},
+	}
+	// Steering needs the ring: the delays are the Dot's geometry, and two microphones have no
+	// direction to resolve.
+	if Mics >= 3 {
+		out = append(out, mix{config.MixDelaySum, func() Mixer { return NewBeamformer() }})
 	}
 
 	w, err := subband.Load(subband.VendorDir)
