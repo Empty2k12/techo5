@@ -381,9 +381,13 @@ session.
    applied digitally after cancellation, because a clipped echo cannot be
    cancelled; averaging or beamforming mics this close buys nothing, so one
    mic + AEC + NS is the end state — which retires the two-mic canceller idea.
-   Our canceller (cancel.go) is simpler; the daemon is static Go without cgo,
-   so this is either a pure-Go port of the linear part or a small C helper
-   fed over a pipe. Worth its own session; near the top of the audio work.
+   DONE the same night as a helper process: `tools/aec/techo5-aec.cpp`
+   (WebRTC AudioProcessing from Alpine's `webrtc-audio-processing-1`, full
+   linear canceller, NS low, high-pass; blocks of 320 mic + 320 loopback
+   samples over pipes, `hardware/mic/webrtc.go`), selectable against the
+   built-in filter in Home Assistant, with fallback. Built for armv7 by
+   `tools/linux/build-aec.sh` in WSL under QEMU. Left to measure: ERLE and
+   wake-word double talk on the bench against the built-in filter.
 9. **Camera, later** (same repo): its kernel patches — Amazon's imgsensor
    struct layouts, the OV02B10 driver for cronos, mirror and timing fixes —
    apply to the tree we build and would give a sensor that streams into the
@@ -392,7 +396,14 @@ session.
    no V4L2 interface, so a Linux camera means driving the ISP pass-through
    from its ioctls and debayering in the daemon. docs/findings.md there is the
    only map of that path. First target if ever: one raw still frame, not
-   video. Well behind the settings sheet and the Dot.
+   video. CHECKED 2026-09-15: the kernel commit we build (8d928c5176cc)
+   already has the OV02B10 driver, `CONFIG_CUSTOM_KERNEL_IMGSENSOR=
+   "ov02b10_mipi_raw"` and the imgsensor fixes — that work was upstreamed —
+   and the running image has `/dev/kd_camera_hw`, `/dev/camera-isp`,
+   `/dev/camera-sysram` with the ISP probed at boot. So nothing to patch; what
+   remains is all userspace: select the sensor through the imgsensor ioctls,
+   configure the ISP pass-through, get one raw frame. `build-kernel.sh` keeps
+   KPATCHED=1 for a patched branch should that ever be needed.
 10. **Echo Dot (biscuit) on the same image**: same MT8163 family, the daemon
    already builds with the `dot` tag. Inventory one Dot (partition table,
    FireOS kernel version/config, Wi-Fi/BT modules and firmware, RAM/eMMC),

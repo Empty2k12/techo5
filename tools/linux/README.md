@@ -190,8 +190,33 @@ bluez-alsa's PCM (`hardware/speaker/sink.go`) instead of the codec. Scanning is
 only on while pairing: the radio shares the antenna with Wi-Fi. `btmon` and
 `btmgmt` are in the image for the console.
 
+## Echo cancellation
+
+Two engines, chosen in Home Assistant (`select.*_microphone_echo_canceller`):
+the daemon's own linear filter, and WebRTC's canceller in `techo5-aec`
+(tools/aec, C++ against Alpine's `webrtc-audio-processing-1`), which the
+daemon feeds 20 ms blocks of microphone and loopback over pipes. The loopback
+channels of the FPGA capture stream are sample-aligned with the microphones,
+so the reported delay is 0 and the plain filter converges. `build-aec.sh`
+compiles the helper for armv7 in WSL inside an Alpine root under QEMU
+(`~/alpine-armv7-sdk`, made on first run); `deploy-rootfs.sh` ships it when
+it is there and the rootfs carries the runtime library. Without the helper the
+select settles on the built-in filter. Measured on the bench: about a third
+of a core on worst-case noise, nothing while nothing plays.
+
+## Screen
+
+The daemon paints everything (hardware/screen, feature/display): the clock,
+the conversation, a splash at boot. A swipe down from the top edge opens the
+settings sheet — Bluetooth (opens the pairing page), brightness (tap to step
+25/50/75/100), auto-brightness, microphone mute, wake word, volume, about
+(name, version, slot, address) and a two-tap restart. Vertical swipes anywhere
+else are the volume; a tap is the action button.
+
 ## Next
 
-A settings sheet on the screen (swipe down from the top edge): Bluetooth,
-brightness, mute, wake word, about. Then the Echo Dot on the same image. See
-`docs/porting-plan.md`.
+The camera: the kernel at this commit already carries the OV02B10 sensor
+driver and the imgsensor fixes (jxlarrea's work, upstreamed into amazon-oss),
+and `/dev/kd_camera_hw` and `/dev/camera-isp` exist on the running image;
+pictures need the ISP driven from its ioctls — `docs/porting-plan.md` item 9.
+Then the Echo Dot on the same image.

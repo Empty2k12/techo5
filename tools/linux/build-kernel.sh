@@ -32,12 +32,16 @@ while [ $# -gt 0 ]; do
 done
 
 cd "$KSRC"
+# KPATCHED=1 allows a tree with local changes (the camera sensor patches on a branch): the
+# release string is then pinned by hand to what the vendor modules were built against.
 head=$(git rev-parse --short=12 HEAD)
-case "$head" in "$KCOMMIT"*) ;; *) echo "kernel tree is at $head, not $KCOMMIT" >&2; exit 1;; esac
-if [ -n "$(git status --porcelain)" ]; then
-	echo "kernel tree is not clean (LOCALVERSION would get -dirty):" >&2
-	git status --short >&2
-	exit 1
+if [ -z "${KPATCHED:-}" ]; then
+	case "$head" in "$KCOMMIT"*) ;; *) echo "kernel tree is at $head, not $KCOMMIT (set KPATCHED=1 for a patched branch)" >&2; exit 1;; esac
+	if [ -n "$(git status --porcelain)" ]; then
+		echo "kernel tree is not clean (LOCALVERSION would get -dirty):" >&2
+		git status --short >&2
+		exit 1
+	fi
 fi
 export ARCH=arm64 CROSS_COMPILE
 mkdir -p "$KOUT"
@@ -47,6 +51,9 @@ make -s O="$KOUT" cronos_defconfig
 scripts/config --file "$KOUT/.config" \
 	-e BT -e BT_BREDR -e BT_LE -e BT_RFCOMM -e BT_RFCOMM_TTY \
 	-e BT_HCIVHCI -e BT_HCIUART -e BT_HCIUART_H4 -d BT_DEBUGFS
+if [ -n "${KPATCHED:-}" ]; then
+	scripts/config --file "$KOUT/.config" -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g$KCOMMIT"
+fi
 make -s O="$KOUT" olddefconfig
 grep -E "^CONFIG_(BT|BT_HCIVHCI|LOCALVERSION_AUTO)=" "$KOUT/.config"
 make -j"$(nproc)" O="$KOUT" Image.gz-dtb
