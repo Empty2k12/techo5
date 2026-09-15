@@ -353,11 +353,52 @@ session.
    the rootfs (`t5_bt_up`). A pair of earbuds and a phone paired;
    a tone played to the buds through `bluealsa:DEV=…,PROFILE=a2dp`. Quirks:
    inquiry/LE scans return nothing until hci0 is power-cycled once after
-   bring-up; bluealsa must start after bluetoothd. Still to do: the daemon's
-   playback into the bluealsa PCM when buds are connected, a pairing agent and
-   on-screen pairing UI, HA controls, auto-reconnect at boot, bind mounts for
-   the bond store in the shipped image.
+   bring-up (t5_bt_up does it); bluealsa must start after bluetoothd. **Daemon
+   side done the same evening (v0.1.5-dev8/dev9):** `feature/btaudio` is the
+   pairing agent (BlueZ D-Bus, `lib/bluez`) and the player (`lib/bluealsa`
+   PCM → `hardware/speaker/sink.go`; the codec keeps getting silence for pace,
+   the sink gets the audio, stereo, untuned, its own dB curve); pairing mode
+   from HA (`switch.*_bluetooth_pairing`) or a swipe left on the clock lists
+   audio devices on the screen, a tap pairs+trusts+connects; `sensor.*_bluetooth_audio`,
+   reconnect/disconnect buttons; the remembered (or any bonded) device is tried
+   at start-up. A connection the buds initiate gives a transport bluetoothd will
+   not let us acquire (NotAuthorized), so after two refusals the daemon drops
+   and remakes the link itself. Verified: HA announcement heard in the wireless
+   earbuds (AAC, 48 kHz). Bonds and bluez-alsa state on userdata. Next:
+   the settings sheet (below) absorbs the pairing page; media metadata.
+
+   Settings sheet (user request 2026-09-15): swipe down from the top edge
+   opens it — Bluetooth, brightness + auto, mute, wake word/volume, about
+   (name, address, version, slot, restart). Vertical swipes elsewhere stay
+   volume.
 7. Second unit rollout with the installer rewritten for the Linux image.
+8. **Echo cancellation, WebRTC grade** (from jxlarrea/lineageos-echo-show-camera,
+   docs/echo-cancellation.md, measured on crown with the same FPGA front end):
+   the loopback channels are a sample-aligned far end and WebRTC's full linear
+   canceller on them removes 38–44 dB at ~13% of a core; low suppression with
+   the extended filter is the double-talk balance that keeps the wake word
+   working; analog mic gain must stay modest (our MICPGA 40) with the boost
+   applied digitally after cancellation, because a clipped echo cannot be
+   cancelled; averaging or beamforming mics this close buys nothing, so one
+   mic + AEC + NS is the end state — which retires the two-mic canceller idea.
+   Our canceller (cancel.go) is simpler; the daemon is static Go without cgo,
+   so this is either a pure-Go port of the linear part or a small C helper
+   fed over a pipe. Worth its own session; near the top of the audio work.
+9. **Camera, later** (same repo): its kernel patches — Amazon's imgsensor
+   struct layouts, the OV02B10 driver for cronos, mirror and timing fixes —
+   apply to the tree we build and would give a sensor that streams into the
+   ISP. Everything past that is Android (MediaTek's camera HAL, the display
+   pipeline library, cmdq) and does not exist in our image; the MT8163 ISP has
+   no V4L2 interface, so a Linux camera means driving the ISP pass-through
+   from its ioctls and debayering in the daemon. docs/findings.md there is the
+   only map of that path. First target if ever: one raw still frame, not
+   video. Well behind the settings sheet and the Dot.
+10. **Echo Dot (biscuit) on the same image**: same MT8163 family, the daemon
+   already builds with the `dot` tag. Inventory one Dot (partition table,
+   FireOS kernel version/config, Wi-Fi/BT modules and firmware, RAM/eMMC),
+   first boot = rescue initramfs on the FireOS kernel flashed to recovery, then
+   the slot store on its system partition. The Wi-Fi driver loading is the
+   unknown that decides it.
 
 ## Ground rules
 

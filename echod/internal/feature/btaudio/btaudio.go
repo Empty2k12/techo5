@@ -234,7 +234,30 @@ func (f *Feature) tryRemembered(ctx context.Context) {
 	if addr == "" {
 		return
 	}
-	f.connect(ctx, addr, false)
+	// Earbuds that were just switched on refuse the first attempt while they settle, so a few
+	// tries, spaced out; ones in their case never answer, and that is the end of it.
+	for attempt := 1; attempt <= 3; attempt++ {
+		f.connect(ctx, addr, false)
+		if d, ok := f.device(addr); ok && d.Connected {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(15 * time.Second):
+		}
+	}
+}
+
+// device looks a device up by address.
+func (f *Feature) device(addr string) (bluez.Device, bool) {
+	f.mu.Lock()
+	a := f.adapter
+	f.mu.Unlock()
+	if a == nil {
+		return bluez.Device{}, false
+	}
+	return a.Device(addr)
 }
 
 // remembered is the device to reach for: the one saved here, or failing that the first audio
