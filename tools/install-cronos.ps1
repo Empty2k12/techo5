@@ -67,8 +67,8 @@ foreach ($w in $WakeWords) {
     Write-Host "   $w"
 }
 
-Write-Host "== stopping anything that holds the audio devices"
-Sh 'setprop ctl.stop techo5 2>/dev/null; for p in $(pidof echod techo5); do kill $p; done; am force-stop com.huskerminion.showassist >/dev/null 2>&1; exit 0' | Out-Null
+Write-Host "== stopping a running daemon"
+Sh 'setprop ctl.stop techo5 2>/dev/null; for p in $(pidof echod techo5); do kill $p; done; exit 0' | Out-Null
 
 Write-Host "== /data/misc/techo5"
 Sh 'mkdir -p /data/misc/techo5/models /data/techo5; chmod 700 /data/misc/techo5' | Out-Null

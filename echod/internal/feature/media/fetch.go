@@ -1,14 +1,17 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/hajimehoshi/go-mp3"
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
@@ -55,20 +58,70 @@ func Fetch(ctx context.Context, url string) ([]int16, error) {
 	if err != nil {
 		return nil, err
 	}
-	samples, f, err := monoPCM(body)
+	var (
+		samples []int16
+		f       wavFormat
+	)
+	switch {
+	case len(body) >= 12 && string(body[0:4]) == "RIFF":
+		samples, f, err = monoPCM(body)
+	case isMP3(body, resp.Header.Get("Content-Type")):
+		samples, f, err = monoMP3(body)
+	default:
+		head := body
+		if len(head) > 4 {
+			head = head[:4]
+		}
+		err = fmt.Errorf("unrecognised audio: %d bytes, content-type %q, starts %q", len(body), resp.Header.Get("Content-Type"), string(head))
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w (from %s)", err, url)
 	}
 	if f.channels != 1 || f.rate != speaker.VoiceRate {
-		slog.Warn("announcement arrived in a format other than the one asked for; converted",
-			"rate", f.rate, "channels", f.channels, "bits", f.bits, "url", url)
+		slog.Info("announcement converted", "from", fmt.Sprintf("%d Hz, %d ch, %s", f.rate, f.channels, f.codec), "url", url)
 	}
 	return samples, nil
 }
 
-// wavFormat is what the fmt chunk said.
+// isMP3 recognises what Home Assistant's tts_proxy serves when it does not convert: an MP3, with
+// or without an ID3 tag in front.
+func isMP3(body []byte, contentType string) bool {
+	if strings.HasPrefix(contentType, "audio/mpeg") || strings.HasPrefix(contentType, "audio/mp3") {
+		return true
+	}
+	if len(body) >= 3 && string(body[:3]) == "ID3" {
+		return true
+	}
+	return len(body) >= 2 && body[0] == 0xFF && body[1]&0xE0 == 0xE0
+}
+
+// monoMP3 decodes an MP3 to one channel at speaker.VoiceRate. go-mp3 always yields 16-bit stereo at
+// the file's rate.
+func monoMP3(body []byte) ([]int16, wavFormat, error) {
+	f := wavFormat{channels: 2, bits: 16, codec: "mp3"}
+	d, err := mp3.NewDecoder(bytes.NewReader(body))
+	if err != nil {
+		return nil, f, fmt.Errorf("mp3: %w", err)
+	}
+	f.rate = d.SampleRate()
+	pcm, err := io.ReadAll(d)
+	if err != nil {
+		return nil, f, fmt.Errorf("mp3: %w", err)
+	}
+	frames := len(pcm) / 4
+	mono := make([]int16, frames)
+	for i := range mono {
+		l := int(int16(binary.LittleEndian.Uint16(pcm[i*4:])))
+		r := int(int16(binary.LittleEndian.Uint16(pcm[i*4+2:])))
+		mono[i] = int16((l + r) / 2)
+	}
+	return toVoiceRate(mono, f.rate), f, nil
+}
+
+// wavFormat is what the container said about the audio.
 type wavFormat struct {
 	channels, rate, bits int
+	codec                string
 }
 
 // monoPCM takes 16-bit samples out of a RIFF/WAVE body, walking the chunks rather than assuming a
@@ -80,7 +133,7 @@ type wavFormat struct {
 // Sizes are handled as uint64. A 32-bit int cannot hold a large RIFF size, and a chunk claiming
 // one turns negative, which slips past a bounds check and panics on the slice.
 func monoPCM(body []byte) ([]int16, wavFormat, error) {
-	f := wavFormat{channels: 1, rate: speaker.VoiceRate, bits: 16}
+	f := wavFormat{channels: 1, rate: speaker.VoiceRate, bits: 16, codec: "wav"}
 	if len(body) < 12 || string(body[0:4]) != "RIFF" || string(body[8:12]) != "WAVE" {
 		return nil, f, fmt.Errorf("not a WAVE file: %d bytes", len(body))
 	}

@@ -4,3 +4,7 @@ internal/alsa
   Derived from EchoLocal, https://github.com/ygelfand/echolocal
   Copyright (c) 2026 Yuri Gelfand — MIT License
   Files: alsa.go, playback.go, mixer.go (raw /dev/snd ioctl ALSA client).
+
+echod (dependency)
+  github.com/hajimehoshi/go-mp3 — Apache License 2.0
+  MP3 decoding for announcements Home Assistant serves unconverted.
