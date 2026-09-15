@@ -105,6 +105,23 @@ playback while listening.
 
 Per-unit microphone calibration is in `/proc/idme/miccal.0` … `miccal.3`.
 
+### Kernel panic hazard: playback ring size
+
+The MediaTek playback driver (`mtk_pcm_I2S0dl1`, which device 23 rides on) accepts any
+`hw_params` and then faults in `mtk_pcm_I2S0dl1_copy` (`__arch_copy_from_user`, address
+`ffffff8009eb0004`) when the ring is 1024 × 4 frames = 16 KB. The fault is a **kernel panic
+and reboot** (`sys.boot.reason = kernel_panic,fatal_exception`). 768 × 4 = 12 KB plays cleanly
+from `cmd/audioprobe`. Reproduced three times on 2026-09-14; the console log lands in
+`/sys/fs/pstore/console-ramoops`.
+
+Open: the daemon's `tools play` at 768 × 4 panicked once more in the same place while
+`audioprobe` at 768 × 4 played fine in the same session. The difference between the two
+processes is not yet understood; do not run daemon playback on a Show that is in use until it
+is.
+
+The capture side is a separate Amazon driver, `amzn_mt_spi_pcm` (the mic array arrives over
+SPI, not the AFE). It rejects a 256 × 10 ring with `EINVAL` and accepts 320 × 8.
+
 ### Warning
 
 Do **not** run `dumpsys media.audio_flinger` on this device. It null-derefs in

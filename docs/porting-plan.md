@@ -15,7 +15,12 @@ captures and plays through the raw devices with no vendor HAL involvement.
 Channel map established: mic, mic copy, loopback L, loopback R. Build with
 `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ./cmd/audioprobe`.
 
-Step 2 — port the EchoLocal daemon (`echod`, pure Go, MIT) to `cronos`:
+Step 2 — in progress: the daemon is vendored under `echod/` and builds for cronos (default)
+and the Dot (`-tags dot`). On the Show, `tools mic` captures and `tools mute` reads the latch.
+`tools play` panics the kernel (see hardware.md); the daemon's playback path is blocked on
+that. Not yet tried: `tools mute on/off`, `run` end to end, Home Assistant discovery.
+
+The port covers:
 
 - New device layout: paths, board name, model string.
 - `hardware/mic`: open `pcmC0D22c` as S24_3LE, 4 channels, 16 kHz; ch 0 is
