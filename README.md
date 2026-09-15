@@ -23,7 +23,12 @@ update.
 
 ## Status
 
-Early. Today the working path on this hardware is:
+Early, but talking. The ported daemon (`echod/`) runs on a Show, appears in Home Assistant
+as an ESPHome voice satellite, and completes voice turns: wake word on the device,
+transcription and reply through Home Assistant, speech from the speaker. It is started by hand
+on a bench unit with Android's framework stopped; see `docs/porting-plan.md` for what is left.
+
+For daily use the working path on this hardware is still:
 
 - bootloader unlock with [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/),
 - [LineageOS 18.1 (unofficial)](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/),

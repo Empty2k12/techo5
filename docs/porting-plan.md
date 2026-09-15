@@ -15,10 +15,26 @@ captures and plays through the raw devices with no vendor HAL involvement.
 Channel map established: mic, mic copy, loopback L, loopback R. Build with
 `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ./cmd/audioprobe`.
 
-Step 2 — in progress: the daemon is vendored under `echod/` and builds for cronos (default)
-and the Dot (`-tags dot`). On the Show, `tools mic` captures and `tools mute` reads the latch.
-`tools play` panics the kernel (see hardware.md); the daemon's playback path is blocked on
-that. Not yet tried: `tools mute on/off`, `run` end to end, Home Assistant discovery.
+Step 2 — **working end to end** (2026-09-14). The daemon is vendored under `echod/` and builds
+for cronos (default) and the Dot (`-tags dot`). On the Show it captures, plays, detects the wake
+word (microWakeWord, on the CPU at ~27 % of one core), streams to Home Assistant, and speaks
+the reply. Home Assistant discovers it over zeroconf as an ESPHome device ("Echo Show 3D4E5F",
+manufacturer TECHO5) with 102 entities. First complete turn: "Hey Jarvis, what time is it?" →
+"7:11 PM", at a sensible volume.
+
+What it took, all in `docs/hardware.md`: hold an AFE node so the DL1 driver uses DRAM, never
+toggle the amp switch, treat the mute latch as one-way, decode announcement WAVs by header,
+and keep Android's audio stack off the devices — for now by stopping the framework
+(`tools/bench-nofw.sh`).
+
+Still to do for M1:
+
+- Start the daemon from init on boot instead of by hand, and keep Android's audio stack away
+  from the devices without stopping the framework (a null primary audio HAL for Android).
+- Provisioning: name, key and wake models are placed by hand today (`/data/misc/techo5/`).
+- Volume curve: the middle step is a touch loud; pull the curve down a few dB.
+- Understand the second capture channel (identical copy of the mic) and whether a second mic
+  exists.
 
 The port covers:
 

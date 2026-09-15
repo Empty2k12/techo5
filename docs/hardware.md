@@ -125,6 +125,38 @@ on this device) works. `cmd/audioprobe -hold` and the daemon's speaker do this; 
 Ring geometry: 768 × 4 (12 KB, the vendor HAL's period at twice its depth) is what the
 daemon uses; the HAL itself runs 768 × 2.
 
+### Do not toggle `Ext_Speaker_Amp_Switch`
+
+On cronos this MediaTek control drives the GPIO wired to the MAX98396's reset (`gpio-392`,
+`MAX98396_RESET`). Switching it Off and On resets the amplifier and wipes the register setup the
+codec driver did at probe; the driver's `init_done` flag means it never repeats it, so the
+speaker stays silent, with the DAC still "powering up" normally in the log, until a reboot.
+Found 2026-09-14 when the daemon's speaker start sequence did exactly that. Leave the amplifier
+as the kernel brought it up; volume is applied in software.
+
+### Android's audio stack cannot share the devices
+
+With the daemon holding `pcmC0D22c`/`pcmC0D23p` on LineageOS, the vendor HAL fails to open
+them, `audioserver` crash-loops once a second, `system_server` dies with it, and the framework
+restart hangs until the daemon lets go. Stopping `audioserver` instead makes AudioService block
+system_server's main thread and the watchdog kills it a few minutes later; the class restart
+then brings audioserver back into the crash loop. Working bench mode (`tools/bench-nofw.sh`):
+stop `zygote` (framework, launcher, boot animation), `audioserver`, `bootanim` and
+`vendor.audio-hal`; native services, Wi-Fi, adb and the daemon keep running, free memory rises
+from ~355 MB to ~640 MB. Android's connectivity service removes the policy-routing rule for the
+Wi-Fi table when it dies (`ip rule` falls through to `unreachable`); adding `ip rule add from
+all lookup <wlan0 table> pref 5000` restores it. DHCP renewal is the framework's, so the lease
+will lapse in this mode. Reboot to get Android back.
+
+A permanent Android+daemon arrangement needs a null audio HAL for Android
+(`audio.primary.default.so` is on the device) so audioserver never touches the hardware; that
+is M2/M3 work.
+
+### Mute button
+
+`gpio-privacy-button` emits KEY_POWER on LineageOS and nothing else; it is silent and has no
+on-screen effect.
+
 The capture side is a separate Amazon driver, `amzn_mt_spi_pcm` (the mic array arrives over
 SPI, not the AFE). It rejects a 256 × 10 ring with `EINVAL` and accepts 320 × 8.
 
