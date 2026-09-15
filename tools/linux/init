@@ -1,65 +1,84 @@
-#!/bin/sh
+#!/bin/busybox.static sh
 # TECHO5 first-boot init for the Linux image (porting plan M4, step 1).
 #
-# Runs as PID 1 from the initramfs on the LineageOS 4.9 kernel. It does the
-# minimum: populate /dev (the kernel has no devtmpfs), clear the recovery
-# bootloader message so the next reboot is a normal Android boot, keep a boot
-# log on the userdata partition where Android can read it afterwards, paint
-# the panel, offer a root shell over USB serial (CDC ACM), try the vendor
-# Wi-Fi module, and reboot into Android on its own after a while unless told
-# to stay. Everything is best effort and logged; nothing here is permanent.
+# Runs as PID 1 from the initramfs. It does the minimum: populate /dev (the
+# kernel has no devtmpfs), clear the recovery bootloader message so the next
+# reboot is a normal Android boot, leave breadcrumbs and a boot log in the
+# spare area of the MISC partition (readable later from TWRP or Android with
+# tools/linux/readmisc.sh) and on userdata, paint the panel, offer a root shell
+# over USB serial (CDC ACM), try the vendor Wi-Fi module, and reboot into
+# Android on its own after a while unless told to stay. Everything is best
+# effort and logged; nothing here is permanent.
+#
+# The interpreter is the static busybox so PID 1 does not depend on the
+# dynamic loader; everything after that uses the normal Alpine busybox.
 
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+BB=/bin/busybox.static
+MISC=/dev/mmcblk0p8          # static node from the initramfs, major 179
 STAY_MINUTES=${STAY_MINUTES:-15}
 
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t tmpfs -o mode=0755 tmpfs /dev
-mkdir -p /dev/pts /dev/graphics /run /tmp
-mount -t devpts devpts /dev/pts
-mount -t tmpfs tmpfs /run
-mount -t tmpfs tmpfs /tmp
-mdev -s
-[ -e /dev/fb0 ] && ln -sf /dev/fb0 /dev/graphics/fb0
-echo 4 4 1 7 > /proc/sys/kernel/printk
+# Everything this script prints goes to the kernel log, which pstore keeps
+# across a reboot (console-ramoops).
+exec > /dev/kmsg 2>&1
+CRUMB=0
+crumb() {
+	# one 512-byte block per stage, starting at MISC byte offset 4096
+	CRUMB=$((CRUMB+1))
+	echo "techo5 crumb $CRUMB: $*"
+	printf 'TECHO5 %02d %s\n' "$CRUMB" "$*" | $BB dd of=$MISC bs=512 seek=$((7+CRUMB)) count=1 conv=notrunc,sync 2>/dev/null
+}
+crumb "init started, kernel $($BB uname -r) $($BB uname -m)"
 
-log() { echo "techo5-init: $*" | tee /dev/kmsg >> /tmp/boot.log 2>/dev/null; }
-log "TECHO5 Linux init starting, kernel $(uname -r) $(uname -m)"
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+crumb "proc and sys mounted"
 
 # --- Recovery bootloader message: clear it first, so a crash later still
 # leaves the unit booting Android next time. Android writes "boot-recovery"
 # into the first 32 bytes of MISC for `reboot recovery`; recovery zeroes it.
-MISC=/dev/mmcblk0p8
-if [ -e "$MISC" ]; then
-	dd if=/dev/zero of=$MISC bs=32 count=1 conv=notrunc 2>/dev/null && log "cleared bootloader message in MISC"
-else
-	log "no $MISC node; bootloader message not cleared"
-fi
+$BB dd if=/dev/zero of=$MISC bs=32 count=1 conv=notrunc 2>/dev/null && crumb "cleared bootloader message in MISC"
+
+$BB mount -t tmpfs -o mode=0755 tmpfs /dev
+$BB mkdir -p /dev/pts /dev/graphics /run /tmp
+$BB mount -t devpts devpts /dev/pts
+$BB mount -t tmpfs tmpfs /run
+$BB mount -t tmpfs tmpfs /tmp
+$BB mdev -s
+$BB mknod -m 600 /dev/mmcblk0p8 b 179 8 2>/dev/null
+[ -e /dev/fb0 ] && $BB ln -sf /dev/fb0 /dev/graphics/fb0
+echo 7 4 1 7 > /proc/sys/kernel/printk
+crumb "dev populated: $($BB ls /dev | $BB wc -l) nodes, fb0=$([ -e /dev/fb0 ] && echo yes || echo no), ttyGS0=$([ -e /dev/ttyGS0 ] && echo yes || echo no)"
+
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+log() { echo "techo5-init: $*"; echo "$*" >> /tmp/boot.log; }
 
 # --- Persistent log on userdata (ext4, the Android /data partition).
 mkdir -p /data /android
 if mount -t ext4 -o noatime /dev/mmcblk0p16 /data 2>/dev/null; then
 	mkdir -p /data/techo5-linux
 	LOGDIR=/data/techo5-linux
-	log "userdata mounted, logging to $LOGDIR"
+	crumb "userdata mounted"
 else
 	LOGDIR=/tmp
-	log "userdata mount failed, logging to tmp only"
+	crumb "userdata mount failed"
 fi
-mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /android 2>/dev/null && log "android system mounted read-only at /android"
+mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /android 2>/dev/null && crumb "android system mounted" || crumb "android system mount failed"
 [ -d /android/system/vendor ] && ln -sfn /android/system/vendor /vendor
 
 snapshot() {
 	{
 		echo "=== $(date) uptime $(cut -d' ' -f1 /proc/uptime)"
 		cat /tmp/boot.log
-		echo "--- dmesg tail"; dmesg | tail -40
+		echo "--- dmesg tail"; dmesg | tail -60
 		echo "--- ip link"; ip link 2>&1
 		echo "--- fb"; cat /sys/class/graphics/fb0/virtual_size 2>&1
 		echo "--- udc"; ls /sys/class/udc 2>&1; cat /sys/kernel/config/usb_gadget/g1/UDC 2>&1
 		echo "--- mounts"; cat /proc/mounts
 		echo "--- mem"; head -3 /proc/meminfo
-	} > $LOGDIR/boot.log.new 2>&1 && mv $LOGDIR/boot.log.new $LOGDIR/boot.log
+	} > /tmp/snapshot 2>&1
+	cp /tmp/snapshot $LOGDIR/boot.log 2>/dev/null
+	# also into MISC at byte offset 64 KiB, up to 120 KiB, so it survives without any filesystem
+	head -c 122880 /tmp/snapshot | dd of=$MISC bs=512 seek=128 conv=notrunc 2>/dev/null
 	sync
 }
 snapshot
@@ -67,11 +86,38 @@ snapshot
 # --- Panel: paint the test screen with the clock ticking, as proof of life.
 if [ -x /usr/local/bin/fbprobe ]; then
 	/usr/local/bin/fbprobe -hold ${STAY_MINUTES}m > /tmp/fbprobe.log 2>&1 &
-	log "fbprobe started"
+	sleep 2
+	crumb "fbprobe: $(head -c 200 /tmp/fbprobe.log | tr '\n' ' ')"
 fi
 
 # --- USB gadget: one CDC ACM serial function, root shell on it.
-if mount -t configfs none /sys/kernel/config 2>/dev/null; then
+# The 4.9.77 (TWRP) kernel has the legacy Android gadget (/sys/class/android_usb),
+# the 4.9.337 (LineageOS) kernel has configfs; support both.
+A=/sys/class/android_usb/android0
+if [ -d $A ]; then
+	echo 0 > $A/enable
+	echo 1d6b > $A/idVendor
+	echo 0104 > $A/idProduct
+	echo TECHO5 > $A/iManufacturer
+	echo "Echo Show 5 Linux" > $A/iProduct
+	echo techo5 > $A/iSerial
+	echo acm > $A/functions
+	[ -e $A/f_acm/instances ] && echo 1 > $A/f_acm/instances
+	if echo 1 > $A/enable; then
+		crumb "legacy android_usb gadget enabled (acm), state=$(cat $A/state 2>/dev/null)"
+	else
+		crumb "legacy android_usb gadget enable failed; functions=$(cat $A/functions 2>/dev/null)"
+	fi
+	(
+		while true; do
+			[ -e /dev/ttyGS0 ] || mdev -s
+			if [ -e /dev/ttyGS0 ]; then
+				setsid sh -c 'exec sh -l < /dev/ttyGS0 > /dev/ttyGS0 2>&1'
+			fi
+			sleep 2
+		done
+	) &
+elif mount -t configfs none /sys/kernel/config 2>/dev/null; then
 	G=/sys/kernel/config/usb_gadget/g1
 	mkdir -p $G && cd $G || true
 	echo 0x1d6b > idVendor
@@ -80,20 +126,21 @@ if mount -t configfs none /sys/kernel/config 2>/dev/null; then
 	mkdir -p strings/0x409
 	echo "TECHO5" > strings/0x409/manufacturer
 	echo "Echo Show 5 Linux" > strings/0x409/product
-	echo "$(cat /proc/device-tree/serial-number 2>/dev/null || echo techo5)" > strings/0x409/serialnumber
+	echo "techo5" > strings/0x409/serialnumber
 	mkdir -p configs/c.1/strings/0x409
 	echo "acm" > configs/c.1/strings/0x409/configuration
 	mkdir -p functions/acm.usb0
 	ln -sf $G/functions/acm.usb0 configs/c.1/acm.usb0
 	UDC=$(ls /sys/class/udc | head -1)
 	if [ -n "$UDC" ]; then
-		echo "$UDC" > UDC && log "usb gadget bound to $UDC (acm)"
+		echo "$UDC" > UDC && crumb "usb gadget bound to $UDC (acm)" || crumb "usb gadget bind to $UDC failed"
 	else
-		log "no UDC found; usb gadget not started"
+		crumb "no UDC found; usb gadget not started"
 	fi
 	cd /
 	(
 		while true; do
+			[ -e /dev/ttyGS0 ] || mdev -s
 			if [ -e /dev/ttyGS0 ]; then
 				setsid sh -c 'exec sh -l < /dev/ttyGS0 > /dev/ttyGS0 2>&1'
 			fi
@@ -101,26 +148,25 @@ if mount -t configfs none /sys/kernel/config 2>/dev/null; then
 		done
 	) &
 else
-	log "configfs mount failed; no usb serial"
+	crumb "configfs mount failed; no usb serial"
 fi
 
 # --- Wi-Fi: load the vendor module from the Android system partition.
-# firmware_class.path=/vendor/firmware comes from the boot image command line.
+# firmware_class.path=/vendor/firmware comes from the kernel command line.
 WLAN=/android/system/vendor/lib/modules/mt76x8_wlan.ko
 if [ -e "$WLAN" ]; then
 	if insmod $WLAN 2>/tmp/insmod.err; then
-		log "mt76x8_wlan loaded"
 		sleep 5
-		ip link show wlan0 >/dev/null 2>&1 && log "wlan0 present" || log "wlan0 not present after insmod"
+		ip link show wlan0 >/dev/null 2>&1 && crumb "mt76x8_wlan loaded, wlan0 present" || crumb "mt76x8_wlan loaded, no wlan0"
 	else
-		log "insmod mt76x8_wlan failed: $(cat /tmp/insmod.err)"
+		crumb "insmod mt76x8_wlan failed: $(cat /tmp/insmod.err)"
 	fi
 else
-	log "vendor wlan module not found at $WLAN"
+	crumb "vendor wlan module not found at $WLAN"
 fi
 
 snapshot
-log "ready; touch /tmp/stay on the serial shell to cancel the ${STAY_MINUTES}-minute reboot"
+crumb "ready; reboot to Android in ${STAY_MINUTES} min unless /tmp/stay exists"
 
 # --- Keep logging, then reboot into Android unless asked to stay.
 i=0
@@ -130,11 +176,11 @@ while true; do
 	snapshot
 	if [ -e /tmp/stay ]; then continue; fi
 	if [ $((i*30)) -ge $((STAY_MINUTES*60)) ]; then
-		log "time is up, rebooting into Android"
+		crumb "time is up, rebooting into Android"
 		snapshot
 		umount /android 2>/dev/null
 		umount /data 2>/dev/null
 		sync
-		reboot -f
+		$BB reboot -f
 	fi
 done

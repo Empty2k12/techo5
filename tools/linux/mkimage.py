@@ -65,6 +65,9 @@ class Cpio:
     def chardev(self, name, major, minor, mode=0o600):
         self._entry(name, stat.S_IFCHR | mode, rdev=(major, minor))
 
+    def blockdev(self, name, major, minor, mode=0o600):
+        self._entry(name, stat.S_IFBLK | mode, rdev=(major, minor))
+
     def add_parents(self, name):
         parts = name.strip("/").split("/")[:-1]
         for i in range(1, len(parts) + 1):
@@ -158,6 +161,9 @@ def main():
     c = Cpio()
     c.dir("dev"); c.chardev("dev/console", 5, 1); c.chardev("dev/null", 1, 3, 0o666)
     c.chardev("dev/kmsg", 1, 11); c.chardev("dev/fb0", 29, 0)
+    # eMMC partitions init needs before mdev runs: MISC (breadcrumbs), system, userdata
+    for n in (8, 12, 16):
+        c.blockdev(f"dev/mmcblk0p{n}", 179, n)
     c.dir("proc"); c.dir("sys"); c.dir("tmp", 0o1777); c.dir("run"); c.dir("data"); c.dir("android")
     c.add_tar(a.rootfs)
     init = open(a.init, "rb").read().replace(b"\r\n", b"\n")
@@ -169,8 +175,8 @@ def main():
         c.file(dest, open(src, "rb").read(), 0o755)
     raw = c.finish()
     names = verify_cpio(raw)
-    if "init" not in names or "bin/busybox" not in names:
-        sys.exit("initramfs is missing /init or /bin/busybox")
+    if "init" not in names or "bin/busybox" not in names or "bin/busybox.static" not in names:
+        sys.exit("initramfs is missing /init, /bin/busybox or /bin/busybox.static (pass --add busybox.static=/bin/busybox.static)")
     rd = gzip.compress(raw, 9)
     if a.ramdisk_out:
         open(a.ramdisk_out, "wb").write(rd)
