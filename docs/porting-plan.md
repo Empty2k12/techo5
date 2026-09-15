@@ -345,10 +345,18 @@ session.
    semantics; the initramfs stays as the rescue environment. Still open: the
    daemon's manifest could carry a rootfs tarball so a slot update rides the
    same Home Assistant update entity as a binary update.
-6. **Bluetooth** (earbuds, user requirement 2026-09-15): rebuild the kernel with
-   `CONFIG_BT` + `hci_vhci`, bridge `/dev/stpbt`, BlueZ + `bluez-alsa` (or
-   PipeWire) as an A2DP source; route the daemon's playback to the earbuds when
-   connected. Pairing driven from the on-screen UI.
+6. **Bluetooth** (earbuds, user requirement 2026-09-15) — **radio, stack and
+   A2DP proven 2026-09-15 13:38**: the kernel rebuilt at the LineageOS commit
+   with `CONFIG_BT` + `hci_vhci` (`tools/linux/build-kernel.sh`; the vendor
+   Wi-Fi/BT modules still load), `cmd/btbridge` turning the vendor driver's
+   `/dev/stpbt` into hci0 with the factory address, BlueZ 5.86 + bluez-alsa in
+   the rootfs (`t5_bt_up`). A pair of earbuds and a phone paired;
+   a tone played to the buds through `bluealsa:DEV=…,PROFILE=a2dp`. Quirks:
+   inquiry/LE scans return nothing until hci0 is power-cycled once after
+   bring-up; bluealsa must start after bluetoothd. Still to do: the daemon's
+   playback into the bluealsa PCM when buds are connected, a pairing agent and
+   on-screen pairing UI, HA controls, auto-reconnect at boot, bind mounts for
+   the bond store in the shipped image.
 7. Second unit rollout with the installer rewritten for the Linux image.
 
 ## Ground rules
