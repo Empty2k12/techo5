@@ -86,14 +86,61 @@ daemon: a card driven by `assist_satellite.<name>_assist_satellite` shows "Liste
 Playing and volume tiles and the station chips target the daemon's `media_player`. All of that
 is Home Assistant configuration, no device code.
 
-Pick one and keep it thin:
+Direction chosen (2026-09-15): the daemon gets its **own** display layer, so the
+end device runs no Android UI at all. ShowAssist stays only as the interim screen
+until that layer works. Where the daemon-owned layer runs is the open question
+below.
 
-1. A minimal Android kiosk app (WebView of a Home Assistant dashboard,
-   Browser Mod for per-device control), or
-2. ShowAssist with its satellite disabled, display only.
+### What was learned reaching for the panel from userspace
 
-Expose screen state (on/off, brightness, current path) through the same
-ESPHome device so Home Assistant sees one device, not two.
+The goal was to paint the panel directly from a small Go program
+(`internal/mtkdisp`, `cmd/dispprobe`), with the Android framework stopped. The
+kernel is MediaTek's 4.9 `mtkfb`/`mtk_disp_mgr` stack (sources at
+`amazon-oss/android_kernel_amazon_mt8163`, branch `lineage-18.1`). Findings, all
+verified on the bench unit:
+
+- **The Linux framebuffer is a dead end.** `/dev/graphics/fb0` reports
+  `smem_len = 0`; the driver allocates the real buffer itself and exposes it only
+  through the overlay path, so `mmap` on fb0 is refused at every size, with or
+  without SurfaceFlinger running. `cmd/fbprobe` records this.
+- **The display-manager API works up to the last step.** `/dev/mtk_disp_mgr`
+  takes a 32-bit compat ABI; the struct sizes were confirmed against the running
+  kernel by probing which argument size each ioctl accepts (`ScanIoctlSize`).
+  `internal/mtkdisp` creates the primary session, reads its info (480×960,
+  ~60 Hz, physical 63×125 mm), allocates ION multimedia buffers that get valid
+  M4U addresses (get-phys returns non-zero), switches the session between direct
+  link and decouple (which visibly moves the RDMA registers), reads back the
+  overlay/RDMA registers, captures what the panel is scanning out, and waits on
+  vsync — all working.
+- **The overlay config never latches.** With a valid buffer address handed to
+  the overlay (`src_phy_addr`, so the kernel's own fence lookup is bypassed),
+  `SET_INPUT_BUFFER` + `TRIGGER_SESSION` return success and the CMDQ record shows
+  the config tasks executing for our process — yet `OVL0 src_con` stays 0 and the
+  layer-0 address stays at the boot framebuffer. The frame config is accepted and
+  submitted but is never committed to the overlay registers. That commit is the
+  CMDQ trigger-loop / display-mutex machinery the hardware composer builds at its
+  own init; a bare session join does not reproduce it, and reconstructing it means
+  reimplementing most of `primary_display.c` against undocumented CMDQ tokens.
+
+Conclusion: driving this vendor stack from userspace is a poor investment. The
+clean way to a daemon-owned panel is the mainline **DRM/KMS** driver for MT8163
+(`mediatek-drm`): standard atomic modeset with dumb buffers, no CMDQ, no compat
+guessing. That belongs in the Linux image (M4). So the display layer is folded
+into M4, and until then the screen stays on ShowAssist (below).
+
+`internal/mtkdisp`, `cmd/dispprobe` and `cmd/fbprobe` are kept as the record of
+the vendor path and a working probe of the panel geometry, capture and registers.
+
+### Interim screen (in place since 2026-09-14)
+
+ShowAssist stays on the screen as a display-only web view of the `echo-show`
+dashboard (its own satellite role is disabled), and the dashboard reacts to the
+daemon: a card driven by `assist_satellite.<name>_assist_satellite` shows
+"Listening…", "Thinking…" with the transcript, then transcript and reply while
+the answer plays; the Now Playing and volume tiles and the station chips target
+the daemon's `media_player`. All of that is Home Assistant configuration, no
+device code. Screen state (on/off, brightness) can later be exposed through the
+same ESPHome device so Home Assistant sees one device, not two.
 
 ## M3 — Slim the OS
 

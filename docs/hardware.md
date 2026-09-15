@@ -232,6 +232,48 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
   Android sensor HAL (`android.hardware.sensors@1.0-service`, sensor
   "Light Sensor" by `amazon-oss`). Calibration in `/proc/idme/alscal`.
 
+## Display
+
+- Panel: `st7701s_wsvga_dsi_vdo_cronos_st_truly` (from the kernel command line
+  `lcm=`), a MIPI-DSI **video-mode** panel. Native orientation is portrait: the
+  framebuffer is 480 wide × 960 tall, 32 bpp, byte order B, G, R, A (BGRA8888,
+  the `mmap` offsets fb0 advertises are r16 g8 b0 a24). The device is used in
+  landscape, so anything drawn is composed 960×480 and rotated 90° onto the panel.
+- Kernel display stack: MediaTek 4.9 `mtkfb` + `mtk_disp_mgr`
+  (`drivers/misc/mediatek/video/mt8163/videox` in
+  `amazon-oss/android_kernel_amazon_mt8163`, branch `lineage-18.1`). The overlay
+  engine OVL0 has 4 layers; the primary path runs OVL0 → RDMA0 → DSI, driven by
+  the GCE command queue (CMDQ). Register window is physical `0x14007000`–`0x14018000`.
+- **The Linux framebuffer cannot be used.** `/dev/graphics/fb0` reports
+  `smem_len = 0`: the driver owns the backing buffer (reserved region at
+  physical `0x5f900000`, 7 MB) and only feeds it to the overlay, so `mmap` on fb0
+  returns `EINVAL` at every size, with or without SurfaceFlinger. `cmd/fbprobe`
+  is the probe.
+- **The display-manager API works up to the commit step.** `/dev/mtk_disp_mgr`
+  takes MediaTek's 32-bit compat ioctls (`'O'` magic). `internal/mtkdisp` speaks
+  them: create the primary session (id `0x10000`), read info (480×960, `vram` 7 MB,
+  physical 63×125 mm), allocate ION multimedia-heap buffers (`/dev/ion`, heap id
+  10) that get valid M4U addresses via `ION_MM_CONFIG_BUFFER` + `ION_SYS_GET_PHYS`,
+  switch the session between direct-link and decouple mode (which visibly changes
+  the RDMA registers), read back the OVL/RDMA registers by mapping the register
+  window, capture what the panel scans out (`MTKFB_CAPTURE_FRAMEBUFFER`, WDMA to a
+  user buffer), and wait on vsync. The compat struct sizes were pinned by probing
+  which argument size each ioctl accepts (`disp_input_config` is 168 bytes, not
+  164 — the compat `s64` timestamp is 8-aligned on this arm64 kernel; the input
+  config array totals 1432 bytes).
+- **The overlay config does not latch from a bare session.** `SET_INPUT_BUFFER`
+  with a valid `src_phy_addr` and `TRIGGER_SESSION` both return success, and the
+  CMDQ record shows the config tasks executing for the calling process — yet
+  `OVL0 src_con` stays 0 and layer 0's address stays at the boot framebuffer, so
+  nothing new reaches the panel. The missing piece is the CMDQ trigger-loop /
+  display-mutex commit that the hardware composer builds at its own init and a
+  session join does not reproduce. Conclusion: paint the panel from the mainline
+  `mediatek-drm` KMS driver in the Linux image, not from this vendor stack. See
+  `docs/porting-plan.md` (M2/M4).
+- TWRP paints this panel with a tiny userspace, which confirms the kernel and
+  DSI work outside Android; it uses the same fbdev path but on a boot where the
+  driver leaves the framebuffer mappable.
+
 ## Factory data (`/proc/idme`)
 
 `board_id`, `serial`, `mac_addr`, `bt_mac_addr`, `miccal.0-3`, `alscal`,
