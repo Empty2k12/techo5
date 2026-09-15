@@ -39,6 +39,24 @@ That works, but it is Android underneath. The plan in
 [docs/porting-plan.md](docs/porting-plan.md) is to replace the Android layers
 step by step, starting with the voice path.
 
+## Installing on a Show
+
+On a cronos unit already running LineageOS 18.1 with USB debugging and rooted debugging
+enabled:
+
+```powershell
+cd echod
+$env:GOOS='linux'; $env:GOARCH='arm'; $env:GOARM='7'; $env:CGO_ENABLED='0'
+go build -trimpath -ldflags '-s -w' -o ../bin/echod-arm ./cmd/echod
+cd ..
+.\tools\install-cronos.ps1 -Serial <adb serial> -Name "Kitchen" -KeyFile .\kitchen.psk
+```
+
+The installer puts the daemon in place as an init service, switches Android to its null audio
+HAL (the daemon owns the microphone and speaker), provisions the name, API key and wake word
+models, and reboots. Home Assistant then discovers the device as an ESPHome node; paste the key
+when asked. Android and any app on the screen keep running, silently.
+
 ## Approach
 
 [EchoLocal](https://github.com/ygelfand/echolocal) (MIT) already turns the
