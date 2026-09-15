@@ -84,20 +84,21 @@ func DetectOutput() Output {
 // volume is in.
 const VolumeSteps = config.VolumeSteps
 
-// volumeCurves maps a volume step to attenuation in dB: the Dot's vendor speaker curve shape,
-// sitting 8 dB below it. With the amplifier out of safe mode this speaker is loud: half the dial
-// at the unity-topped curve was "fricking loud" in a small room (2026-09-15), so the whole range
-// is pulled down and the top of the dial is room-loud rather than painful.
+// volumeCurves maps a volume step to attenuation in dB. With the amplifier out of safe mode this
+// speaker is loud: the Dot's vendor curve, which reaches unity and bunches its top half into 8 dB,
+// put "fricking loud" at half the dial in a small room (2026-09-15). This curve is linear in dB
+// instead: 1.5 dB a step up to half the dial (−40 → −19 dB), 1 dB a step above it (→ −4 dB), so
+// half is a conversation and the top is room-loud rather than painful.
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -41, -38, -34, -33, -31, -29, -27, -25, -24,
-		-22, -21, -20, -18, -17, -16, -15, -13, -13, -12,
-		-12, -12, -12, -11, -11, -11, -11, -11, -10, -9, -8,
+		-90, -40, -38.5, -37, -35.5, -34, -32.5, -31, -29.5, -28,
+		-26.5, -25, -23.5, -22, -20.5, -19, -18, -17, -16, -15,
+		-14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4,
 	},
 	OutputHeadphone: {
-		-90, -41, -38, -34, -33, -31, -29, -27, -25, -24,
-		-22, -21, -20, -18, -17, -16, -15, -13, -13, -12,
-		-12, -12, -12, -11, -11, -11, -11, -11, -10, -9, -8,
+		-90, -40, -38.5, -37, -35.5, -34, -32.5, -31, -29.5, -28,
+		-26.5, -25, -23.5, -22, -20.5, -19, -18, -17, -16, -15,
+		-14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4,
 	},
 }
 
