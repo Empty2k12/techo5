@@ -5,7 +5,6 @@ package display
 import (
 	"fmt"
 	"image"
-	"image/draw"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
