@@ -4,10 +4,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
 )
 
@@ -30,6 +33,7 @@ func newPlayCmd() *cobra.Command {
 		level   float64
 		silence bool
 		channel string
+		hold    string
 	)
 
 	c := &cobra.Command{
@@ -42,6 +46,17 @@ func newPlayCmd() *cobra.Command {
 			"broken stream from a muted one.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if hold != "" {
+				// Experiment: the MediaTek DL1 driver takes the AFE SRAM as its ring when nobody else
+				// holds an AFE stream, and DRAM otherwise. Holding any other AFE PCM node open forces
+				// the DRAM path.
+				h, err := os.OpenFile(hold, os.O_RDWR|syscall.O_NONBLOCK, 0)
+				if err != nil {
+					return fmt.Errorf("hold %s: %w", hold, err)
+				}
+				defer h.Close()
+				fmt.Fprintf(cmd.OutOrStdout(), "holding %s open\n", hold)
+			}
 			p, err := alsa.OpenPlayback(card, device, alsa.Config{
 				Channels:   playChannels,
 				Rate:       playRate,
@@ -96,6 +111,7 @@ func newPlayCmd() *cobra.Command {
 	c.Flags().Float64Var(&level, "level", 0.2, "amplitude, 0 to 1")
 	c.Flags().BoolVar(&silence, "silence", false, "write zeros instead of a tone")
 	c.Flags().StringVar(&channel, "channel", "both", "which channel carries the tone: left, right or both")
+	c.Flags().StringVar(&hold, "hold", speaker.DRAMHold, "open this device node and hold it while playing (forces the DL1 driver's DRAM path; empty for none)")
 	return c
 }
 

@@ -8,8 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
@@ -61,6 +63,9 @@ type Player struct {
 	devMu sync.Mutex
 	pb    *alsa.Playback
 	mixer *alsa.Mixer
+
+	// hold is DRAMHold, kept open for as long as pb is: see paths_cronos.go.
+	hold *os.File
 
 	// Output changed: a headphone was plugged in or pulled out.
 	OnOutput hook.Hook[Output]
@@ -178,6 +183,16 @@ func (p *Player) open() error {
 		return fmt.Errorf("speaker: opening mixer: %w", err)
 	}
 
+	// Before the playback device, so its driver sees the AFE in use and takes the DRAM ring.
+	var hold *os.File
+	if DRAMHold != "" {
+		hold, err = os.OpenFile(DRAMHold, os.O_RDWR|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			_ = m.Close()
+			return fmt.Errorf("speaker: holding %s: %w", DRAMHold, err)
+		}
+	}
+
 	pb, err := alsa.OpenPlayback(Card, PlaybackDevice, alsa.Config{
 		Channels:   Channels,
 		Rate:       Rate,
@@ -188,11 +203,14 @@ func (p *Player) open() error {
 	})
 	if err != nil {
 		_ = m.Close()
+		if hold != nil {
+			_ = hold.Close()
+		}
 		return fmt.Errorf("speaker: opening playback: %w", err)
 	}
 
 	p.devMu.Lock()
-	p.pb, p.mixer = pb, m
+	p.pb, p.mixer, p.hold = pb, m, hold
 	p.devMu.Unlock()
 	return nil
 }
@@ -670,15 +688,24 @@ func (p *Player) Close() error {
 	p.apply(initSequence)
 
 	p.devMu.Lock()
-	pb, mixer := p.pb, p.mixer
-	p.pb, p.mixer = nil, nil
+	pb, mixer, hold := p.pb, p.mixer, p.hold
+	p.pb, p.mixer, p.hold = nil, nil, nil
 	p.devMu.Unlock()
 
 	if mixer != nil {
 		_ = mixer.Close()
 	}
 	if pb == nil {
+		if hold != nil {
+			_ = hold.Close()
+		}
 		return nil
 	}
-	return pb.Close()
+	err := pb.Close()
+	// After the playback device: the driver reads the AFE state at open, not at close, but there is
+	// no reason to let go of it first.
+	if hold != nil {
+		_ = hold.Close()
+	}
+	return err
 }

@@ -131,3 +131,6 @@ const (
 	period  = 1024
 	periods = 4
 )
+
+// DRAMHold is unused on the Dot: its DL1 driver's SRAM ring works.
+const DRAMHold = ""

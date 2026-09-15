@@ -12,8 +12,13 @@ import (
 
 // The Echo Show 5 exposes its mute through the gpio-privacy platform driver rather than a bare
 // GPIO: `state` reads the latch (1 while the microphones are cut) and a write to `enable` pulses
-// the enable line for the device tree's toggle duration (1000 ms), which flips it. The red mute
+// the enable line for the device tree's toggle duration (1000 ms), which engages it. The red mute
 // indicator is part of the same circuit and follows the latch on its own.
+//
+// The latch is one-way from software. Measured 2026-09-14: a write of "1" cuts the microphones;
+// a second "1", or a "0", leaves them cut, and only the physical button releases them. That is
+// the privacy design of the hardware rather than a gap in the driver, so Set(false) reports it
+// instead of pretending.
 const (
 	dir    = "/sys/devices/platform/gpio-privacy"
 	state  = dir + "/state"
@@ -35,7 +40,11 @@ func (platform) HardwareToggles() bool { return true }
 
 func (platform) Lag() time.Duration { return toggleLag }
 
-// Set flips the latch when it disagrees with muted and waits for it to report the change.
+// ErrButtonOnly is returned when software asks for a release the hardware reserves for the button.
+var ErrButtonOnly = errors.New("privacy: the microphones can only be unmuted with the button on the device")
+
+// Set engages the latch when asked to mute and waits for it to report the change. Unmuting is
+// the button's alone; asking for it is an error, not a no-op, so whatever asked can say so.
 func (p platform) Set(muted bool) error {
 	is, err := p.Get()
 	if err != nil {
@@ -43,6 +52,9 @@ func (p platform) Set(muted bool) error {
 	}
 	if is == muted {
 		return nil
+	}
+	if !muted {
+		return ErrButtonOnly
 	}
 	if err := write(enable, "1"); err != nil {
 		return fmt.Errorf("privacy: pulsing enable: %w", err)

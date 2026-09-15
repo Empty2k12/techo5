@@ -105,19 +105,25 @@ playback while listening.
 
 Per-unit microphone calibration is in `/proc/idme/miccal.0` … `miccal.3`.
 
-### Kernel panic hazard: playback ring size
+### Kernel panic hazard: the DL1 driver's SRAM ring
 
-The MediaTek playback driver (`mtk_pcm_I2S0dl1`, which device 23 rides on) accepts any
-`hw_params` and then faults in `mtk_pcm_I2S0dl1_copy` (`__arch_copy_from_user`, address
-`ffffff8009eb0004`) when the ring is 1024 × 4 frames = 16 KB. The fault is a **kernel panic
-and reboot** (`sys.boot.reason = kernel_panic,fatal_exception`). 768 × 4 = 12 KB plays cleanly
-from `cmd/audioprobe`. Reproduced three times on 2026-09-14; the console log lands in
-`/sys/fs/pstore/console-ramoops`.
+The MediaTek playback driver (`mtk_pcm_I2S0dl1`, which device 23 rides on) decides at `open()`
+where its ring lives. If no other AFE stream is open it takes the AFE's internal SRAM
+(`mPlaybackSramState = SRAM_STATE_PLAYBACKFULL`); otherwise it uses a DRAM buffer. On this
+Amazon kernel the SRAM path faults on the first `copy_from_user` into the ring
+(`mtk_pcm_I2S0dl1_copy`, fault address `ffffff8009eb0004`, every time) — a **kernel panic and
+reboot** (`sys.boot.reason = kernel_panic,fatal_exception`, log in
+`/sys/fs/pstore/console-ramoops`). Reproduced six times on 2026-09-14 with 12 and 16 KB rings.
+The DRAM path plays cleanly.
 
-Open: the daemon's `tools play` at 768 × 4 panicked once more in the same place while
-`audioprobe` at 768 × 4 played fine in the same session. The difference between the two
-processes is not yet understood; do not run daemon playback on a Show that is in use until it
-is.
+**Workaround, required:** hold any other AFE PCM node open, unconfigured, before opening
+`pcmC0D23p` and for as long as it is open. `/dev/snd/pcmC0D1c` (MultiMedia1_Capture, unused
+on this device) works. `cmd/audioprobe -hold` and the daemon's speaker do this; the daemon's
+`tools play --hold` defaults to it. The driver source that explains the two paths is
+`sound/soc/mediatek/mt8163/mt_soc_pcm_dl1_i2s0Dl1.c` in any public MT8163 kernel tree.
+
+Ring geometry: 768 × 4 (12 KB, the vendor HAL's period at twice its depth) is what the
+daemon uses; the HAL itself runs 768 × 2.
 
 The capture side is a separate Amazon driver, `amzn_mt_spi_pcm` (the mic array arrives over
 SPI, not the AFE). It rejects a 256 × 10 ring with `EINVAL` and accepts 320 × 8.
@@ -146,10 +152,19 @@ silent until reboot. `dumpsys audio` is safe.
   `key 116 WAKEUP` fixes that (needs root, takes effect after reboot).
 - The mute is a **hardware** function: the button toggles a latch, and
   `privacy-state-gpio` (`gpio-405`, input) reports it while
-  `privacy-enable-gpio` (`gpio-384`, **output**, currently low) drives it.
-  That output is the line a daemon can use to control the mic mute (and the
-  red mute indicator, see below). After unmuting, an app that was capturing
-  gets silence until it reopens the capture path.
+  `privacy-enable-gpio` (`gpio-384`, output) engages it. The kernel's
+  `gpio-privacy` platform driver exposes both at
+  `/sys/devices/platform/gpio-privacy/`: `state` (readable, `1` = cut) and
+  `enable` (root write-only). Writing `1` to `enable` pulses the line for the
+  device tree's 1000 ms and cuts the microphones. **Software cannot release
+  the latch**: a second `1` or a `0` leaves it cut; only the button releases
+  it (verified 2026-09-14). The red indicator follows the latch. After
+  unmuting, an app that was capturing gets silence until it reopens the
+  capture path.
+- While the latch is engaged, the vendor audio HAL (`audio.service`) opens and
+  holds `pcmC0D22c` even with no client, and reopens it if killed. A daemon
+  that owns capture has to take the device before the mute is engaged, or the
+  HAL must not be running.
 
 GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
 

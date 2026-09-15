@@ -115,6 +115,9 @@ func (p *Playback) Write(buf []byte) (int, error) {
 		buf:    uintptr(unsafe.Pointer(&buf[0])),
 		frames: uintptr(frames),
 	}
+	if os.Getenv("ALSA_TRACE") != "" {
+		fmt.Fprintf(os.Stderr, "alsa: writei fd=%d buf=%#x frames=%d frameBytes=%d\n", p.f.Fd(), x.buf, x.frames, p.frameBytes)
+	}
 	if err := ioctl(p.f.Fd(), ioctlWritei, unsafe.Pointer(&x)); err != nil {
 		if err == syscall.EPIPE {
 			_ = ioctlArgless(p.f.Fd(), ioctlPrepare)

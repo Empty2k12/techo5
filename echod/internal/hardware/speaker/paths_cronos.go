@@ -20,13 +20,22 @@ const (
 	OutputHeadphone Output = "headphone"
 )
 
-// The playback ring. The MediaTek I2S0dl1 driver accepts any geometry at hw_params and then
-// faults in mtk_pcm_I2S0dl1_copy when writes run past its DMA buffer: 1024 x 4 (16 KB) panicked
-// the kernel, 768 x 4 (12 KB, the vendor HAL's period at twice its depth) plays cleanly.
+// The playback ring: the vendor HAL's period at twice its depth.
 const (
 	period  = 768
 	periods = 4
 )
+
+// DRAMHold is a second AFE PCM node the player holds open, unconfigured, for as long as it holds
+// the playback device.
+//
+// The MediaTek DL1 driver decides at open() where its ring lives: in the AFE's internal SRAM when
+// no other AFE stream is open, in DRAM otherwise. On this Amazon kernel the SRAM path faults on
+// the first copy_from_user — a kernel panic and reboot (mtk_pcm_I2S0dl1_copy, fault address
+// ffffff8009eb0004), reproduced five times on 2026-09-14 with rings of 12 and 16 KB — while the
+// DRAM path plays cleanly. Holding any other AFE node marks the SRAM taken, so DL1 takes DRAM.
+// MultiMedia1_Capture is an AFE capture nothing on this device uses.
+const DRAMHold = "/dev/snd/pcmC0D1c"
 
 // A mixer write, as the shared player applies it.
 type kctl struct {

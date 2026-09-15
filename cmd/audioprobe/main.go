@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/HuskerMinion/techo5/internal/alsa"
@@ -49,7 +50,17 @@ func main() {
 	concurrent := flag.Bool("concurrent", false, "play the tone during the capture instead of after it")
 	setEnum := flag.String("set-enum", "", "set an enumerated mixer control before capturing, as NAME=ITEM")
 	setInt := flag.String("set-int", "", "set an integer or boolean mixer control before capturing, as NAME=VALUE")
+	perPeriod := flag.Bool("per-period", false, "play a tone filling a fixed 768-frame stack buffer per write, the way the daemon's play tool does")
+	hold := flag.String("hold", "/dev/snd/pcmC0D1c", "hold this AFE node open so the DL1 driver takes its DRAM ring, not the SRAM ring that panics this kernel; empty for none")
 	flag.Parse()
+
+	if *hold != "" {
+		h, err := os.OpenFile(*hold, os.O_RDWR|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			fatal("holding %s: %v", *hold, err)
+		}
+		defer h.Close()
+	}
 
 	if *mixer {
 		dumpMixer()
@@ -93,6 +104,11 @@ func main() {
 		now, _ := m.Get(c)
 		fmt.Printf("mixer: %s = %v\n", name, now)
 		_ = m.Close()
+	}
+
+	if *perPeriod {
+		playPerPeriod()
+		return
 	}
 
 	if *concurrent {
@@ -149,6 +165,45 @@ func main() {
 		_ = pb.Close()
 		fmt.Printf("played %d frames in %v, underruns %d\n", len(pcm)/frameBytes, time.Since(start).Round(time.Millisecond), underruns)
 	}
+}
+
+// playPerPeriod reproduces the daemon's play tool exactly: a constant-size buffer that escape
+// analysis keeps on the stack, filled one period at a time between writes.
+func playPerPeriod() {
+	const (
+		period  = 768
+		periods = 4
+	)
+	pb, err := alsa.OpenPlayback(card, playbackDevice, alsa.Config{
+		Channels: playbackChannels, Rate: playbackRate, Format: alsa.FormatS16_LE, Bits: playbackBits,
+		PeriodSize: period, Periods: periods,
+	})
+	if err != nil {
+		fatal("opening playback: %v", err)
+	}
+	defer pb.Close()
+	fmt.Printf("per-period: pcmC%dD%dp ring %d x %d, 440 Hz at 20%%\n", card, playbackDevice, period, periods)
+	frames := playbackRate
+	buf := make([]byte, period*playbackChannels*playbackBits/8)
+	for done := 0; done < frames; {
+		n := min(period, frames-done)
+		for i := 0; i < n; i++ {
+			t := float64(done+i) / playbackRate
+			s := int16(0.2 * math.MaxInt16 * math.Sin(2*math.Pi*440*t))
+			binary.LittleEndian.PutUint16(buf[i*4:], uint16(s))
+			binary.LittleEndian.PutUint16(buf[i*4+2:], uint16(s))
+		}
+		if _, err := pb.Write(buf[:n*4]); err != nil {
+			if err == alsa.ErrUnderrun {
+				fmt.Println("underrun")
+				continue
+			}
+			fatal("write: %v", err)
+		}
+		done += n
+	}
+	_ = pb.Drain()
+	fmt.Println("per-period done")
 }
 
 func playTone(period, periods int) {
