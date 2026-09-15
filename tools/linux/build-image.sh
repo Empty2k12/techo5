@@ -12,6 +12,9 @@ set -euo pipefail
 
 INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
 KERNEL_IMAGE=${KERNEL_IMAGE:-D:/platform-tools/echoshow/boot-lineage-18.1-20260904-cronos.img}
+# KERNEL=Image.gz-dtb: a kernel built from source replaces the one in KERNEL_IMAGE
+# (its header, load addresses and command line still come from KERNEL_IMAGE).
+KERNEL=${KERNEL:-}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 OUT=techo5-linux-boot.img
 while [ $# -gt 0 ]; do
@@ -27,7 +30,7 @@ W() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 
 echo "== building tools for armv7"
 export GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0
-for c in fbprobe audioprobe rebootto; do
+for c in fbprobe audioprobe rebootto btbridge; do
 	(cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$ROOT/bin/$c-arm" "./cmd/$c")
 done
 unset GOOS GOARCH GOARM CGO_ENABLED
@@ -45,7 +48,8 @@ echo "== mkimage"
 export MSYS_NO_PATHCONV=1
 R=$(W "$ROOT"); I=$(W "$INPUTS")
 mini=$(ls "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz | head -1)
-python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" \
+kern=(); [ -n "$KERNEL" ] && kern=(--kernel "$(W "$KERNEL")")
+python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" "${kern[@]}" \
 	--rootfs "$(W "$mini")" \
 	"${apks[@]}" \
 	--init "$R/tools/linux/init" \
@@ -53,6 +57,7 @@ python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" \
 	--add "$R/bin/fbprobe-arm=/usr/local/bin/fbprobe" \
 	--add "$R/bin/audioprobe-arm=/usr/local/bin/audioprobe" \
 	--add "$R/bin/rebootto-arm=/usr/local/bin/rebootto" \
+	--add "$R/bin/btbridge-arm=/usr/local/bin/btbridge" \
 	--script "$R/tools/linux/slotctl=/usr/local/sbin/slotctl" \
 	--script "$R/tools/linux/techo5-lib.sh=/lib/techo5-lib.sh" \
 	--copy "$I/techo5_ed25519.pub=/root/.ssh/authorized_keys" \

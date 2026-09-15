@@ -10,7 +10,7 @@
 #   mkrootfs.sh -i <indir> -o <out.tar.gz> [-w <workdir>] [-V <version>] [-z <timezone>]
 #
 # <indir> layout (what deploy-rootfs.sh stages):
-#   bin/techo5 bin/fbprobe bin/audioprobe bin/rebootto      Go binaries, armv7
+#   bin/techo5 bin/fbprobe bin/audioprobe bin/rebootto bin/btbridge  Go binaries, armv7
 #   tools/slotctl tools/techo5-lib.sh tools/packages-rootfs.txt
 #   overlay/                                               tools/linux/rootfs from the repo
 #   inputs/alpine-minirootfs-*-armv7.tar.gz
@@ -59,7 +59,7 @@ tar -xzf "$IN/inputs/vendor.tar.gz" -C "$R" vendor
 
 # Our binaries and scripts.
 install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib"
-for b in techo5 fbprobe audioprobe rebootto; do
+for b in techo5 fbprobe audioprobe rebootto btbridge; do
 	[ -e "$IN/bin/$b" ] && install -m 755 "$IN/bin/$b" "$R/usr/local/bin/$b"
 done
 install -m 755 "$IN/tools/slotctl" "$R/usr/local/sbin/slotctl"

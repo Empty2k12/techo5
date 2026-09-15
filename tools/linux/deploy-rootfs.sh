@@ -38,7 +38,7 @@ pkg=github.com/HuskerMinion/techo5/echod/internal/layout
 commit=$(git -C "$ROOT" rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 (cd "$ROOT/echod" && "$GO" build -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
-for c in fbprobe audioprobe rebootto; do
+for c in fbprobe audioprobe rebootto btbridge; do
 	(cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$ROOT/bin/$c-arm" "./cmd/$c")
 done
 unset GOOS GOARCH GOARM CGO_ENABLED
@@ -47,7 +47,7 @@ echo "== staging"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/tools" "$STAGE/overlay" "$STAGE/inputs/apks312"
 cp "$ROOT/bin/echod-arm" "$STAGE/bin/techo5"
-for c in fbprobe audioprobe rebootto; do cp "$ROOT/bin/$c-arm" "$STAGE/bin/$c"; done
+for c in fbprobe audioprobe rebootto btbridge; do cp "$ROOT/bin/$c-arm" "$STAGE/bin/$c"; done
 cp "$ROOT/tools/linux/slotctl" "$ROOT/tools/linux/techo5-lib.sh" "$ROOT/tools/linux/mkrootfs.sh" "$ROOT/tools/linux/packages-rootfs.txt" "$STAGE/tools/"
 cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"

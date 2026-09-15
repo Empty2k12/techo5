@@ -55,6 +55,9 @@ if [ -n "$IP" ]; then
 	ntpd -p "${NTP_SERVER:-pool.ntp.org}" > /dev/null 2>&1
 fi
 
+# --- Bluetooth (only on a kernel that has it; see t5_bt_up).
+t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
+
 # --- Network keeper: bring Wi-Fi back if it is gone, and reboot after 15 minutes
 # without an address — an unattended unit must never sit unreachable.
 (

@@ -8,6 +8,11 @@ wireless-tools
 e2fsprogs
 tzdata
 alsa-utils
+# Bluetooth: BlueZ over the kernel's vhci (btbridge feeds it from the vendor
+# driver's /dev/stpbt); bluez-alsa is the A2DP source the daemon plays into.
+dbus
+bluez
+bluez-alsa
 # wpa_supplicant 2.9 comes from local v3.12 packages (see README.md, "Why these
 # choices"); apk resolves its libnl3 / dbus-libs / pcsc-lite-libs dependencies
 # from v3.24 and its libssl1.1 / libcrypto1.1 ones from the same local set.

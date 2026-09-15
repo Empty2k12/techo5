@@ -74,7 +74,19 @@ def main():
 
     d = open(a.boot_in, "rb").read()
     if d[:8] != b"ANDROID!":
-        sys.exit("not an Android boot image")
+        # A raw Image.gz-dtb (build-kernel.sh output): patch it in place, no boot image around it.
+        gz, dtbs = split_kernel(d)
+        sets = [(n, p, int(v, 0)) for n, p, v in a.set_u32]
+        out, total = [], 0
+        for i, blob in enumerate(dtbs):
+            new, changed = edit(blob, a.delete, sets)
+            total += changed
+            out.append(new)
+        if total == 0:
+            sys.exit("nothing changed; check the node path and property name")
+        open(a.boot_out, "wb").write(gz + b"".join(out))
+        print(f"wrote {a.boot_out}: raw kernel, {len(dtbs)} device trees, {total} changes")
+        return
     ks, ka, rs, ra, ss, sa, tl, ps, hv = struct.unpack("<9I", d[8:44])
     pg = lambda n: ((n + ps - 1) // ps) * ps
     hdr = bytearray(d[:ps])

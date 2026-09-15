@@ -133,3 +133,32 @@ t5_dropbear() {
 	pidof dropbear >/dev/null && return 0
 	dropbear -R -p 22 "$@" > /tmp/dropbear.log 2>&1 && log "ssh: dropbear listening on :22" || { log "ssh: dropbear failed to start"; return 1; }
 }
+
+# Bluetooth: the vendor driver gives a raw H4 channel (/dev/stpbt); btbridge
+# turns it into hci0 through the kernel's vhci driver; BlueZ and bluez-alsa
+# sit on top. Needs a kernel with CONFIG_BT + CONFIG_BT_HCIVHCI — without
+# /dev/vhci this quietly does nothing, so an older boot image keeps working.
+t5_bt_up() {
+	mod=$1; logdir=${2:-/tmp}
+	[ -e /dev/vhci ] || { log "bt: no /dev/vhci (kernel without Bluetooth); skipping"; return 1; }
+	if [ ! -e /dev/stpbt ]; then
+		[ -e "$mod" ] || { log "bt: driver not found at $mod"; return 1; }
+		insmod "$mod" 2>/tmp/insmod-bt.err || { log "bt: insmod failed: $(cat /tmp/insmod-bt.err)"; return 1; }
+		n=0; while [ $n -lt 10 ] && [ ! -e /dev/stpbt ]; do sleep 1; n=$((n+1)); done
+		[ -e /dev/stpbt ] || { log "bt: driver loaded but no /dev/stpbt"; return 1; }
+	fi
+	command -v btbridge >/dev/null || { log "bt: no btbridge"; return 1; }
+	(while true; do btbridge >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
+	n=0; while [ $n -lt 10 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
+	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: bridge up but no hci0"; return 1; }
+	mkdir -p /run/dbus /var/lib/bluetooth
+	if ! pidof dbus-daemon >/dev/null; then
+		dbus-daemon --system --nofork --nopidfile >> "$logdir/dbus.log" 2>&1 &
+		sleep 1
+	fi
+	bd=$(command -v bluetoothd || echo /usr/lib/bluetooth/bluetoothd)
+	[ -x "$bd" ] && "$bd" -n >> "$logdir/bluetoothd.log" 2>&1 &
+	command -v bluealsa >/dev/null && bluealsa -p a2dp-source >> "$logdir/bluealsa.log" 2>&1 &
+	log "bt: hci0 up; bluetoothd and bluealsa started"
+	return 0
+}

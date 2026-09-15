@@ -162,6 +162,8 @@ def verify_cpio(data):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kernel-image", required=True, help="LineageOS boot.img to take header and kernel from")
+    ap.add_argument("--kernel", default=None, metavar="Image.gz-dtb",
+                    help="use this kernel blob instead of the one in --kernel-image (header still comes from there)")
     ap.add_argument("--rootfs", default=None, help="Alpine minirootfs .tar.gz (omit for --minimal)")
     ap.add_argument("--minimal", action="store_true",
                     help="no rootfs tarball: the static busybox (from --add) becomes /bin/busybox with applet symlinks")
@@ -187,6 +189,8 @@ def main():
     if a.ramdisk_file:
         rd = open(a.ramdisk_file, "rb").read()
         hdr, kernel, old_rd, ps = read_bootimg(a.kernel_image)
+        if a.kernel:
+            kernel = open(a.kernel, "rb").read()
         if a.ramdisk_addr is not None:
             struct.pack_into("<I", hdr, 20, a.ramdisk_addr)
         size = write_bootimg(hdr, kernel, rd, ps, a.output, a.cmdline_append)
@@ -247,6 +251,8 @@ def main():
         open(a.ramdisk_out, "wb").write(rd)
 
     hdr, kernel, old_rd, ps = read_bootimg(a.kernel_image)
+    if a.kernel:
+        kernel = open(a.kernel, "rb").read()
     if a.ramdisk_addr is not None:
         struct.pack_into("<I", hdr, 20, a.ramdisk_addr)
     size = write_bootimg(hdr, kernel, rd, ps, a.output, a.cmdline_append)
