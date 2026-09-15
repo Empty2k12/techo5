@@ -309,11 +309,15 @@ session.
    transcript, then transcript and reply lingering twelve seconds after the turn — and
    exposes the screen to Home Assistant as a brightness-only light (`light.<name>_screen`,
    saved in the config as `screen`). The conversation publishes its phase and words on
-   `voice.Changed` for it. Still to do in this step: touch from `goodix-ts` (event3) for
-   an on-screen volume/mute and later pairing UI; auto-brightness from the light sensor
-   (`m_alsps_input`, event5 — the IIO device on this board is the auxadc, not the ALS);
-   media metadata once the player carries any; then retire ShowAssist and the
-   `echo-show` dashboard for this device.
+   `voice.Changed` for it. Later the same day: `hardware/touch` reads the Goodix
+   controller (protocol B) and reports taps and swipes in the landscape frame; a tap is the
+   action button (start or end a turn; on a dark screen it only lights it), a vertical swipe
+   is the volume a notch per step, with the level shown as it moves (`media.OnVolume`).
+   `hardware/ambient` switches the light sensor on through hwmsensor and streams lux;
+   with the "Screen auto-brightness" switch on, the room's light scales the backlight
+   below the ceiling Home Assistant set, on a log curve with a running average. Still to
+   do in this step: media metadata once the player carries any; a pairing UI when
+   Bluetooth exists; then retire ShowAssist and the `echo-show` dashboard for this device.
 5. **Rootfs on eMMC** — done 2026-09-15 (above): a persistent Alpine on
    `system` in two slots with a boot-count trial that fits the updater's trial
    semantics; the initramfs stays as the rescue environment. Still open: the

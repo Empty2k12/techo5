@@ -327,6 +327,17 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
 - Light sensor: `alsps` at I²C 0-0x44, read through the input device or the
   Android sensor HAL (`android.hardware.sensors@1.0-service`, sensor
   "Light Sensor" by `amazon-oss`). Calibration in `/proc/idme/alscal`.
+  It sits behind MediaTek's hwmsensor framework, not IIO (the only IIO device,
+  `iio:device0`, is the auxadc): nothing arrives on `event5` until it is
+  switched on — `echo <ns> > /sys/class/misc/m_alsps_misc/alsdelay`, then
+  `echo 1 > …/alsactive` — after which it reports `ABS_X` = lux at that period
+  (verified 2026-09-15: ~105 lux on the bench, the same figure ShowAssist
+  showed). The daemon's `hardware/ambient` does this.
+- Touch (`goodix-ts`, event3): multitouch protocol B only — `ABS_MT_SLOT`,
+  `TOUCH_MAJOR`, `WIDTH_MAJOR`, `POSITION_X/Y`, `TRACKING_ID`, no single-touch
+  axes, `INPUT_PROP_DIRECT`. Coordinates are in the panel's portrait frame; the
+  daemon's `hardware/touch` reads the ranges with `EVIOCGABS` and turns them a
+  quarter turn to match `hardware/screen`.
 
 ## Display
 

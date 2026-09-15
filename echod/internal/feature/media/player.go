@@ -18,6 +18,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
@@ -63,6 +64,10 @@ type Player struct {
 	external atomic.Bool
 
 	step int
+
+	// OnVolume fires with the new step whenever the level is changed on purpose — a button, a swipe,
+	// Home Assistant — so a screen can show it. A restore is silent, as it is on the ring.
+	OnVolume hook.Hook[int]
 }
 
 var (
@@ -422,6 +427,7 @@ func (p *Player) apply(step int, tell bool) int {
 	}
 
 	p.show(step)
+	p.OnVolume.Emit(step)
 	slog.Info("volume", "step", step, "of", VolumeSteps)
 	return step
 }
@@ -450,3 +456,6 @@ func (p *Player) show(step int) {
 	frame := led.Volume(float64(step) / VolumeSteps)
 	led.Get().Claim(led.PriorityNotice).PaintFor(frame, volumeFlash)
 }
+
+// Volume is the current level in steps, 0..VolumeSteps.
+func (p *Player) Volume() int { return p.step }

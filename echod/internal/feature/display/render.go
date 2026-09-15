@@ -3,6 +3,7 @@
 package display
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -16,6 +17,8 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
+
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 )
 
 // The palette is TECHO5's: walnut ground, amber accent, cream text.
@@ -37,6 +40,10 @@ type scene struct {
 	playing bool
 	paused  bool
 	muted   bool
+
+	// volume is shown while it moves: the step out of media.VolumeSteps.
+	volume     int
+	showVolume bool
 }
 
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
@@ -101,6 +108,24 @@ func (r *renderer) draw(s scene) {
 		r.bigClock(s)
 	}
 	r.footer(s)
+	if s.showVolume {
+		r.volumeBar(s)
+	}
+}
+
+// volumeBar is the level, laid over the bottom of whatever is showing while it moves.
+func (r *renderer) volumeBar(s scene) {
+	top := r.h - 110
+	draw.Draw(r.dst, image.Rect(0, top, r.w, r.h), image.NewUniform(walnut), image.Point{}, draw.Src)
+	label := "Volume"
+	r.text(r.small, label, r.margin, top+38, dim)
+	full := r.w - 2*r.margin
+	y0 := top + 56
+	draw.Draw(r.dst, image.Rect(r.margin, y0, r.margin+full, y0+14), image.NewUniform(ember), image.Point{}, draw.Src)
+	fill := full * min(max(s.volume, 0), media.VolumeSteps) / media.VolumeSteps
+	draw.Draw(r.dst, image.Rect(r.margin, y0, r.margin+fill, y0+14), image.NewUniform(amber), image.Point{}, draw.Src)
+	pct := fmt.Sprintf("%d%%", s.volume*100/media.VolumeSteps)
+	r.text(r.small, pct, r.w-r.margin-r.width(r.small, pct), top+38, cream)
 }
 
 // bigClock is the idle screen: the time across the middle, the date beneath.

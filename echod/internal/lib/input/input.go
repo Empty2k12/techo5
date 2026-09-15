@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
 // Event types we care about.
@@ -158,4 +160,35 @@ func List() ([]*Device, error) {
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// AbsInfo is what the kernel reports about one absolute axis: its current value and its range.
+type AbsInfo struct {
+	Value, Min, Max, Fuzz, Flat, Resolution int32
+}
+
+// Abs queries an absolute axis with EVIOCGABS, for a touchscreen's coordinate ranges.
+func (d *Device) Abs(code uint16) (AbsInfo, error) {
+	var info AbsInfo
+	// _IOR('E', 0x40 + code, struct input_absinfo): 24 bytes, read direction.
+	req := uintptr(0x80184540 + uint32(code))
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, d.f.Fd(), req, uintptr(unsafe.Pointer(&info))); e != 0 {
+		return info, fmt.Errorf("input: EVIOCGABS %#x on %s: %w", code, d.Path, e)
+	}
+	return info, nil
+}
+
+// Find opens the one event node whose reported name matches, leaving every other node closed.
+func Find(name string) (*Device, error) {
+	paths, err := filepath.Glob("/dev/input/event*")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range paths {
+		if nameFor(p) != name {
+			continue
+		}
+		return Open(p)
+	}
+	return nil, fmt.Errorf("input: no device named %q", name)
 }
