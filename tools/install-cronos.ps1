@@ -68,7 +68,9 @@ foreach ($w in $WakeWords) {
 }
 
 Write-Host "== stopping a running daemon"
-Sh 'setprop ctl.stop techo5 2>/dev/null; for p in $(pidof echod techo5); do kill $p; done; exit 0' | Out-Null
+# TERM first: a daemon on an update trial clears its trial marker on a clean stop, and init's own
+# stop is a SIGKILL, which the next start would read as a crash and roll back.
+Sh 'for p in $(pidof echod techo5); do kill -TERM $p; done; sleep 2; setprop ctl.stop techo5 2>/dev/null; exit 0' | Out-Null
 
 Write-Host "== /data/misc/techo5"
 Sh 'mkdir -p /data/misc/techo5/models /data/techo5; chmod 700 /data/misc/techo5' | Out-Null

@@ -46,9 +46,13 @@ Still to do for M1:
   it); raise it carefully and re-measure headroom before making it the default.
 - Releases: `tools/release.ps1` builds a versioned daemon, writes `manifest.json` with
   `cmd/mkmanifest` and publishes a GitHub release. The daemon's updater (the `update` entity in
-  Home Assistant) follows the latest release and replaces `/system/bin/techo5` in place; the
-  v0.1.0 → v0.1.1 round trip was done from Home Assistant's update button on 2026-09-15, with
-  init restarting the daemon into the new binary and the previous one kept for rollback.
+  Home Assistant) follows the latest release and replaces `/system/bin/techo5` in place; init
+  restarts the daemon into the new binary (the service must not be `oneshot`). The new binary
+  runs **on trial** for five minutes, then commits. Cronos has no vendor boot hook, so a trial
+  binary that dies is rolled back in-process by the next start (verified 2026-09-15 with
+  v0.1.2 → v0.1.1 in five seconds, no reboot). Consequence: `setprop ctl.stop`/`ctl.restart`
+  is a SIGKILL and looks like a crash — during a trial, stop the daemon with `kill -TERM` (the
+  bench scripts and the installer do), or simply leave it for five minutes.
 - Loudness: the amplifier's safe mode was the cap (see hardware.md); the daemon clears it,
   speech is normalised to −14 dBFS RMS, and the volume curve sits 6 dB under the Dot's.
 
