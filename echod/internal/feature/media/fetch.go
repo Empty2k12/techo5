@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -54,17 +55,34 @@ func Fetch(ctx context.Context, url string) ([]int16, error) {
 	if err != nil {
 		return nil, err
 	}
-	return monoPCM(body)
+	samples, f, err := monoPCM(body)
+	if err != nil {
+		return nil, err
+	}
+	if f.channels != 1 || f.rate != speaker.VoiceRate {
+		slog.Warn("announcement arrived in a format other than the one asked for; converted",
+			"rate", f.rate, "channels", f.channels, "bits", f.bits, "url", url)
+	}
+	return samples, nil
+}
+
+// wavFormat is what the fmt chunk said.
+type wavFormat struct {
+	channels, rate, bits int
 }
 
 // monoPCM takes 16-bit samples out of a RIFF/WAVE body, walking the chunks rather than assuming a
-// 44-byte header: a converted file can carry extra chunks before the data.
+// 44-byte header: a converted file can carry extra chunks before the data. The result is one channel
+// at speaker.VoiceRate whatever the file carried: Home Assistant is asked for that, but what it
+// serves is decided by its proxy, and a mismatch played as if it were right is speech at the wrong
+// speed.
 //
 // Sizes are handled as uint64. A 32-bit int cannot hold a large RIFF size, and a chunk claiming
 // one turns negative, which slips past a bounds check and panics on the slice.
-func monoPCM(body []byte) ([]int16, error) {
+func monoPCM(body []byte) ([]int16, wavFormat, error) {
+	f := wavFormat{channels: 1, rate: speaker.VoiceRate, bits: 16}
 	if len(body) < 12 || string(body[0:4]) != "RIFF" || string(body[8:12]) != "WAVE" {
-		return nil, fmt.Errorf("not a WAVE file: %d bytes", len(body))
+		return nil, f, fmt.Errorf("not a WAVE file: %d bytes", len(body))
 	}
 
 	total := uint64(len(body))
@@ -78,13 +96,28 @@ func monoPCM(body []byte) ([]int16, error) {
 			end = total
 		}
 
-		if id == "data" {
-			pcm := body[off:end]
-			samples := make([]int16, len(pcm)/2)
-			for i := range samples {
-				samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
+		switch id {
+		case "fmt ":
+			if end-off >= 16 {
+				f.channels = int(binary.LittleEndian.Uint16(body[off+2:]))
+				f.rate = int(binary.LittleEndian.Uint32(body[off+4:]))
+				f.bits = int(binary.LittleEndian.Uint16(body[off+14:]))
 			}
-			return samples, nil
+		case "data":
+			if f.bits != 16 || f.channels < 1 {
+				return nil, f, fmt.Errorf("unsupported WAVE: %d-bit, %d channels", f.bits, f.channels)
+			}
+			pcm := body[off:end]
+			frames := len(pcm) / (2 * f.channels)
+			mono := make([]int16, frames)
+			for i := range mono {
+				var sum int
+				for c := 0; c < f.channels; c++ {
+					sum += int(int16(binary.LittleEndian.Uint16(pcm[(i*f.channels+c)*2:])))
+				}
+				mono[i] = int16(sum / f.channels)
+			}
+			return toVoiceRate(mono, f.rate), f, nil
 		}
 
 		off = end
@@ -92,5 +125,27 @@ func monoPCM(body []byte) ([]int16, error) {
 			off++
 		}
 	}
-	return nil, fmt.Errorf("no data chunk in %d bytes", total)
+	return nil, f, fmt.Errorf("no data chunk in %d bytes", total)
+}
+
+// toVoiceRate brings mono speech to speaker.VoiceRate by linear interpolation, which is plenty for
+// a voice that is about to be upsampled again on the way to the card.
+func toVoiceRate(in []int16, rate int) []int16 {
+	if rate == speaker.VoiceRate || rate <= 0 || len(in) < 2 {
+		return in
+	}
+	n := int(int64(len(in)) * int64(speaker.VoiceRate) / int64(rate))
+	out := make([]int16, n)
+	step := float64(rate) / float64(speaker.VoiceRate)
+	for i := range out {
+		pos := float64(i) * step
+		j := int(pos)
+		if j >= len(in)-1 {
+			out[i] = in[len(in)-1]
+			continue
+		}
+		frac := pos - float64(j)
+		out[i] = int16(float64(in[j])*(1-frac) + float64(in[j+1])*frac)
+	}
+	return out
 }

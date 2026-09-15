@@ -48,7 +48,7 @@ type kctl struct {
 // On cronos the MAX98396 amplifier and the AIC3101 codec are left configured by the vendor HAL at
 // boot, and audioprobe plays through them with no mixer writes at all: the playback stream is
 // driven at unity and the volume curve is applied in software. There is nothing to route, so the
-// sequences are empty. AmpSwitch (Ext_Speaker_Amp_Switch, on the MediaTek AFE) is still gated.
+// sequences are empty, and the amplifier switch is never touched (see AmpSwitch below).
 var initSequence = []kctl{}
 
 var pathSequence = map[Output][]kctl{
@@ -115,3 +115,9 @@ func gainForStep(out Output, step int) float32 {
 
 // MediaService is the init service that owns Android's audio HAL on LineageOS.
 const MediaService = "vendor.audio-hal"
+
+// AmpSwitch is empty: on cronos Ext_Speaker_Amp_Switch drives the GPIO wired to the MAX98396's
+// reset, so switching it off and on resets the amplifier and wipes the register setup the codec
+// driver did at probe — which it never repeats, leaving the speaker silent until a reboot
+// (found 2026-09-14). The amplifier is left as the kernel brought it up.
+const AmpSwitch = ""

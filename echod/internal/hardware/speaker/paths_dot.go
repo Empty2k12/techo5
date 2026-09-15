@@ -137,3 +137,6 @@ const DRAMHold = ""
 
 // MediaService is the init service that owns Android's audio HAL on Fire OS.
 const MediaService = "media"
+
+// AmpSwitch gates the speaker.
+const AmpSwitch = "Ext_Speaker_Amp_Switch"

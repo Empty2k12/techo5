@@ -50,9 +50,6 @@ const (
 const (
 	Card           = 0
 	PlaybackDevice = 23
-
-	// AmpSwitch gates the speaker.
-	AmpSwitch = "Ext_Speaker_Amp_Switch"
 )
 
 // Player owns the speaker: one playback stream held open for the life of the process, with the
@@ -230,8 +227,13 @@ func (p *Player) route() {
 	p.apply(pathSequence[p.out])
 }
 
-// amp switches the speaker amplifier.
+// amp switches the speaker amplifier, where the device has a switch that is safe to touch: see
+// AmpSwitch in paths_dot.go and paths_cronos.go.
 func (p *Player) amp(on bool) {
+	if AmpSwitch == "" {
+		return
+	}
+
 	p.pathMu.Lock()
 	defer p.pathMu.Unlock()
 
@@ -261,7 +263,9 @@ func (p *Player) setOutput(out Output) {
 		return
 	}
 	p.out = out
-	p.apply([]kctl{{name: AmpSwitch, value: "Off"}})
+	if AmpSwitch != "" {
+		p.apply([]kctl{{name: AmpSwitch, value: "Off"}})
+	}
 	if out == OutputSpeaker {
 		p.apply(headphoneOff)
 	}
