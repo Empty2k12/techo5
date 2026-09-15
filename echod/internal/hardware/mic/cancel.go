@@ -20,17 +20,19 @@ const cancelTaps = 1024
 const cancelMu = 0.5
 
 // refQuiet is the mean square per sample, at int16 scale, below which the loopback counts as silence.
-// About -60 dBFS. Below it there is no echo to remove, so the filter is skipped entirely and the frame
-// costs nothing — which is what keeps this free on an idle device.
-const refQuiet = 1e-6 * 32768 * 32768
+// About -76 dBFS. Below it there is no echo to remove, so the filter is skipped entirely and the frame
+// costs nothing — which is what keeps this free on an idle device. It has to sit well under a
+// radio at a quiet volume: measured at -50 dBFS on the loopback, which a -60 dBFS gate flapped on
+// every second, resetting the canceller each time.
+const refQuiet = 1e-7 * 32768 * 32768 / 4
 
 // refHold is how long the filter keeps running after the loopback goes quiet, in samples.
 //
 // Speech is full of gaps, and without this the gate flaps between every word. That is not only untidy:
 // the room is still ringing with the echo of the word that just played, and the measured tail here runs
-// past 100 ms, so disengaging on the gap stops cancelling exactly as that tail arrives. 250 ms covers
-// it with room to spare.
-const refHold = Rate / 4
+// past 100 ms, so disengaging on the gap stops cancelling exactly as that tail arrives. A second
+// covers it with room to spare, and rides across the pauses in a radio talk show.
+const refHold = Rate
 
 // canceller subtracts the playback loopback from one fixed microphone.
 //

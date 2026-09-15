@@ -45,7 +45,7 @@ func Get() *Detect {
 }
 
 // playingSlack is how much lower the wake threshold sits while the echo canceller is running.
-const playingSlack = 0.06
+const playingSlack = 0.10
 
 func newDetect() *Detect {
 	// Sized to reach the stop word's reserved index. The slots between it and Home Assistant's are never
