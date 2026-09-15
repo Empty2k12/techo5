@@ -50,7 +50,7 @@ exit 0
 // first heartbeat several minutes later — a rollback there would tear out an update that was doing
 // nothing wrong.
 func Script(path string) string {
-	if path == layout.StartAnimation {
+	if path != "" && path == layout.StartAnimation {
 		return Rollback
 	}
 	return Stub

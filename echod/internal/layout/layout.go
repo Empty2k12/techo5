@@ -12,7 +12,7 @@ import (
 // Where echod and its state live. Dir and StateDir are the device's own (device_dot.go,
 // device_cronos.go); everything else hangs off them.
 const (
-	Binary   = Dir + "/echod"
+	Binary   = Dir + "/" + BinaryName
 	KeyPath  = StateDir + "/psk"
 	NamePath = StateDir + "/name"
 

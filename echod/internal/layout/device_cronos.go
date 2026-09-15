@@ -2,15 +2,17 @@
 
 package layout
 
-// The Echo Show 5 2nd gen on LineageOS 18.1: nothing of Amazon's is taken over, so the daemon lives
-// on /data and is started by an init service of its own (see docs/porting-plan.md). There are no
-// vendor boot hooks to keep current, so AnimationScripts is empty and update.Ensure has nothing to
-// write.
+// The Echo Show 5 2nd gen on LineageOS 18.1: nothing of Amazon's is taken over. The daemon is an
+// init service of its own (tools/init/techo5.rc) with its state on /data. There are no vendor boot
+// hooks to keep current, so AnimationScripts is empty and update.Ensure has nothing to write.
 const (
-	Dir      = "/data/techo5"
-	StateDir = "/data/misc/techo5"
+	// The daemon is /system/bin/techo5, which is what tools/init/techo5.rc runs and what the
+	// updater replaces in place (remounting / rw, as the Dot does for /system).
+	Dir        = "/system/bin"
+	BinaryName = "techo5"
+	StateDir   = "/data/misc/techo5"
 
-	Service     = Dir + "/echod"
+	Service     = Dir + "/" + BinaryName
 	ServiceName = "techo5"
 
 	StockLabel = "u:object_r:system_file:s0"

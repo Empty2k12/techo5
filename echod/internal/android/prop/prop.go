@@ -7,6 +7,7 @@ package prop
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -21,8 +22,12 @@ const (
 )
 
 // Set assigns a system property. init applies its own permission checks, so a rejected
-// write reports no error here — verify the effect, not the call.
+// write reports no error here — verify the effect, not the call. Off the device, where there is no
+// setprop, it is a no-op: the property store is Android's, and a test on a workstation has none.
 func Set(name, value string) error {
+	if _, err := os.Stat(setprop); err != nil {
+		return nil
+	}
 	cmd := exec.Command(setprop, name, value)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Run() }()

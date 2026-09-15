@@ -12,6 +12,9 @@ import (
 // The two hooks run at different moments and must not be interchangeable: only the one init runs on the
 // way up may put a binary back, because the other fires while a healthy update is still on trial.
 func TestOnlyTheEarlyHookRollsBack(t *testing.T) {
+	if len(layout.AnimationScripts) == 0 {
+		t.Skip("this device has no vendor boot hooks to take over")
+	}
 	early := Script(layout.StartAnimation)
 	late := Script(layout.StopAnimation)
 

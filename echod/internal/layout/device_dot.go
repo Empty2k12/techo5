@@ -7,8 +7,9 @@ package layout
 // ledcontroller service, which removes the only other writer of the LED ring and gets init's
 // supervision. /system is read-only once installed, so anything written after install goes on /data.
 const (
-	Dir      = "/system/app/echod"
-	StateDir = "/data/misc/echolocal"
+	Dir        = "/system/app/echod"
+	BinaryName = "echod"
+	StateDir   = "/data/misc/echolocal"
 
 	Service     = "/system/bin/ledcontroller"
 	ServiceName = "ledcontroller"
