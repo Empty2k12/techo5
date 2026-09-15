@@ -211,13 +211,22 @@ Surveyed 2026-09-15, all details in `docs/hardware.md` (Kernels, Wi-Fi/Bluetooth
 ### Steps
 
 1. **First Linux boot** (no kernel build): LineageOS kernel + an initramfs built
-   from Alpine 3.24 armv7 minirootfs with a tiny init that mounts the essentials,
-   brings up USB gadget (ACM serial + RNDIS or FunctionFS adbd) for access, paints
-   the panel with `fbprobe`, and drops to a shell. Flash to `recovery`,
-   `adb reboot recovery`. Failure mode: if init never runs, MISC may keep the
-   recovery bootloader message and the unit loops into recovery — recovery is
-   volume-down at power-up into fastboot, then `fastboot flash recovery` the TWRP
-   backup. Do this with the unit at hand.
+   from the Alpine 3.24 armv7 minirootfs with a tiny init (`tools/linux/init`)
+   that populates `/dev` (no devtmpfs in this kernel), **clears the recovery
+   bootloader message in MISC first**, keeps a boot log in `/data/techo5-linux/`
+   on userdata (readable from Android afterwards), paints the panel with
+   `fbprobe` (clock ticking), offers a root shell over USB CDC ACM (Windows sees
+   a COM port; RNDIS is out because Windows 11 24H2+ dropped it), insmods the
+   vendor Wi-Fi module from the mounted Android system partition as a first
+   probe, and reboots into Android after 15 minutes unless `/tmp/stay` exists.
+   `tools/linux/mkimage.py` builds the boot image straight from the tarball
+   (no root, no cpio binary). Built 2026-09-15 as
+   `D:\platform-tools\echoshow\techo5-linux-test.img` (13 MB; not yet booted).
+   Flash to `recovery`, `adb reboot recovery`. Failure mode: if init never runs
+   (kernel panic before userspace), MISC keeps the recovery message and the unit
+   loops into the test image — volume-down at power-up into fastboot, then
+   `fastboot flash recovery recovery-twrp-cronos.img`. So: first boot with the
+   unit at hand.
 2. **Wi-Fi**: mount the LineageOS `system` partition read-only, `insmod` the
    vendor `mt76x8_wlan.ko` with `firmware_class.path` pointing at its `vendor/firmware`,
    `wpa_supplicant` + DHCP. Then SSH (dropbear) replaces the USB cable.
