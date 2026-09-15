@@ -68,3 +68,50 @@ resolutions.
    `ISP_BUFFER_CTRL` ring, or ION), `CAM_CTL_START`, wait `IMGO_DONE`, dequeue, dump the RAW10
    frame, demosaic in Go (nearest-neighbour is enough for a first picture).
 4. Then a still-capture action for the daemon and a "show me" page. Video would be after that.
+
+## The register map is found (2026-09-15 late)
+
+Our ISP driver names 49 registers; the four that matter for placing the generation match the
+MT6592 userspace header from the BQ Aquaris E10 GPL drop
+(`mediatek/platform/mt6592/hardware/include/mtkcam/drv/isp_reg.h`, kept at
+`D:\platform-tools\echoshow\camera\isp_reg_mt6592_bq_aquaris_E10.h`; the register XML it was
+generated from is MT6582's): CTL_EN1 +0x004, CTL_INT_STATUS +0x024, IMGO_BASE_ADDR +0x300,
+TG_VF_CON +0x414 — all identical to what `camera_isp.c` for mt8163 uses. MT6795 and later
+(IMGO at +0x3300, INT at +0x4C) are a different ISP; MT6589/MT8127/MT6580/MT8163 are this one.
+So the MT6592 header is the map, offsets relative to `CAMINF_BASE` (0x15000000) with the
+ISP block at +0x4000 (the header's comments say 4xxx):
+
+| register | offset | fields |
+| --- | --- | --- |
+| CAM_CTL_START | 0x4000 | PASS2_START, FMT_START, CQ0_START… (pass 1 runs on VF, not START) |
+| CAM_CTL_EN1 | 0x4004 | per-block enables (TG1, PASS1 path…) |
+| CAM_CTL_DMA_EN | 0x400C | IMGO_EN bit0, LSCI, ESFKO, AAO, IMGI, IMG2O bit10 |
+| CAM_CTL_FMT_SEL | 0x4010 | SCENARIO[2:0], SUB_MODE, CAM_IN_FMT[11:8], CAM_OUT_FMT, TG1_FMT[18:16], TWO_PIX, TG1_SW |
+| CAM_CTL_SEL | 0x4018 | path selects |
+| CAM_CTL_INT_STATUS | 0x4024 | (driver: IMGO_DONE bit 0 of DMA_INT 0x4028, FBC_IMGO_DONE bit 28) |
+| CAM_IMGO_BASE_ADDR | 0x4300 | physical address of the frame buffer |
+| CAM_IMGO_XSIZE | 0x4308 | XSIZE[13:0] in bytes − 1 |
+| CAM_IMGO_YSIZE | 0x430C | lines − 1 |
+| CAM_IMGO_STRIDE | 0x4310 | bytes per line (+ bus size bits) |
+| CAM_TG_SEN_MODE | 0x4410 | CMOS_EN bit0, DBL_DATA_BUS, SOT_MODE… |
+| CAM_TG_VF_CON | 0x4414 | VFDATA_EN bit0 (this is what starts pass 1), SINGLE_MODE bit1 |
+| CAM_TG_SEN_GRAB_PXL | 0x4418 | PXL_S[14:0], PXL_E[30:16] |
+| CAM_TG_SEN_GRAB_LIN | 0x441C | LIN_S, LIN_E |
+
+Not in this header: the SENINF / CSI-2 receiver block. On this generation the imgsensor
+driver may own it (look for `seninf` under `drivers/misc/mediatek/imgsensor/src/mt8163` and
+the `KDIMGSENSORIOC_X_SET_I2CBUS`/`GET_CSI_CLK` ioctls), or it is a second header
+(`seninf_reg.h`) in the same GPL drops. That is the first thing to settle next.
+
+## Plan for the first frame
+
+1. Unmute (button), `camprobe` → sensor id and resolutions.
+2. SENINF: find who programs the CSI receiver; if userspace, take its offsets from the
+   MT6592 `seninf_reg.h`.
+3. A buffer the ISP can write: `ISP_BUFFER_CTRL` on `_imgo_`, or `/dev/camera-sysram`, or an
+   ION buffer's physical address — check what the driver's enqueue expects.
+4. Program: FMT_SEL (TG1 raw 10-bit, scenario pass-1), DMA_EN.IMGO_EN, IMGO base/xsize/ysize/
+   stride for the preview mode, TG grab window from the sensor's `GET_CROP_INFO`, TG_SEN_MODE
+   CMOS_EN, then TG_VF_CON.VFDATA_EN=1; wait `IMGO_DONE`; VFDATA_EN=0.
+5. Dump the RAW10 buffer, unpack, nearest-neighbour demosaic, PNG. Then the daemon's
+   "take a picture" action and a page.
