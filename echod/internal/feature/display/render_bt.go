@@ -13,11 +13,12 @@ import (
 // The pairing page: a title, a line saying what to do, the devices the scan has found as rows a
 // finger can hit, and a bar at the bottom that ends pairing. Geometry is shared with the gesture
 // handler, which maps a tap back to a row.
+// The panel is 960 by 480 in landscape: title, hint, four rows, and the bar fit in 480.
 const (
-	btRowTop    = 190 // first row's top edge
-	btRowHeight = 74
-	btRows      = 5
-	btDoneBar   = 90 // the bottom bar's height
+	btRowTop    = 112 // first row's top edge
+	btRowHeight = 58
+	btRows      = 4
+	btDoneBar   = 64 // the bottom bar's height
 )
 
 // btRowAt maps a tap to the row it landed on, or -1; the bottom bar is btRows.
@@ -36,18 +37,19 @@ func (r *renderer) btRowAt(y int) int {
 }
 
 func (r *renderer) pairingPage(s scene) {
-	r.cornerClock(s)
-	r.text(r.title, "Bluetooth", r.margin, 110, amber)
+	r.text(r.body, "Bluetooth", r.margin, 52, amber)
+	t := s.now.Format("3:04")
+	r.text(r.small, t, r.w-r.margin-r.width(r.small, t), 52, dim)
 	hint := s.bt.Status
 	if hint == "" {
 		hint = "Put your earbuds in pairing mode"
 	}
-	r.text(r.small, hint, r.margin, 160, dim)
+	r.text(r.tiny, hint, r.margin, 92, dim)
 
 	if len(s.bt.Devices) == 0 {
 		// A dot that walks while the scan runs, so a still list reads as searching rather than stuck.
-		t := int(s.now.UnixMilli() / 400 % 4)
-		r.text(r.body, fmt.Sprintf("Searching%s", "..."[:t]), r.margin, btRowTop+50, dim)
+		n := int(s.now.UnixMilli() / 400 % 4)
+		r.text(r.small, fmt.Sprintf("Searching%s", "..."[:n]), r.margin, btRowTop+38, dim)
 	}
 	for i, d := range s.bt.Devices {
 		if i >= btRows {
@@ -59,7 +61,7 @@ func (r *renderer) pairingPage(s scene) {
 		if d.Busy {
 			c = amber
 		}
-		r.text(r.body, d.Name, r.margin, top+50, c)
+		r.text(r.small, d.Name, r.margin, top+40, c)
 		var right string
 		switch {
 		case d.Busy:
@@ -71,14 +73,14 @@ func (r *renderer) pairingPage(s scene) {
 		default:
 			right = "tap to pair"
 		}
-		r.text(r.tiny, right, r.w-r.margin-r.width(r.tiny, right), top+48, dim)
+		r.text(r.tiny, right, r.w-r.margin-r.width(r.tiny, right), top+38, dim)
 	}
 
 	// The bar that ends it.
 	top := r.h - btDoneBar
 	draw.Draw(r.dst, image.Rect(0, top, r.w, r.h), image.NewUniform(ember), image.Point{}, draw.Src)
 	label := "Done"
-	r.text(r.title, label, (r.w-r.width(r.title, label))/2, top+62, cream)
+	r.text(r.body, label, (r.w-r.width(r.body, label))/2, top+45, cream)
 }
 
 // btFooter is what the footer says for a connected device.

@@ -49,7 +49,13 @@ type scene struct {
 	// bt is the Bluetooth audio state: the pairing page replaces everything while it is on, and a
 	// connected device is named in the footer.
 	bt btaudio.State
+
+	// sheet is the settings sheet, drawn instead of everything else while showSheet is set.
+	showSheet bool
+	sheet     settings
 }
+
+const sheetVolumeSteps = media.VolumeSteps
 
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
 // building a face at each size is not something to do per frame.
@@ -102,6 +108,13 @@ func (r *renderer) draw(s scene) {
 
 	if s.bt.Pairing {
 		r.pairingPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showSheet {
+		r.settingsPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

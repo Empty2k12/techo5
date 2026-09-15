@@ -66,6 +66,13 @@ t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
 		sleep 60
 		if [ -n "$(t5_ip)" ]; then
 			down=0
+			# An address without a default route is the aftermath of the link bouncing:
+			# udhcpc does not put the route back. Renewing the lease does.
+			if ! ip route show default 2>/dev/null | grep -q default; then
+				log "network: address but no default route; renewing the lease"
+				killall udhcpc 2>/dev/null
+				udhcpc -i wlan0 -b -R -t 10 -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
+			fi
 			continue
 		fi
 		down=$((down+1))

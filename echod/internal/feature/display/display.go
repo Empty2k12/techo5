@@ -91,6 +91,10 @@ type Display struct {
 	booting bool
 	started time.Time
 	logo    *splash
+
+	// sheet is the settings sheet being shown; restartArm is the first of the two taps Restart wants.
+	sheet      bool
+	restartArm time.Time
 }
 
 var (
@@ -292,15 +296,83 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	// The settings sheet: rows do things, the bar at the bottom closes it.
+	d.mu.Lock()
+	sheet := d.sheet
+	d.mu.Unlock()
+	if sheet {
+		switch g.Kind {
+		case touch.Tap:
+			if d.r != nil {
+				d.sheetTap(d.r.sheetRowAt(g.Y))
+			}
+		case touch.SwipeUp:
+			media.Get().Adjust(+1)
+		case touch.SwipeDown:
+			media.Get().Adjust(-1)
+		}
+		d.wake()
+		return
+	}
+
 	switch g.Kind {
 	case touch.Tap:
 		voice.Get().Action()
 	case touch.SwipeUp:
 		media.Get().Adjust(+1)
 	case touch.SwipeDown:
+		// From the top edge it is the sheet; anywhere else it is the volume.
+		if g.Y < topEdge {
+			d.showSheet(true)
+			return
+		}
 		media.Get().Adjust(-1)
-	case touch.SwipeLeft:
-		bt.SetPairing(true)
+	}
+}
+
+func (d *Display) showSheet(on bool) {
+	d.mu.Lock()
+	d.sheet = on
+	d.restartArm = time.Time{}
+	d.mu.Unlock()
+	slog.Info("settings sheet", "open", on)
+	d.wake()
+}
+
+// sheetTap is a finger on a row of the settings sheet.
+func (d *Display) sheetTap(row int) {
+	switch row {
+	case sheetRows:
+		d.showSheet(false)
+	case rowBluetooth:
+		d.showSheet(false)
+		btaudio.Get().SetPairing(true)
+	case rowBrightness:
+		// Round the dial: 25, 50, 75, 100.
+		pct := d.ceilingOrDefault()
+		next := (pct/25+1)*25
+		if next > 100 {
+			next = 25
+		}
+		d.apply(true, next, true)
+	case rowAuto:
+		d.mu.Lock()
+		on := d.autoOn
+		d.mu.Unlock()
+		d.setAuto(!on, true)
+	case rowMic:
+		mute.Get().Toggle()
+	case rowRestart:
+		d.mu.Lock()
+		armed := !d.restartArm.IsZero() && time.Since(d.restartArm) < restartWindow
+		if !armed {
+			d.restartArm = time.Now()
+		}
+		d.mu.Unlock()
+		if armed {
+			slog.Warn("restart asked for from the screen")
+			restart()
+		}
 	}
 }
 
@@ -398,14 +470,21 @@ func (d *Display) frame() time.Duration {
 		s.volume, s.showVolume = volume, true
 	}
 	s.bt = btaudio.Get().State()
+	d.mu.Lock()
+	s.showSheet = d.sheet
+	restartArm := d.restartArm
+	d.mu.Unlock()
+	if s.showSheet {
+		s.sheet = d.gather(s, restartArm)
+	}
 
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
 
-	if s.bt.Pairing {
-		return 400 * time.Millisecond
+	if s.bt.Pairing || s.showSheet {
+		return 500 * time.Millisecond
 	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {
 		// On the next whole second, so the clock changes when the second does.
