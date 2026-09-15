@@ -22,6 +22,9 @@ import (
 	"github.com/HuskerMinion/techo5/internal/alsa"
 )
 
+// toneLevel is the tone amplitude, set from -level.
+var toneLevel = 0.3
+
 const (
 	card = 0
 
@@ -52,7 +55,9 @@ func main() {
 	setInt := flag.String("set-int", "", "set an integer or boolean mixer control before capturing, as NAME=VALUE")
 	perPeriod := flag.Bool("per-period", false, "play a tone filling a fixed 768-frame stack buffer per write, the way the daemon's play tool does")
 	hold := flag.String("hold", "/dev/snd/pcmC0D1c", "hold this AFE node open so the DL1 driver takes its DRAM ring, not the SRAM ring that panics this kernel; empty for none")
+	level := flag.Float64("level", 0.3, "tone amplitude, 0 to 1")
 	flag.Parse()
+	toneLevel = *level
 
 	if *hold != "" {
 		h, err := os.OpenFile(*hold, os.O_RDWR|syscall.O_NONBLOCK, 0)
@@ -140,7 +145,7 @@ func main() {
 		fmt.Printf("playback open: pcmC%dD%dp %d Hz %d ch S16_LE period %d x %d\n", card, playbackDevice, playbackRate, playbackChannels, *pbPeriod, *pbPeriods)
 		var pcm []byte
 		if *tone {
-			pcm = toneS16Stereo(1000, 1.0, 0.3)
+			pcm = toneS16Stereo(1000, 1.0, toneLevel)
 		} else {
 			pcm = upsampleCh0(recorded)
 		}
@@ -215,7 +220,7 @@ func playTone(period, periods int) {
 		fmt.Fprintf(os.Stderr, "audioprobe: concurrent playback: %v\n", err)
 		return
 	}
-	pcm := toneS16Stereo(1000, 1.5, 0.3)
+	pcm := toneS16Stereo(1000, 1.5, toneLevel)
 	chunk := period * pb.FrameBytes()
 	for off := 0; off < len(pcm); off += chunk {
 		end := off + chunk

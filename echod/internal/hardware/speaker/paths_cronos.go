@@ -45,11 +45,16 @@ type kctl struct {
 	blob  []byte
 }
 
-// On cronos the MAX98396 amplifier and the AIC3101 codec are left configured by the vendor HAL at
-// boot, and audioprobe plays through them with no mixer writes at all: the playback stream is
-// driven at unity and the volume curve is applied in software. There is nothing to route, so the
-// sequences are empty, and the amplifier switch is never touched (see AmpSwitch below).
-var initSequence = []kctl{}
+// On cronos the AIC3101 codec is left as the kernel brings it up, the playback stream is driven
+// at unity and the volume curve is applied in software; there is nothing to route, and the
+// amplifier switch is never touched (see AmpSwitch below). One write matters: the MAX98396 comes
+// up in "Speaker Safe Mode", a power cap that takes about 30 dB off the output (measured
+// 2026-09-15: a 0.3 FS tone at the mic went from -47 to -15 dBFS when it was cleared). Amazon's
+// HAL cleared it at boot; with Android on the null HAL nobody does, so the daemon does. Codec
+// writes are cached until the stream powers up, which is why this goes before the first write.
+var initSequence = []kctl{
+	{name: "Speaker Safe Mode A", level: 0},
+}
 
 var pathSequence = map[Output][]kctl{
 	OutputSpeaker:   {},
@@ -79,20 +84,20 @@ func DetectOutput() Output {
 // volume is in.
 const VolumeSteps = config.VolumeSteps
 
-// volumeCurves maps a volume step to attenuation in dB: the Dot's vendor speaker curve, which
-// reaches unity at the top. A first version capped the top at -6 dB because a 0.3 FS test tone
-// had sounded loud; in the room, speech at that cap was too quiet (2026-09-14), so the full range
-// is back and the step is the listener's to choose.
+// volumeCurves maps a volume step to attenuation in dB: the Dot's vendor speaker curve shape,
+// sitting 6 dB below it. With the amplifier out of safe mode this speaker is loud: half the dial
+// at the unity-topped curve was "fricking loud" in a small room (2026-09-15), so the whole range
+// is pulled down and the top of the dial is room-loud rather than painful.
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -33, -30, -26, -25, -23, -21, -19, -17, -16,
-		-14, -13, -12, -10, -9, -8, -7, -5, -5, -4,
-		-4, -4, -4, -3, -3, -3, -3, -3, -2, -1, 0,
+		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
+		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
+		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
 	},
 	OutputHeadphone: {
-		-90, -33, -30, -26, -25, -23, -21, -19, -17, -16,
-		-14, -13, -12, -10, -9, -8, -7, -5, -5, -4,
-		-4, -4, -4, -3, -3, -3, -3, -3, -2, -1, 0,
+		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
+		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
+		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
 	},
 }
 

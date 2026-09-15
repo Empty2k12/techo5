@@ -125,17 +125,23 @@ on this device) works. `cmd/audioprobe -hold` and the daemon's speaker do this; 
 Ring geometry: 768 × 4 (12 KB, the vendor HAL's period at twice its depth) is what the
 daemon uses; the HAL itself runs 768 × 2.
 
-### Loudness ceiling
+### Loudness: `Speaker Safe Mode A` must be cleared
 
-The MAX98396's ASoC controls (`Speaker Volume A`, `Digital Volume A`) are register-cached while
-a stream runs and only reach the chip when the codec powers up again, so a change shows only
-after the stream is closed and reopened. Applied that way, `Speaker Volume A` values 5 and 8
-sound identical and 14 mutes the output; it is not a usable gain. With speech normalised to
-−14 dBFS RMS (the level a test tone was called loud at) and the dial at the top, speech is heard
-as "medium, adequate" (2026-09-15). The daemon normalises speech to that level
-(`media.Normalize`/`SpeechGain`) and applies no other boost; louder than this needs the
-amplifier configured differently than the kernel driver leaves it, which is where Amazon's HAL
-did its work.
+The MAX98396 comes up from the kernel driver with `Speaker Safe Mode A = 1`, a power cap that
+takes about **30 dB** off the output. Amazon's HAL clears it at boot, which is why the device was
+loud with the stock HAL and quiet once Android moved to the null HAL. Measured 2026-09-15 with
+`audioprobe -concurrent`: a 0.3 FS tone read −47 dBFS RMS at the microphone with safe mode on
+and −15 dBFS with it off, mic floor unchanged. The daemon now clears it in its speaker init
+sequence. The hardware is linear either way (10 dB digital → 10 dB acoustic).
+
+Codec controls are register-cached while a stream runs and reach the chip when the codec
+powers up again, so a control changed under a running daemon shows only after the stream is
+closed and reopened. `Speaker Volume A` is not a usable gain: 5 and 8 sound identical and 14
+mutes the output.
+
+Speech from Home Assistant is normalised to −14 dBFS RMS before the volume curve
+(`media.Normalize`/`SpeechGain`). The cronos volume curve sits 6 dB below the Dot's, since half
+the dial at unity was too loud for a small room once safe mode was off.
 
 ### Do not toggle `Ext_Speaker_Amp_Switch`
 
