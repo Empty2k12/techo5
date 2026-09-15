@@ -379,6 +379,9 @@ func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 // Pause leaves the track where it is, so it can be picked up again.
 func (p *Player) Pause() { p.stream.Pause() }
 
+// Resume picks a paused track up again.
+func (p *Player) Resume() { p.stream.Resume() }
+
 // refresh tells Home Assistant what the player is doing. Anything that displaces the noise — a track,
 // a stop, the action button — clears both entities, rather than leaving them naming a sound nobody can
 // hear.

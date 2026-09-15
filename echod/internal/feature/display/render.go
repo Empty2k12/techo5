@@ -59,6 +59,12 @@ type scene struct {
 	showRadio bool
 	radio     home.Radio
 	weather   home.Weather
+
+	// showWeather is the forecast page, for a while after a weather question; nowPlaying is the
+	// idle screen while the radio plays or sits paused.
+	showWeather bool
+	forecast    forecastDays
+	nowPlaying  bool
 }
 
 const sheetVolumeSteps = media.VolumeSteps
@@ -133,6 +139,14 @@ func (r *renderer) draw(s scene) {
 		}
 		return
 	}
+	if s.showWeather {
+		r.weatherPage(s)
+		r.footer(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
 
 	switch s.phase {
 	case "listening":
@@ -144,7 +158,11 @@ func (r *renderer) draw(s scene) {
 		r.cornerClock(s)
 		r.words(s.heard, s.reply, 70)
 	default:
-		r.bigClock(s)
+		if s.nowPlaying {
+			r.nowPlaying(s)
+		} else {
+			r.bigClock(s)
+		}
 	}
 	r.footer(s)
 	if s.showVolume {

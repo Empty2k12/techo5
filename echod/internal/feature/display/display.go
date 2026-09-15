@@ -21,6 +21,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,6 +100,11 @@ type Display struct {
 
 	// radio is the radio page being shown.
 	radio bool
+
+	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
+	// stays once the turn is over.
+	weatherArmed bool
+	weatherUntil time.Time
 }
 
 var (
@@ -247,8 +253,28 @@ func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
 	d.view = s
 	d.viewAt = time.Now()
+	// A question about the weather brings the forecast page up once the answer is done, for a
+	// while, and then the screen goes back to whatever it was showing.
+	if s.Heard != "" && aboutWeather(s.Heard) {
+		d.weatherArmed = true
+	}
+	if s.Phase == "idle" && d.weatherArmed {
+		d.weatherArmed = false
+		d.weatherUntil = time.Now().Add(weatherShow)
+	}
 	d.mu.Unlock()
 	d.wake()
+}
+
+// aboutWeather is whether what was heard asked about the weather.
+func aboutWeather(heard string) bool {
+	h := strings.ToLower(heard)
+	for _, w := range []string{"weather", "forecast", "temperature", "rain", "snow", "how hot", "how cold"} {
+		if strings.Contains(h, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // volumeMoved is the level changing on purpose; the screen shows it for a moment.
@@ -327,6 +353,26 @@ func (d *Display) gesture(g touch.Gesture) {
 
 	switch g.Kind {
 	case touch.Tap:
+		d.mu.Lock()
+		weatherUp := time.Now().Before(d.weatherUntil)
+		idle := d.view.Phase == "idle"
+		d.mu.Unlock()
+		if weatherUp {
+			// The forecast page: a tap puts it away.
+			d.mu.Lock()
+			d.weatherUntil = time.Time{}
+			d.mu.Unlock()
+			return
+		}
+		if idle && d.nowPlaying() {
+			// The now-playing screen: a tap is play/pause.
+			if playing, _ := media.Get().Playing(); playing {
+				media.Get().Pause()
+			} else {
+				media.Get().Resume()
+			}
+			return
+		}
 		voice.Get().Action()
 	case touch.SwipeUp:
 		media.Get().Adjust(+1)
@@ -338,6 +384,16 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		media.Get().Adjust(-1)
 	}
+}
+
+// nowPlaying is whether the idle screen should be the radio's: something playing or paused, and
+// the radio wired up so the page has a name to show.
+func (d *Display) nowPlaying() bool {
+	playing, paused := media.Get().Playing()
+	if !playing && !paused {
+		return false
+	}
+	return home.Get().Radio().Configured
 }
 
 func (d *Display) showRadio(on bool) {
@@ -526,10 +582,17 @@ func (d *Display) frame() time.Duration {
 	if s.showSheet {
 		s.sheet = d.gather(s, restartArm)
 	}
-	if s.showRadio {
+	s.nowPlaying = (s.phase == "idle") && d.nowPlaying()
+	if s.showRadio || s.nowPlaying {
 		s.radio = home.Get().Radio()
 	}
 	s.weather = home.Get().Weather()
+	d.mu.Lock()
+	s.showWeather = (s.phase == "idle" || s.phase == "lingering") && now.Before(d.weatherUntil)
+	d.mu.Unlock()
+	if s.showWeather {
+		s.forecast = home.Get().Forecast()
+	}
 
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
@@ -538,6 +601,9 @@ func (d *Display) frame() time.Duration {
 
 	if s.bt.Pairing || s.showSheet || s.showRadio {
 		return 500 * time.Millisecond
+	}
+	if s.showWeather || s.nowPlaying {
+		return time.Until(now.Truncate(idleFrame).Add(idleFrame))
 	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {
 		// On the next whole second, so the clock changes when the second does.

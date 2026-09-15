@@ -6,9 +6,11 @@
 package home
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
 
@@ -43,8 +46,50 @@ type Feature struct {
 	// Changed fires when anything shown changes; listeners must not block.
 	Changed hook.Hook[struct{}]
 
-	mu     sync.Mutex
-	chosen string
+	mu       sync.Mutex
+	chosen   string
+	forecast []hass.Day
+	fetched  time.Time
+	poke     chan struct{}
+}
+
+// forecastEvery is how often the forecast is refreshed while there is a weather entity.
+const forecastEvery = 30 * time.Minute
+
+// Run keeps the forecast current. Nothing to do without a token or a weather entity.
+func (f *Feature) Run(ctx context.Context) error {
+	for {
+		f.refreshForecast()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-f.poke:
+		case <-time.After(forecastEvery):
+		}
+	}
+}
+
+func (f *Feature) refreshForecast() {
+	entity := config.Get().Home.Weather
+	if entity == "" || !hass.Get().Ready() {
+		return
+	}
+	days, err := hass.Get().Forecast(entity)
+	if err != nil {
+		slog.Warn("home: forecast", "err", err)
+		return
+	}
+	f.mu.Lock()
+	f.forecast, f.fetched = days, time.Now()
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+}
+
+// Forecast is the daily forecast as last fetched, today first.
+func (f *Feature) Forecast() []hass.Day {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]hass.Day(nil), f.forecast...)
 }
 
 var (
@@ -54,10 +99,17 @@ var (
 
 func Get() *Feature {
 	once.Do(func() {
-		shared = &Feature{}
+		shared = &Feature{poke: make(chan struct{}, 1)}
 		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
 	})
 	return shared
+}
+
+func (f *Feature) wake() {
+	select {
+	case f.poke <- struct{}{}:
+	default:
+	}
 }
 
 func (f *Feature) Name() string { return "home" }
@@ -85,6 +137,7 @@ func (f *Feature) want(h config.Home) {
 // radio page is wired. Both persist and take effect at the next connection.
 func (f *Feature) Actions() []*esphome.Action {
 	return []*esphome.Action{
+		f.accessAction(),
 		{
 			Name: "home_weather",
 			Args: []esphome.Arg{{Name: "entity", Type: esphome.ArgString}},
@@ -143,7 +196,25 @@ func (f *Feature) Actions() []*esphome.Action {
 func (f *Feature) rewire() {
 	f.want(config.Get().Home)
 	component.Reconnect.Emit(struct{}{})
+	f.wake()
 	f.Changed.Emit(struct{}{})
+}
+
+// accessAction is the third action: the URL and a long-lived token for Home Assistant's REST
+// API, for the forecast and, later, pictures and cameras.
+func (f *Feature) accessAction() *esphome.Action {
+	return &esphome.Action{
+		Name: "home_assistant",
+		Args: []esphome.Arg{{Name: "url", Type: esphome.ArgString}, {Name: "token", Type: esphome.ArgString}},
+		Run: func(c esphome.Call) (any, error) {
+			if err := hass.Get().Set(c.String("url"), c.String("token")); err != nil {
+				return nil, err
+			}
+			slog.Info("home: home assistant access stored")
+			f.wake()
+			return nil, nil
+		},
+	}
 }
 
 // Weather is the current reading for the clock.

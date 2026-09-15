@@ -417,7 +417,16 @@ session.
    remains is all userspace: select the sensor through the imgsensor ioctls,
    configure the ISP pass-through, get one raw frame. `build-kernel.sh` keeps
    KPATCHED=1 for a patched branch should that ever be needed.
-10. **Echo Dot (biscuit) on the same image**: same MT8163 family, the daemon
+10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
+   Assistant entities over the ESPHome state subscription; `feature/home`
+   shows the weather on the clock and a radio page whose stations come from
+   the house's input_selects and whose taps call `script.radio_play_on_speaker`
+   through a device-initiated action (needs "Allow the device to perform Home
+   Assistant actions" on the ESPHome entry). Wired from Home Assistant with the
+   device actions `home_weather` and `home_radio`. Next page: **cameras** — fetch
+   snapshots / the MJPEG stream from Home Assistant's camera proxy with a token
+   handed over by an action, list the camera entities, tap to view live.
+11. **Echo Dot (biscuit) on the same image**: same MT8163 family, the daemon
    already builds with the `dot` tag. Inventory one Dot (partition table,
    FireOS kernel version/config, Wi-Fi/BT modules and firmware, RAM/eMMC),
    first boot = rescue initramfs on the FireOS kernel flashed to recovery, then
