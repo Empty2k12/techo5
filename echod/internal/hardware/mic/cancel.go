@@ -2,6 +2,7 @@ package mic
 
 import (
 	"log/slog"
+	"math"
 	"sync/atomic"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/aec"
@@ -143,7 +144,8 @@ func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
 	}
 
 	if !c.active.Swap(true) {
-		slog.Info("echo cancellation running", "engine", c.engine, "taps", cancelTaps)
+		slog.Info("echo cancellation running", "engine", c.engine, "taps", cancelTaps,
+			"ref_dbfs", level(c.ref), "mic_dbfs", level(mics[CenterMic]))
 	}
 
 	out, erleDB, err := c.process(mics[CenterMic], c.ref)
@@ -164,6 +166,22 @@ func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
 	c.mono = c.mono[:len(out)]
 	copy(c.mono, out)
 	return c.mono
+}
+
+// level is the RMS of a block in dBFS, rounded, for the log.
+func level(s []int16) float64 {
+	if len(s) == 0 {
+		return -120
+	}
+	var sum float64
+	for _, v := range s {
+		sum += float64(v) * float64(v)
+	}
+	rms := math.Sqrt(sum / float64(len(s)))
+	if rms < 1 {
+		return -120
+	}
+	return math.Round(20*math.Log10(rms/32768)*10) / 10
 }
 
 // playing reports whether the loopback carries anything.

@@ -19,6 +19,7 @@ import (
 	"golang.org/x/image/math/fixed"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 )
 
@@ -53,6 +54,11 @@ type scene struct {
 	// sheet is the settings sheet, drawn instead of everything else while showSheet is set.
 	showSheet bool
 	sheet     settings
+
+	// radio is the radio page, likewise; weather is on the clock when known.
+	showRadio bool
+	radio     home.Radio
+	weather   home.Weather
 }
 
 const sheetVolumeSteps = media.VolumeSteps
@@ -120,6 +126,13 @@ func (r *renderer) draw(s scene) {
 		}
 		return
 	}
+	if s.showRadio {
+		r.radioPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
 
 	switch s.phase {
 	case "listening":
@@ -168,6 +181,38 @@ func (r *renderer) bigClock(s scene) {
 
 	date := s.now.Format("Monday, January 2")
 	r.text(r.small, date, (r.w-r.width(r.small, date))/2, base+70, dim)
+
+	// The weather, top left, when Home Assistant has told us where to look.
+	if w := s.weather; w.Temp != "" || w.Condition != "" {
+		line := w.Temp
+		if c := conditionWords(w.Condition); c != "" {
+			if line != "" {
+				line += "  ·  "
+			}
+			line += c
+		}
+		r.text(r.small, line, r.margin, r.margin+26, dim)
+	}
+}
+
+// conditionWords turns Home Assistant's weather state into words for the screen.
+func conditionWords(c string) string {
+	switch c {
+	case "", "unknown", "unavailable":
+		return ""
+	case "clear-night":
+		return "Clear"
+	case "partlycloudy":
+		return "Partly cloudy"
+	case "lightning-rainy":
+		return "Thunderstorms"
+	case "snowy-rainy":
+		return "Sleet"
+	case "exceptional":
+		return "Severe"
+	}
+	// "sunny", "cloudy", "rainy", "pouring", "fog", "hail", "snowy", "windy", "lightning"…
+	return strings.ToUpper(c[:1]) + c[1:]
 }
 
 // cornerClock keeps the time in view while words have the screen.

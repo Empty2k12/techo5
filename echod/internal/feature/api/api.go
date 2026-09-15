@@ -16,6 +16,7 @@ import (
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
+	"github.com/ygelfand/go-esphome-device/api"
 
 	"github.com/HuskerMinion/techo5/echod/internal/android/firewall"
 	"github.com/HuskerMinion/techo5/echod/internal/component"
@@ -53,8 +54,26 @@ func Get() *API {
 		shared = &API{reconnect: make(chan struct{}, 1)}
 		component.Reconnect.Listen(func(struct{}) { shared.Reconnect() })
 		component.Fire.Listen(func(e component.Event) { shared.fire(e) })
+		component.CallService.Listen(func(c component.Call) { shared.call(c) })
 	})
 	return shared
+}
+
+// call asks Home Assistant to run an action — a script, a service — with data. Like fire, nothing
+// happens before the server is up; Home Assistant also has to allow it for this device.
+func (a *API) call(c component.Call) {
+	if a.srv == nil {
+		return
+	}
+	fields := make([]*api.HomeassistantServiceMap, 0, len(c.Data))
+	for k, v := range c.Data {
+		fields = append(fields, &api.HomeassistantServiceMap{Key: k, Value: v})
+	}
+	if err := a.srv.Broadcast(&api.HomeassistantActionRequest{Service: c.Service, Data: fields}); err != nil {
+		slog.Warn("calling a home assistant action failed", "service", c.Service, "err", err)
+	} else {
+		slog.Info("home assistant action called", "service", c.Service, "data", c.Data)
+	}
 }
 
 func (a *API) Name() string { return "api" }

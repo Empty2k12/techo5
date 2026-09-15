@@ -29,6 +29,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
@@ -95,6 +96,9 @@ type Display struct {
 	// sheet is the settings sheet being shown; restartArm is the first of the two taps Restart wants.
 	sheet      bool
 	restartArm time.Time
+
+	// radio is the radio page being shown.
+	radio bool
 }
 
 var (
@@ -131,6 +135,7 @@ func build() *Display {
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	return d
 }
 
@@ -296,10 +301,19 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	// The settings sheet: rows do things, the bar at the bottom closes it.
+	// The radio page: a row plays (or stops), the bar closes it.
 	d.mu.Lock()
-	sheet := d.sheet
+	sheet, radio := d.sheet, d.radio
 	d.mu.Unlock()
+	if radio {
+		if g.Kind == touch.Tap && d.r != nil {
+			d.radioTap(d.r.radioRowAt(g.Y))
+		}
+		d.wake()
+		return
+	}
+
+	// The settings sheet: rows do things, the bar at the bottom closes it.
 	if sheet {
 		// Vertical swipes do nothing here: the swipe that opened the sheet keeps reporting notches
 		// until the finger lifts, and those must not turn into volume steps. The Volume row takes
@@ -326,6 +340,35 @@ func (d *Display) gesture(g touch.Gesture) {
 	}
 }
 
+func (d *Display) showRadio(on bool) {
+	d.mu.Lock()
+	d.radio = on
+	d.mu.Unlock()
+	slog.Info("radio page", "open", on)
+	d.wake()
+}
+
+// radioTap is a finger on a row of the radio page.
+func (d *Display) radioTap(row int) {
+	if row == radioRows {
+		d.showRadio(false)
+		return
+	}
+	if row < 0 {
+		return
+	}
+	rd := home.Get().Radio()
+	rows := radioList(rd)
+	if row >= len(rows) {
+		return
+	}
+	if rows[row] == "■ Stop" {
+		home.Get().Stop()
+		return
+	}
+	home.Get().Play(rows[row])
+}
+
 func (d *Display) showSheet(on bool) {
 	d.mu.Lock()
 	d.sheet = on
@@ -340,6 +383,9 @@ func (d *Display) sheetTap(row, x int) {
 	switch row {
 	case sheetRows:
 		d.showSheet(false)
+	case rowRadio:
+		d.showSheet(false)
+		d.showRadio(true)
 	case rowVolume:
 		// Left half down, right half up.
 		if d.r != nil && x < d.r.w/2 {
@@ -474,19 +520,23 @@ func (d *Display) frame() time.Duration {
 	}
 	s.bt = btaudio.Get().State()
 	d.mu.Lock()
-	s.showSheet = d.sheet
+	s.showSheet, s.showRadio = d.sheet, d.radio
 	restartArm := d.restartArm
 	d.mu.Unlock()
 	if s.showSheet {
 		s.sheet = d.gather(s, restartArm)
 	}
+	if s.showRadio {
+		s.radio = home.Get().Radio()
+	}
+	s.weather = home.Get().Weather()
 
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
 
-	if s.bt.Pairing || s.showSheet {
+	if s.bt.Pairing || s.showSheet || s.showRadio {
 		return 500 * time.Millisecond
 	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {

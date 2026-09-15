@@ -1,0 +1,229 @@
+// Package home is the house on the screen: the weather on the clock, and a radio page that lists
+// the stations Home Assistant knows and plays one through Home Assistant's own script — the same
+// path the old dashboard's chips used, so favourites, search and the station finder stay where
+// they are. Nothing here is baked in: Home Assistant tells the device which entities to follow and
+// which script to call, through two actions (esphome.<device>_home_weather and _home_radio).
+package home
+
+import (
+	"log/slog"
+	"strings"
+	"sync"
+
+	esphome "github.com/ygelfand/go-esphome-device"
+
+	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+)
+
+func init() {
+	component.Register(component.Device, Get(), component.Order(36))
+}
+
+// Weather is what the clock shows.
+type Weather struct {
+	Condition string // Home Assistant's state: "partlycloudy", "rain"…
+	Temp      string // "75°" already formatted, empty when unknown
+}
+
+// Radio is what the radio page shows.
+type Radio struct {
+	Configured bool
+	Stations   []string
+	Now        string // the station Home Assistant says is playing, empty for none
+	Playing    bool   // the device's own player is running
+	Chosen     string // the station tapped last, until Now catches up
+}
+
+type Feature struct {
+	// Changed fires when anything shown changes; listeners must not block.
+	Changed hook.Hook[struct{}]
+
+	mu     sync.Mutex
+	chosen string
+}
+
+var (
+	once   sync.Once
+	shared *Feature
+)
+
+func Get() *Feature {
+	once.Do(func() {
+		shared = &Feature{}
+		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
+	})
+	return shared
+}
+
+func (f *Feature) Name() string { return "home" }
+
+// Restore registers what to follow from the saved configuration, before Home Assistant connects.
+func (f *Feature) Restore(c config.Config) { f.want(c.Home) }
+
+func (f *Feature) want(h config.Home) {
+	t := hastate.Get()
+	t.Forget()
+	if h.Weather != "" {
+		t.Want(h.Weather, "")
+		t.Want(h.Weather, "temperature")
+		t.Want(h.Weather, "temperature_unit")
+	}
+	for _, s := range h.Radio.Stations {
+		t.Want(s, "options")
+	}
+	if h.Radio.Now != "" {
+		t.Want(h.Radio.Now, "")
+	}
+}
+
+// Actions are how Home Assistant configures this: which weather entity to show, and how the
+// radio page is wired. Both persist and take effect at the next connection.
+func (f *Feature) Actions() []*esphome.Action {
+	return []*esphome.Action{
+		{
+			Name: "home_weather",
+			Args: []esphome.Arg{{Name: "entity", Type: esphome.ArgString}},
+			Run: func(c esphome.Call) (any, error) {
+				entity := strings.TrimSpace(c.String("entity"))
+				if err := config.Set().Home().Weather(entity); err != nil {
+					return nil, err
+				}
+				slog.Info("home: weather entity set", "entity", entity)
+				f.rewire()
+				return nil, nil
+			},
+		},
+		{
+			Name: "home_radio",
+			Args: []esphome.Arg{
+				{Name: "stations", Type: esphome.ArgString}, // input_select entities, comma separated
+				{Name: "now", Type: esphome.ArgString},      // entity whose state names the playing station
+				{Name: "service", Type: esphome.ArgString},  // script that plays a station
+				{Name: "field", Type: esphome.ArgString},    // its station argument (default "station")
+				{Name: "speaker_field", Type: esphome.ArgString},
+				{Name: "speaker", Type: esphome.ArgString}, // this device's media_player entity
+			},
+			Run: func(c esphome.Call) (any, error) {
+				r := config.Radio{
+					Now:          strings.TrimSpace(c.String("now")),
+					Service:      strings.TrimSpace(c.String("service")),
+					Field:        strings.TrimSpace(c.String("field")),
+					SpeakerField: strings.TrimSpace(c.String("speaker_field")),
+					Speaker:      strings.TrimSpace(c.String("speaker")),
+				}
+				for _, s := range strings.Split(c.String("stations"), ",") {
+					if s = strings.TrimSpace(s); s != "" {
+						r.Stations = append(r.Stations, s)
+					}
+				}
+				if r.Field == "" {
+					r.Field = "station"
+				}
+				if r.SpeakerField == "" {
+					r.SpeakerField = "speaker"
+				}
+				if err := config.Set().Home().Radio(r); err != nil {
+					return nil, err
+				}
+				slog.Info("home: radio wired", "stations", r.Stations, "service", r.Service, "now", r.Now)
+				f.rewire()
+				return nil, nil
+			},
+		},
+	}
+}
+
+// rewire re-registers what to follow and asks for a reconnect, since Home Assistant only asks
+// what the device wants once per connection.
+func (f *Feature) rewire() {
+	f.want(config.Get().Home)
+	component.Reconnect.Emit(struct{}{})
+	f.Changed.Emit(struct{}{})
+}
+
+// Weather is the current reading for the clock.
+func (f *Feature) Weather() Weather {
+	h := config.Get().Home
+	if h.Weather == "" {
+		return Weather{}
+	}
+	t := hastate.Get()
+	w := Weather{Condition: t.State(h.Weather)}
+	if temp, ok := t.Value(h.Weather, "temperature"); ok && temp != "" && temp != "None" {
+		if i := strings.IndexByte(temp, '.'); i > 0 {
+			temp = temp[:i]
+		}
+		w.Temp = temp + "°"
+	}
+	return w
+}
+
+// Radio is the page's content.
+func (f *Feature) Radio() Radio {
+	h := config.Get().Home.Radio
+	r := Radio{Configured: h.Configured()}
+	if !r.Configured {
+		return r
+	}
+	t := hastate.Get()
+	seen := map[string]bool{}
+	for _, entity := range h.Stations {
+		v, ok := t.Value(entity, "options")
+		if !ok {
+			continue
+		}
+		for _, name := range hastate.Options(v) {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] || strings.HasPrefix(strings.ToLower(name), "select a") {
+				continue
+			}
+			seen[name] = true
+			r.Stations = append(r.Stations, name)
+		}
+	}
+	if h.Now != "" {
+		r.Now = t.State(h.Now)
+		if r.Now == "unknown" || r.Now == "unavailable" {
+			r.Now = ""
+		}
+	}
+	r.Playing, _ = media.Get().Playing()
+	f.mu.Lock()
+	r.Chosen = f.chosen
+	f.mu.Unlock()
+	return r
+}
+
+// Play asks Home Assistant to play a station on this device.
+func (f *Feature) Play(station string) {
+	h := config.Get().Home.Radio
+	if !h.Configured() {
+		return
+	}
+	speaker := h.Speaker
+	if speaker == "" {
+		speaker = "media_player." + layout.Slug(config.Get().Device.Name) + "_speaker"
+	}
+	f.mu.Lock()
+	f.chosen = station
+	f.mu.Unlock()
+	component.CallService.Emit(component.Call{
+		Service: h.Service,
+		Data:    map[string]string{h.Field: station, h.SpeakerField: speaker},
+	})
+	f.Changed.Emit(struct{}{})
+}
+
+// Stop ends whatever the player is doing.
+func (f *Feature) Stop() {
+	media.Get().Pause()
+	f.mu.Lock()
+	f.chosen = ""
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+}

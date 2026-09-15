@@ -12,6 +12,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -41,6 +42,16 @@ func (d *Display) gather(s scene, restartArm time.Time) settings {
 	st.version = layout.VersionString()
 	st.slot = slotName()
 	st.address = address()
+
+	rd := home.Get().Radio()
+	switch {
+	case !rd.Configured:
+		st.radio = "not set up"
+	case rd.Playing && rd.Now != "":
+		st.radio = "playing " + rd.Now + "  ·  tap to open"
+	default:
+		st.radio = "tap to choose a station"
+	}
 
 	bt := btaudio.Get().State()
 	switch {
