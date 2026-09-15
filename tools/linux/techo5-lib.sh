@@ -155,9 +155,12 @@ t5_bt_up() {
 	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: bridge up but no hci0"; return 1; }
 	# Pairings and bluez-alsa's state must survive reboots and slot changes: keep
 	# them on userdata (the root is read-only).
-	mkdir -p /run/dbus /data/misc/techo5/bluetooth /data/misc/techo5/bluealsa /var/lib/bluetooth /var/lib/bluealsa
+	mkdir -p /run/dbus /data/misc/techo5/bluetooth /data/misc/techo5/bluealsa
 	mountpoint -q /var/lib/bluetooth || mount --bind /data/misc/techo5/bluetooth /var/lib/bluetooth
-	mountpoint -q /var/lib/bluealsa || mount --bind /data/misc/techo5/bluealsa /var/lib/bluealsa
+	# Alpine's bluez-alsa was built with /usr/var as its state directory.
+	for d in /var/lib/bluealsa /usr/var/lib/bluealsa; do
+		[ -d "$d" ] && { mountpoint -q "$d" || mount --bind /data/misc/techo5/bluealsa "$d"; }
+	done
 	if ! pidof dbus-daemon >/dev/null; then
 		dbus-daemon --system --nofork --nopidfile >> "$logdir/dbus.log" 2>&1 &
 		sleep 1

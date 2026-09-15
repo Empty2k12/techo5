@@ -89,6 +89,9 @@ type Feature struct {
 	busy    map[string]bool
 	pairOff *time.Timer
 	poke    chan struct{}
+
+	// refusals counts stream opens bluetoothd refused for the current connection; see attach.
+	refusals int
 }
 
 var (
@@ -172,6 +175,11 @@ func (f *Feature) Start(ctx context.Context) error {
 			slog.Warn("bluetooth alias", "err", err)
 		}
 	}
+	// Not findable until someone asks: bluetoothd remembers discoverable across restarts.
+	if err := a.Pairing(false); err != nil {
+		slog.Warn("bluetooth: leaving pairing mode", "err", err)
+	}
+	_ = a.Discover(false)
 	f.mu.Lock()
 	f.adapter, f.alsa = a, al
 	f.state.Available = true
@@ -217,16 +225,36 @@ func (f *Feature) Run(ctx context.Context) error {
 // tryRemembered gives the last device one chance at start-up. Earbuds in their case do not answer
 // and that is fine.
 func (f *Feature) tryRemembered(ctx context.Context) {
-	addr := config.Get().Bluetooth.Audio
-	if addr == "" {
-		return
-	}
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(3 * time.Second):
 	}
+	addr := f.remembered()
+	if addr == "" {
+		return
+	}
 	f.connect(ctx, addr, false)
+}
+
+// remembered is the device to reach for: the one saved here, or failing that the first audio
+// device bluetoothd holds a bond for — one paired from the console, or before this build.
+func (f *Feature) remembered() string {
+	if addr := config.Get().Bluetooth.Audio; addr != "" {
+		return addr
+	}
+	f.mu.Lock()
+	a := f.adapter
+	f.mu.Unlock()
+	if a == nil {
+		return ""
+	}
+	for _, d := range a.Devices() {
+		if d.Paired && d.AudioSink {
+			return d.Address
+		}
+	}
+	return ""
 }
 
 // refresh reconciles: the stream the speaker should be on, and what the screen should say.
@@ -266,6 +294,10 @@ func (f *Feature) refresh() {
 	switch {
 	case want == nil && cur != nil:
 		f.detach()
+	case want == nil:
+		f.mu.Lock()
+		f.refusals = 0 // whatever comes next is a new connection
+		f.mu.Unlock()
 	case want != nil && (cur == nil || cur.Path != want.Path):
 		f.attach(al, *want, wantDev)
 	}
@@ -317,12 +349,42 @@ func displayName(d bluez.Device) string {
 }
 
 // attach opens the stream and points the speaker at it.
+//
+// A stream the device set up itself — earbuds coming out of their case connect on their own —
+// cannot be acquired from this side: bluetoothd answers NotAuthorized, and keeps answering. What
+// works is a connection this side made, so after a couple of refusals the link is dropped and
+// made again, once per connection.
 func (f *Feature) attach(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) {
 	s, err := al.Open(p)
 	if err != nil {
 		slog.Warn("bluetooth stream", "device", displayName(d), "err", err)
+		f.mu.Lock()
+		f.refusals++
+		n := f.refusals
+		f.mu.Unlock()
+		if n == 2 {
+			slog.Info("bluetooth: remaking the connection ourselves", "device", displayName(d))
+			safe.Go("bluetooth remake", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*connectTimeout)
+				defer cancel()
+				f.mu.Lock()
+				a := f.adapter
+				f.mu.Unlock()
+				if a == nil {
+					return
+				}
+				if err := a.Disconnect(ctx, d.Address); err != nil {
+					slog.Warn("bluetooth disconnect", "device", displayName(d), "err", err)
+				}
+				time.Sleep(2 * time.Second)
+				f.connect(ctx, d.Address, false)
+			})
+		}
 		return
 	}
+	f.mu.Lock()
+	f.refusals = 0
+	f.mu.Unlock()
 	f.mu.Lock()
 	old := f.stream
 	f.stream = s
@@ -340,6 +402,7 @@ func (f *Feature) detach() {
 	f.mu.Lock()
 	s := f.stream
 	f.stream = nil
+	f.refusals = 0
 	f.mu.Unlock()
 	if s == nil {
 		return
@@ -468,8 +531,9 @@ func (f *Feature) connect(ctx context.Context, address string, pair bool) {
 
 // Reconnect tries the remembered device now.
 func (f *Feature) Reconnect() {
-	addr := config.Get().Bluetooth.Audio
+	addr := f.remembered()
 	if addr == "" {
+		slog.Info("bluetooth reconnect: no device to reach for")
 		f.note("No device remembered")
 		return
 	}

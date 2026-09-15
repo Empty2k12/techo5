@@ -65,7 +65,7 @@ tar -xzf "$IN/inputs/vendor.tar.gz" -C "$R" vendor
 [ -e "$R/vendor/lib/modules/mt76x8_wlan.ko" ] || { echo "mkrootfs: vendor tree has no mt76x8_wlan.ko" >&2; exit 1; }
 
 # Our binaries and scripts.
-install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa"
+install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa" "$R/usr/var/lib/bluealsa"
 for b in techo5 fbprobe audioprobe rebootto btbridge; do
 	[ -e "$IN/bin/$b" ] && install -m 755 "$IN/bin/$b" "$R/usr/local/bin/$b"
 done
