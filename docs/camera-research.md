@@ -98,10 +98,21 @@ ISP block at +0x4000 (the header's comments say 4xxx):
 | CAM_TG_SEN_GRAB_PXL | 0x4418 | PXL_S[14:0], PXL_E[30:16] |
 | CAM_TG_SEN_GRAB_LIN | 0x441C | LIN_S, LIN_E |
 
-Not in this header: the SENINF / CSI-2 receiver block. On this generation the imgsensor
-driver may own it (look for `seninf` under `drivers/misc/mediatek/imgsensor/src/mt8163` and
-the `KDIMGSENSORIOC_X_SET_I2CBUS`/`GET_CSI_CLK` ioctls), or it is a second header
-(`seninf_reg.h`) in the same GPL drops. That is the first thing to settle next.
+Not in this header: the SENINF / CSI-2 receiver block. Settled where it lives: **userspace
+too.** Our ISP driver's `ISP_WRITE_REGISTER` accepts addresses in these ranges (camera_isp.c
+lines 140–175, "the same with the value in seninf_drv.cpp"): ISP `0x15000000` (+0x10000),
+SENINF `0x15008000` (+0x4000), MIPI RX config `0x1500C000` (+0x100), MIPI RX analog
+`0x10217000` (+0x3000), PLL `0x10000000` (+0x1000), GPIO `0x10005000`. So the CSI receiver,
+the MIPI D-PHY and the sensor clock PLL are all programmed from userspace through the same
+ioctl; the map for those is MediaTek's `seninf_reg.h` (same generation, the MT6592 one is
+not at the isp_reg.h path in the BQ E10 drop — find it in another MT6592/MT8127 GPL drop, or
+the MT6580/MT6582 ones, which list the same "MT6582 xml" origin). The imgsensor kernel driver
+does no SENINF work at all (no `seninf` in `src/mt8163`).
+
+Frame buffers: `ISP_BUFFER_CTRL` ENQUE takes an `ISP_RT_BUF_INFO_STRUCT {memID, size,
+base_vAddr, base_pAddr, …}` — a physical address the caller already has, so the buffer comes
+from ION (`/dev/ion`, the multimedia heap the display probe already used in `internal/mtkdisp`)
+or `/dev/camera-sysram`; the driver tracks it in a ring per DMA and reports `bFilled` on dequeue.
 
 ## Plan for the first frame
 
