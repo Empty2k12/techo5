@@ -350,7 +350,7 @@ func (d *Display) sheetTap(row int) {
 	case rowBrightness:
 		// Round the dial: 25, 50, 75, 100.
 		pct := d.ceilingOrDefault()
-		next := (pct/25+1)*25
+		next := (pct/25 + 1) * 25
 		if next > 100 {
 			next = 25
 		}

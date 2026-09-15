@@ -44,6 +44,11 @@ const (
 
 	DefaultCancel = true
 
+	// WebRTC's canceller where the image has the helper (measured 2026-09-15 on cronos: 31 dB
+	// best against 27 for the built-in filter, and it holds better through the tail); the
+	// select settles on the built-in one elsewhere.
+	DefaultCancelEngine = CancelWebRTC
+
 	// Measured on a quiet room: 0.8 dB at the 99th percentile of frames, so this is well clear of the
 	// room itself and is really about brief small sounds — a chair, a keyboard.
 	DefaultSensitivity = 8
@@ -53,14 +58,15 @@ const (
 
 func defaultMicrophone() Microphone {
 	return Microphone{
-		Muted:       DefaultMuted,
-		LEDBright:   DefaultLEDBright,
-		Gain:        DefaultMicGain,
-		Leveling:    DefaultLeveling,
-		Mixing:      DefaultMixing,
-		Cancel:      DefaultCancel,
-		Sensitivity: DefaultSensitivity,
-		Denoise:     DefaultDenoise,
+		Muted:        DefaultMuted,
+		LEDBright:    DefaultLEDBright,
+		Gain:         DefaultMicGain,
+		Leveling:     DefaultLeveling,
+		Mixing:       DefaultMixing,
+		Cancel:       DefaultCancel,
+		CancelEngine: DefaultCancelEngine,
+		Sensitivity:  DefaultSensitivity,
+		Denoise:      DefaultDenoise,
 	}
 }
 

@@ -386,8 +386,21 @@ session.
    linear canceller, NS low, high-pass; blocks of 320 mic + 320 loopback
    samples over pipes, `hardware/mic/webrtc.go`), selectable against the
    built-in filter in Home Assistant, with fallback. Built for armv7 by
-   `tools/linux/build-aec.sh` in WSL under QEMU. Left to measure: ERLE and
-   wake-word double talk on the bench against the built-in filter.
+   `tools/linux/build-aec.sh` in WSL under QEMU. MEASURED (same announcement
+   through the speaker, ERLE as the daemon reports it): WebRTC best 31.3 dB,
+   25.5 dB at the end of the sentence; built-in best 26.6 dB, 18.8 dB at the
+   end. WebRTC is the default engine. Not yet measured: wake word during
+   music (double talk). Oddity to look at: with earbuds connected and the
+   codec fed silence, the built-in filter still reported 17–19 dB of ERLE, so
+   the loopback channel carried something — check what the FPGA loops back
+   when the DAC input is silence.
+
+   **A2DP and Wi-Fi share the antenna (2026-09-15):** an idle A2DP stream
+   held open dropped the Wi-Fi rate to 6.5 Mbit/s (a 74 MB tarball crawled at
+   1 MB/min); with the stream paused the link sits at 72 Mbit/s and moves
+   8 MB/s. The speaker sink now pauses bluez-alsa's transport after two
+   seconds of silence and resumes on the next audio (`sink.go`); that is why
+   Bluetooth discovery is also only on while pairing.
 9. **Camera, later** (same repo): its kernel patches — Amazon's imgsensor
    struct layouts, the OV02B10 driver for cronos, mirror and timing fixes —
    apply to the tree we build and would give a sensor that streams into the
