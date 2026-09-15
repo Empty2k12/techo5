@@ -84,6 +84,12 @@ type Display struct {
 	poke chan struct{}
 	dev  *screen.Device
 	r    *renderer
+
+	// booting is the splash: from the first frame until Home Assistant is listening and at least
+	// splashMin has passed.
+	booting bool
+	started time.Time
+	logo    *splash
 }
 
 var (
@@ -290,6 +296,11 @@ func (d *Display) Start(context.Context) error {
 	}
 	d.dev = dev
 	d.r = newRenderer(dev.Canvas())
+	w, h := dev.Size()
+	d.logo = newSplash(w, h)
+	d.mu.Lock()
+	d.booting, d.started = true, time.Now()
+	d.mu.Unlock()
 	slog.Info("screen open", "fb", dev.String())
 	return nil
 }
@@ -328,6 +339,21 @@ func (d *Display) frame() time.Duration {
 	if !on {
 		// Dark panel: nothing to draw, and nothing to redraw until told.
 		return time.Hour
+	}
+
+	d.mu.Lock()
+	booting, started := d.booting, d.started
+	if booting && now.Sub(started) >= splashMin && voice.Get().Ready() {
+		d.booting, booting = false, false
+		slog.Info("splash done", "after", now.Sub(started).Round(time.Millisecond))
+	}
+	d.mu.Unlock()
+	if booting {
+		d.r.drawSplash(d.logo, now.Sub(started))
+		if err := d.dev.Present(); err != nil {
+			slog.Warn("presenting the frame failed", "err", err)
+		}
+		return 80 * time.Millisecond
 	}
 
 	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at}

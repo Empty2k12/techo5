@@ -232,7 +232,10 @@ worked with no Android userspace running. What it took, beyond the plan:
   patched boot image through `KERNEL_IMAGE`, and the daemon now treats the
   stream as two microphones (`Mics = 2`) with an "All microphones" mix as the
   cronos default — what the factory driver did, one layer up where the
-  canceller and anything smarter can see both channels.
+  canceller and anything smarter can see both channels. **Wanted next (user,
+  2026-09-15): a two-microphone echo canceller** — the canceller today runs on
+  one channel (`CenterMic`); running it on both, or on the mix with both as
+  inputs, is the step past what the factory build did.
 - A bare boot leaves the codec unrouted: init selected the DIF1 inputs and set
   the mic gain; the daemon does the same at capture start (`mic.routeInputs`),
   so the rootfs boot script leaves the codec to it.
@@ -241,8 +244,14 @@ worked with no Android userspace running. What it took, beyond the plan:
 - `reboot recovery` is marked in the RTC spare register, not MISC; a failed
   boot ends in the watchdog and a normal boot; the bootloader's boot counter
   (idme) eventually parks the unit in fastboot, which is reachable and fine.
-- Custom boot logo (user request): the `logo` partition (1 MB) holds what LK
-  paints; replace it later with a TECHO5 image.
+- Custom boot logo (user request): the `logo` partition turned out empty; the
+  picture is compiled into LK (hardware.md, "Boot logo"). `tools/linux/patch-lk-logo.py`
+  builds an LK image with the TECHO5 mark (`logo/TECHO5_logo.png`) in the
+  wordmark's place, keyed onto black; flashing LK is not a one-command-recoverable
+  step, so it waits for the user's go. The daemon shows the same mark as a
+  splash from its start until Home Assistant is listening, with the signal
+  arcs pulsing outward both ways (`feature/display/splash.go`), so power-on
+  reads as one identity through to the clock.
 
 ### Status 2026-09-15, later: step 5 done — persistent rootfs with slots
 

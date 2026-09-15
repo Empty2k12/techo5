@@ -411,6 +411,23 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
   `docs/porting-plan.md` (M2/M4).
 - TWRP paints this panel with a tiny userspace through exactly this fbdev path.
 
+## Boot logo (LK)
+
+The `logo` partition (p5) is all zeros on this unit; what the bootloader
+paints is compiled into LK itself. `lk-amonet-cronos.img` (MTK header, `LK`,
+384 KB used of the 1 MB partition, load base `0x4BD00000`) carries five
+single-image zlib bundles — `u32 count=1, u32 total, u32 offset=12, zlib(raw
+32-bit BGRA)` — and a data table of pointers to them (load address =
+`0x4BD00000` + file offset − 512): the "amazon" wordmark (315×170, drawn
+centred on black, file offset 335736, pointer at 383384), "Booting…" (315×170),
+two battery pictures (408×216) and the full-screen over-temperature
+thermometer (960×480, landscape as stored; LK applies the panel rotation).
+LK knows each image's size from code, so a replacement must decompress to the
+same byte count. `tools/linux/patch-lk-logo.py` appends a new wordmark bundle
+after the LK image, repoints that one pointer and grows the header size; the
+LK copy in `expdb` (p7) is amonet's, not stock, and is left alone. `swdl` (p11)
+holds an Android boot image (Amazon's recovery/download image).
+
 ## Factory data (`/proc/idme`)
 
 `board_id`, `serial`, `mac_addr`, `bt_mac_addr`, `miccal.0-3`, `alscal`,
