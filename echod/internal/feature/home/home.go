@@ -48,6 +48,8 @@ type Feature struct {
 
 	mu       sync.Mutex
 	chosen   string
+	url      string // the stream playing, from the media player
+	urlName  string // its station name once found
 	forecast []hass.Day
 	fetched  time.Time
 	poke     chan struct{}
@@ -101,8 +103,62 @@ func Get() *Feature {
 	once.Do(func() {
 		shared = &Feature{poke: make(chan struct{}, 1)}
 		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
+		media.Get().OnPlay.Listen(shared.played)
 	})
 	return shared
+}
+
+// played is a new stream starting: whatever was tapped is no longer the answer to "what is
+// this", so its name is looked up from the URL.
+func (f *Feature) played(url string) {
+	f.mu.Lock()
+	f.url, f.urlName, f.chosen = url, "", ""
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+	go f.nameStream(url)
+}
+
+// nameStream finds a station name for a stream URL in the lists Home Assistant keeps —
+// favourites and the last search — and falls back to the stream's host.
+func (f *Feature) nameStream(url string) {
+	name := ""
+	if hass.Get().Ready() {
+		for _, entity := range []string{"sensor.radio_favorites", "sensor.radio_search_results"} {
+			st, err := hass.Get().State(entity)
+			if err != nil {
+				continue
+			}
+			for _, key := range []string{"favorites", "results"} {
+				items, _ := st.Attributes[key].([]any)
+				for _, it := range items {
+					m, _ := it.(map[string]any)
+					if u, _ := m["url"].(string); u == url {
+						if n, _ := m["name"].(string); n != "" {
+							name = n
+						}
+					}
+				}
+			}
+			if name != "" {
+				break
+			}
+		}
+	}
+	if name == "" {
+		if i := strings.Index(url, "://"); i > 0 {
+			host := url[i+3:]
+			if j := strings.IndexAny(host, "/:"); j > 0 {
+				host = host[:j]
+			}
+			name = host
+		}
+	}
+	f.mu.Lock()
+	if f.url == url {
+		f.urlName = name
+	}
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
 }
 
 func (f *Feature) wake() {
@@ -257,16 +313,18 @@ func (f *Feature) Radio() Radio {
 			r.Stations = append(r.Stations, name)
 		}
 	}
-	if h.Now != "" {
+	r.Playing, _ = media.Get().Playing()
+	f.mu.Lock()
+	r.Chosen = f.chosen
+	r.Now = f.urlName
+	f.mu.Unlock()
+	// The stream's own name wins; Home Assistant's "last station" text is the fallback.
+	if r.Now == "" && h.Now != "" {
 		r.Now = t.State(h.Now)
 		if r.Now == "unknown" || r.Now == "unavailable" {
 			r.Now = ""
 		}
 	}
-	r.Playing, _ = media.Get().Playing()
-	f.mu.Lock()
-	r.Chosen = f.chosen
-	f.mu.Unlock()
 	return r
 }
 

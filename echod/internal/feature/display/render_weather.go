@@ -21,27 +21,28 @@ func (r *renderer) weatherPage(s scene) {
 
 	days := s.forecast
 	now := s.weather
-	// Today: the reading, then the day's range.
+	// Today: a big icon, the reading beside it, the day's range and rain beneath.
+	cond := now.Condition
+	if cond == "" && len(days) > 0 {
+		cond = days[0].Condition
+	}
+	r.weatherIcon(cond, r.margin+80, 190, 150)
 	big := now.Temp
 	if big == "" && len(days) > 0 {
 		big = fmt.Sprintf("%.0f°", days[0].High)
 	}
-	r.text(r.clock, big, r.margin, 250, cream)
-	cond := conditionWords(now.Condition)
-	if cond == "" && len(days) > 0 {
-		cond = conditionWords(days[0].Condition)
-	}
-	r.text(r.body, cond, r.margin, 305, dim)
+	r.text(r.clock, big, r.margin+170, 235, cream)
+	r.text(r.body, conditionWords(cond), r.margin, 300, sunPale)
 	if len(days) > 0 {
-		r.text(r.small, fmt.Sprintf("High %.0f°  Low %.0f°", days[0].High, days[0].Low), r.margin, 350, dim)
+		r.text(r.small, fmt.Sprintf("High %.0f°   Low %.0f°", days[0].High, days[0].Low), r.margin, 345, dim)
 		if days[0].Rain >= 0 {
-			r.text(r.small, fmt.Sprintf("Rain %d%%", days[0].Rain), r.margin, 390, dim)
+			r.text(r.small, fmt.Sprintf("Rain %d%%", days[0].Rain), r.margin, 385, rainBlue)
 		}
 	}
 
-	// The next five days as columns.
+	// The next five days as columns, each with its own icon.
 	if len(days) > 1 {
-		left := r.w/2 - 20
+		left := r.w/2 + 10
 		cols := min(5, len(days)-1)
 		colW := (r.w - r.margin - left) / cols
 		for i := 0; i < cols; i++ {
@@ -51,18 +52,17 @@ func (r *renderer) weatherPage(s scene) {
 			if d.When.IsZero() {
 				name = fmt.Sprintf("+%d", i+1)
 			}
-			r.text(r.small, name, x+(colW-r.width(r.small, name))/2, 130, amber)
+			r.text(r.small, name, x+(colW-r.width(r.small, name))/2, 120, amber)
+			r.weatherIcon(d.Condition, x+colW/2, 175, min(colW-6, 70))
 			hi := fmt.Sprintf("%.0f°", d.High)
 			lo := fmt.Sprintf("%.0f°", d.Low)
-			r.text(r.body, hi, x+(colW-r.width(r.body, hi))/2, 200, cream)
-			r.text(r.small, lo, x+(colW-r.width(r.small, lo))/2, 245, dim)
-			c := shortCondition(d.Condition)
-			r.text(r.tiny, c, x+(colW-r.width(r.tiny, c))/2, 285, dim)
+			r.text(r.body, hi, x+(colW-r.width(r.body, hi))/2, 260, cream)
+			r.text(r.small, lo, x+(colW-r.width(r.small, lo))/2, 300, dim)
 			if d.Rain > 0 {
 				p := fmt.Sprintf("%d%%", d.Rain)
-				r.text(r.tiny, p, x+(colW-r.width(r.tiny, p))/2, 315, dim)
+				r.text(r.tiny, p, x+(colW-r.width(r.tiny, p))/2, 335, rainBlue)
 			}
-			draw.Draw(r.dst, image.Rect(x+8, 340, x+colW-8, 342), image.NewUniform(ember), image.Point{}, draw.Src)
+			draw.Draw(r.dst, image.Rect(x+6, 352, x+colW-6, 354), image.NewUniform(ember), image.Point{}, draw.Src)
 		}
 	} else if len(days) == 0 {
 		msg := "No forecast yet: call the home_assistant action with a token"

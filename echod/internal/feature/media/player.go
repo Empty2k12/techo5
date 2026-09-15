@@ -68,6 +68,10 @@ type Player struct {
 	// OnVolume fires with the new step whenever the level is changed on purpose — a button, a swipe,
 	// Home Assistant — so a screen can show it. A restore is silent, as it is on the ring.
 	OnVolume hook.Hook[int]
+
+	// OnPlay fires with the URL whenever a track (not an announcement) is started, so a screen can
+	// find out what it is.
+	OnPlay hook.Hook[string]
 }
 
 var (
@@ -303,6 +307,7 @@ func (p *Player) command(c esphome.MediaCommand) {
 			p.announce(c.MediaURL)
 		} else {
 			p.stream.Play(c.MediaURL)
+			p.OnPlay.Emit(c.MediaURL)
 		}
 	}
 	if !c.HasCommand {

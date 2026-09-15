@@ -44,6 +44,9 @@ func Get() *Detect {
 	return shared
 }
 
+// playingSlack is how much lower the wake threshold sits while the echo canceller is running.
+const playingSlack = 0.06
+
 func newDetect() *Detect {
 	// Sized to reach the stop word's reserved index. The slots between it and Home Assistant's are never
 	// loaded, and an unloaded slot is one comparison a frame.
@@ -53,7 +56,15 @@ func newDetect() *Detect {
 		if slot == StopSlot {
 			return config.Get().Wake.Stop.Threshold
 		}
-		return wakeword.Threshold(slot)
+		t := wakeword.Threshold(slot)
+		// While the speaker plays and the canceller runs, what reaches the detector is the residual
+		// of the music plus the voice, and the word scores lower than it does in a quiet room. A
+		// little slack here is worth more than the false wakes it risks: the music is the
+		// reference the canceller has, so it is the one sound least able to fake the word.
+		if mic.Get().Cancelling() {
+			t = max(t-playingSlack, 0.5)
+		}
+		return t
 	}
 
 	e.OnDetect = func(slot int) {
