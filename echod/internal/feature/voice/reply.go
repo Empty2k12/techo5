@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 )
 
@@ -35,6 +36,10 @@ type stream struct {
 	peak        int
 	splicesAt   uint64
 	underrunsAt uint64
+
+	// energy and samples are the reply's loudness so far, for the speech normaliser in flush.
+	energy  float64
+	samples int
 
 	// playingAt is when playback began, once the cushion had filled. Wall clock from here to the queue
 	// running dry is what measures gapping; a starved buffer is silence the seam count never sees.
@@ -99,6 +104,8 @@ func (s *stream) take(data []byte, p *speaker.Player, started func()) {
 	// against how long it takes to say is how a wrong sample rate would show up.
 	s.bytes += len(data)
 	s.peak = max(s.peak, peak)
+	s.energy += media.SumSquares(samples)
+	s.samples += len(samples)
 
 	s.held = append(s.held, samples...)
 	if p.Queued() == 0 {
@@ -120,12 +127,19 @@ func (s *stream) take(data []byte, p *speaker.Player, started func()) {
 	s.flush(p)
 }
 
+// flush queues what is held, brought towards the speech loudness target. The gain follows the
+// reply's loudness so far, so the first flush — which waits for a buffer's worth — already has
+// something to measure, and later flushes move it only as the reply's level changes.
 func (s *stream) flush(p *speaker.Player) {
 	out := s.held
 	s.held = nil
-	if len(out) > 0 {
-		p.PlayVoice(out)
+	if len(out) == 0 {
+		return
 	}
+	if gain := media.SpeechGain(s.energy, s.samples); gain > 1 {
+		out = media.Scale(out, gain)
+	}
+	p.PlayVoice(out)
 }
 
 // heldSamples is a duration as a count of 16 kHz samples.

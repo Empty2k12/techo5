@@ -57,6 +57,7 @@ func (t *conversation) play(ctx context.Context, url string) error {
 	if err != nil {
 		return err
 	}
+	samples = media.Normalize(samples)
 	slog.Info("playing announcement", "samples", len(samples))
 
 	t.post(event{kind: evPlaying})

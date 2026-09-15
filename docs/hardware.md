@@ -125,6 +125,18 @@ on this device) works. `cmd/audioprobe -hold` and the daemon's speaker do this; 
 Ring geometry: 768 × 4 (12 KB, the vendor HAL's period at twice its depth) is what the
 daemon uses; the HAL itself runs 768 × 2.
 
+### Loudness ceiling
+
+The MAX98396's ASoC controls (`Speaker Volume A`, `Digital Volume A`) are register-cached while
+a stream runs and only reach the chip when the codec powers up again, so a change shows only
+after the stream is closed and reopened. Applied that way, `Speaker Volume A` values 5 and 8
+sound identical and 14 mutes the output; it is not a usable gain. With speech normalised to
+−14 dBFS RMS (the level a test tone was called loud at) and the dial at the top, speech is heard
+as "medium, adequate" (2026-09-15). The daemon normalises speech to that level
+(`media.Normalize`/`SpeechGain`) and applies no other boost; louder than this needs the
+amplifier configured differently than the kernel driver leaves it, which is where Amazon's HAL
+did its work.
+
 ### Do not toggle `Ext_Speaker_Amp_Switch`
 
 On cronos this MediaTek control drives the GPIO wired to the MAX98396's reset (`gpio-392`,

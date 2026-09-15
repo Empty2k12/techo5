@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -81,6 +82,79 @@ func Fetch(ctx context.Context, url string) ([]int16, error) {
 		slog.Info("announcement converted", "from", fmt.Sprintf("%d Hz, %d ch, %s", f.rate, f.channels, f.codec), "url", url)
 	}
 	return samples, nil
+}
+
+// Speech loudness. Text-to-speech engines deliver quiet files — Piper peaks around -12 dBFS and
+// sits far lower on average — and a speaker played at unity is then heard as "medium" with the
+// dial at the top. Announcements are whole clips, so their level can be measured before anything
+// plays, and each is brought to the same RMS target with peaks soft-limited. The dial scales from
+// there.
+const (
+	// speechTargetRMS is the level speech is normalised to, as a fraction of full scale (-14 dBFS).
+	speechTargetRMS = 0.2
+	// speechMaxGain caps how far a very quiet clip is lifted, so silence and noise are not amplified
+	// without limit (+18 dB).
+	speechMaxGain = 8.0
+	// speechKnee is where the peak limiter starts to compress, as a fraction of full scale.
+	speechKnee = 0.8
+)
+
+// Normalize brings a speech clip to speechTargetRMS with soft-limited peaks. A clip already at or
+// above the target is returned unchanged.
+func Normalize(in []int16) []int16 {
+	gain := SpeechGain(SumSquares(in), len(in))
+	if gain <= 1 {
+		return in
+	}
+	return Scale(in, gain)
+}
+
+// SumSquares is the energy of a clip at full-scale units, for SpeechGain. Streamed speech
+// accumulates it chunk by chunk.
+func SumSquares(in []int16) float64 {
+	var sum float64
+	for _, s := range in {
+		v := float64(s) / 32768
+		sum += v * v
+	}
+	return sum
+}
+
+// SpeechGain is the gain that brings audio of the given energy and length to speechTargetRMS,
+// between 1 (never quieter) and speechMaxGain.
+func SpeechGain(sumSquares float64, n int) float64 {
+	if n == 0 || sumSquares <= 0 {
+		return 1
+	}
+	rms := math.Sqrt(sumSquares / float64(n))
+	gain := speechTargetRMS / rms
+	if gain <= 1 {
+		return 1
+	}
+	return math.Min(gain, speechMaxGain)
+}
+
+// Scale multiplies samples by gain with a soft peak limiter: linear to speechKnee, then the
+// remaining headroom is approached asymptotically, so a loud syllable compresses rather than cracks.
+func Scale(in []int16, gain float64) []int16 {
+	out := make([]int16, len(in))
+	const knee = speechKnee * 32767
+	const headroom = 32767 - knee
+	for i, s := range in {
+		v := float64(s) * gain
+		a := math.Abs(v)
+		if a > knee {
+			over := a - knee
+			a = knee + headroom*over/(over+headroom)
+			if v < 0 {
+				v = -a
+			} else {
+				v = a
+			}
+		}
+		out[i] = int16(v)
+	}
+	return out
 }
 
 // isMP3 recognises what Home Assistant's tts_proxy serves when it does not convert: an MP3, with
