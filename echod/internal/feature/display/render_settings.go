@@ -13,8 +13,9 @@ import (
 // the bottom closes it. Geometry is shared with the gesture handler. The panel is 960 by 480 in
 // landscape, so everything here is laid out for 480 rows.
 const (
-	sheetRowTop    = 74
-	sheetRowHeight = 46
+	// Eight rows of 42 from 66 end at 402, above the bar at 416.
+	sheetRowTop    = 66
+	sheetRowHeight = 42
 	sheetDoneBar   = 64
 
 	// topEdge is how far from the top a swipe down has to start to be the sheet rather than the volume.
@@ -88,7 +89,7 @@ func (r *renderer) settingsPage(s scene) {
 	}
 	rows[rowMic] = [2]string{"Microphone", mic + "  ·  tap to toggle"}
 	rows[rowWake] = [2]string{"Wake word", st.wakeWord}
-	rows[rowVolume] = [2]string{"Volume", fmt.Sprintf("%d of %d  ·  swipe up or down", st.volume, sheetVolumeSteps)}
+	rows[rowVolume] = [2]string{"Volume", fmt.Sprintf("%d of %d  ·  tap left to lower, right to raise", st.volume, sheetVolumeSteps)}
 	rows[rowAbout] = [2]string{"About", fmt.Sprintf("%s  ·  %s  ·  slot %s  ·  %s", st.name, st.version, st.slot, st.address)}
 	restart := "tap twice"
 	if !st.restartArm.IsZero() && st.now.Sub(st.restartArm) < restartWindow {

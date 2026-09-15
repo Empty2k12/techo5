@@ -301,15 +301,11 @@ func (d *Display) gesture(g touch.Gesture) {
 	sheet := d.sheet
 	d.mu.Unlock()
 	if sheet {
-		switch g.Kind {
-		case touch.Tap:
-			if d.r != nil {
-				d.sheetTap(d.r.sheetRowAt(g.Y))
-			}
-		case touch.SwipeUp:
-			media.Get().Adjust(+1)
-		case touch.SwipeDown:
-			media.Get().Adjust(-1)
+		// Vertical swipes do nothing here: the swipe that opened the sheet keeps reporting notches
+		// until the finger lifts, and those must not turn into volume steps. The Volume row takes
+		// taps on its halves instead.
+		if g.Kind == touch.Tap && d.r != nil {
+			d.sheetTap(d.r.sheetRowAt(g.Y), g.X)
 		}
 		d.wake()
 		return
@@ -339,11 +335,18 @@ func (d *Display) showSheet(on bool) {
 	d.wake()
 }
 
-// sheetTap is a finger on a row of the settings sheet.
-func (d *Display) sheetTap(row int) {
+// sheetTap is a finger on a row of the settings sheet; x is where across it landed.
+func (d *Display) sheetTap(row, x int) {
 	switch row {
 	case sheetRows:
 		d.showSheet(false)
+	case rowVolume:
+		// Left half down, right half up.
+		if d.r != nil && x < d.r.w/2 {
+			media.Get().Adjust(-1)
+		} else {
+			media.Get().Adjust(+1)
+		}
 	case rowBluetooth:
 		d.showSheet(false)
 		btaudio.Get().SetPairing(true)
