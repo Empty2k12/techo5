@@ -15,11 +15,12 @@ on post-fs-data
     mkdir /data/misc/techo5/models 0755 root root
     mkdir /data/techo5 0755 root root
 
+# Not oneshot: the daemon exits on purpose after installing an update and expects init to start
+# it again into the new binary, and a crash should come back too. init backs off if it keeps dying.
 service techo5 /system/bin/techo5 run
     class late_start
     user root
     group root audio input system
-    oneshot
     disabled
 
 # Start once the framework is up, so the AFE and the Wi-Fi are settled and audioserver has
