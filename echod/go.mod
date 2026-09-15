@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/Sendspin/sendspin-go v1.8.2
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/libp2p/zeroconf/v2 v2.2.0

@@ -164,6 +164,11 @@ t5_bt_up() {
 	fi
 	bd=$(command -v bluetoothd || echo /usr/lib/bluetooth/bluetoothd)
 	[ -x "$bd" ] && "$bd" -n >> "$logdir/bluetoothd.log" 2>&1 &
+	# Seen on the bench: after the first power-on the controller answers commands but never
+	# reports an inquiry result or an advertisement until it has been powered off and on once.
+	n=0; while [ $n -lt 10 ] && ! timeout 3 btmgmt info 2>/dev/null | grep -q "current settings: powered"; do sleep 1; n=$((n+1)); done
+	timeout 5 btmgmt power off >/dev/null 2>&1; sleep 1; timeout 5 btmgmt power on >/dev/null 2>&1
+	# bluez-alsa registers its A2DP endpoints with bluetoothd, so it must come after it.
 	command -v bluealsa >/dev/null && bluealsa -p a2dp-source >> "$logdir/bluealsa.log" 2>&1 &
 	log "bt: hci0 up; bluetoothd and bluealsa started"
 	return 0

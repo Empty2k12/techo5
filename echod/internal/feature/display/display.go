@@ -28,6 +28,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
@@ -125,6 +126,7 @@ func build() *Display {
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
+	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	return d
 }
 
@@ -262,6 +264,34 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		return
 	}
+
+	// The pairing page: a tap on a row pairs or connects it, the bar at the bottom ends the page.
+	// A swipe from the right opens it from the clock.
+	bt := btaudio.Get()
+	if bt.Pairing() {
+		switch g.Kind {
+		case touch.Tap:
+			if d.r == nil {
+				return
+			}
+			st := bt.State()
+			switch row := d.r.btRowAt(g.Y); {
+			case row == btRows:
+				bt.SetPairing(false)
+			case row >= 0 && row < len(st.Devices) && !st.Devices[row].Busy:
+				bt.Choose(st.Devices[row].Address)
+			}
+		case touch.SwipeUp:
+			media.Get().Adjust(+1)
+		case touch.SwipeDown:
+			media.Get().Adjust(-1)
+		case touch.SwipeRight:
+			bt.SetPairing(false)
+		}
+		d.wake()
+		return
+	}
+
 	switch g.Kind {
 	case touch.Tap:
 		voice.Get().Action()
@@ -269,6 +299,8 @@ func (d *Display) gesture(g touch.Gesture) {
 		media.Get().Adjust(+1)
 	case touch.SwipeDown:
 		media.Get().Adjust(-1)
+	case touch.SwipeLeft:
+		bt.SetPairing(true)
 	}
 }
 
@@ -365,12 +397,16 @@ func (d *Display) frame() time.Duration {
 	if !volAt.IsZero() && now.Sub(volAt) < volumeShow {
 		s.volume, s.showVolume = volume, true
 	}
+	s.bt = btaudio.Get().State()
 
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
 
+	if s.bt.Pairing {
+		return 400 * time.Millisecond
+	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {
 		// On the next whole second, so the clock changes when the second does.
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))

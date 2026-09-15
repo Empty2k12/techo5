@@ -67,6 +67,9 @@ type Player struct {
 	// Output changed: a headphone was plugged in or pulled out.
 	OnOutput hook.Hook[Output]
 
+	// sink, when set, is where the audio goes instead of the codec: see sink.go.
+	sink atomic.Pointer[sinkState]
+
 	volume atomic.Uint32 // linear gain, derived from step and the current output's curve
 	step   atomic.Int32
 
@@ -342,13 +345,20 @@ func (p *Player) Run(ctx context.Context) error {
 	p.OnOutput.Emit(out)
 	safe.Go("jack watcher", func() { p.watchJack(ctx) })
 
+	silence := make([]byte, len(buf))
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
 
 		p.fill(buf)
-		if err := p.send(ctx, pb, buf); err != nil {
+		to := buf
+		if s := p.sink.Load(); s != nil {
+			// The sink gets the audio; the codec keeps its pace on silence.
+			s.push(buf)
+			to = silence
+		}
+		if err := p.send(ctx, pb, to); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -402,8 +412,10 @@ func (p *Player) fill(buf []byte) {
 	rendered := p.render()
 
 	// The internal speaker is one driver wired to the right channel, so a stereo track would lose
-	// everything panned left. The line-out is not: it gets both channels as they came.
-	mono := p.Output() == OutputSpeaker
+	// everything panned left. The line-out is not: it gets both channels as they came. Neither is a
+	// sink, which is stereo and untuned: it has its own driver and its own tuning.
+	sinking := p.sink.Load() != nil
+	mono := p.Output() == OutputSpeaker && !sinking
 
 	// The write loop runs whether or not anything is playing, since the amplifier hisses when nothing
 	// drives the DAC, and tuning silence costs what tuning music costs. The block after the audio stops
@@ -699,6 +711,10 @@ func tone(n Note, level float64) []int16 {
 func (p *Player) SetVolume(step int) {
 	step = max(0, min(step, VolumeSteps))
 	p.step.Store(int32(step))
+	if p.sink.Load() != nil {
+		p.volume.Store(math.Float32bits(sinkGain(step)))
+		return
+	}
 	p.volume.Store(math.Float32bits(gainForStep(p.Output(), step)))
 }
 

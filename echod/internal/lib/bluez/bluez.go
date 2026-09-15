@@ -1,0 +1,450 @@
+//go:build linux
+
+// Package bluez talks to bluetoothd over D-Bus: the adapter's modes, the devices it knows or is
+// finding, pairing and connecting them, and a pairing agent that says yes.
+//
+// This is the classic (BR/EDR) side of the radio for earbuds and speakers. The BLE proxy is a
+// different thing on a different path (hardware/ble) and must not run at the same time.
+package bluez
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/godbus/dbus/v5"
+
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+)
+
+const (
+	service     = "org.bluez"
+	adapterIfc  = "org.bluez.Adapter1"
+	deviceIfc   = "org.bluez.Device1"
+	agentIfc    = "org.bluez.Agent1"
+	agentMgrIfc = "org.bluez.AgentManager1"
+	propsIfc    = "org.freedesktop.DBus.Properties"
+	objMgrIfc   = "org.freedesktop.DBus.ObjectManager"
+
+	agentPath = dbus.ObjectPath("/org/techo5/agent")
+
+	// AudioSink is the A2DP sink service class: something that plays what it is sent.
+	AudioSink = "0000110b-0000-1000-8000-00805f9b34fb"
+)
+
+// SystemBus is where bluetoothd is. Set from the environment if it is somewhere else.
+func SystemBus() (*dbus.Conn, error) {
+	if addr := os.Getenv("DBUS_SYSTEM_BUS_ADDRESS"); addr != "" {
+		return dbus.Connect(addr)
+	}
+	for _, p := range []string{"/run/dbus/system_bus_socket", "/var/run/dbus/system_bus_socket"} {
+		if _, err := os.Stat(p); err == nil {
+			return dbus.Connect("unix:path=" + p)
+		}
+	}
+	return dbus.SystemBus()
+}
+
+// Device is one remote the adapter knows about.
+type Device struct {
+	Path      dbus.ObjectPath
+	Address   string
+	Name      string
+	Icon      string
+	RSSI      int16
+	Paired    bool
+	Trusted   bool
+	Connected bool
+	AudioSink bool // offers A2DP sink: earbuds, a speaker
+}
+
+// Adapter is hci0 as bluetoothd presents it.
+type Adapter struct {
+	conn *dbus.Conn
+	path dbus.ObjectPath
+	obj  dbus.BusObject
+
+	// Changed fires when a device appears, goes, or changes; listeners must not block.
+	Changed hook.Hook[struct{}]
+
+	mu      sync.Mutex
+	devices map[dbus.ObjectPath]*Device
+	agent   *agent
+	stop    func()
+}
+
+// Open connects to bluetoothd and takes the first adapter. It fails while bluetoothd or the
+// controller is not there yet; the caller retries.
+func Open(ctx context.Context) (*Adapter, error) {
+	conn, err := SystemBus()
+	if err != nil {
+		return nil, fmt.Errorf("system bus: %w", err)
+	}
+	a := &Adapter{conn: conn, devices: map[dbus.ObjectPath]*Device{}}
+	if err := a.load(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if a.path == "" {
+		conn.Close()
+		return nil, errors.New("bluez: no adapter")
+	}
+	a.obj = conn.Object(service, a.path)
+	if err := a.watch(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return a, nil
+}
+
+// Close lets the bus go.
+func (a *Adapter) Close() error {
+	if a.stop != nil {
+		a.stop()
+	}
+	if a.agent != nil {
+		_ = a.conn.Object(service, "/org/bluez").Call(agentMgrIfc+".UnregisterAgent", 0, agentPath).Err
+	}
+	return a.conn.Close()
+}
+
+// load reads everything bluetoothd exports: the adapter and the devices under it.
+func (a *Adapter) load() error {
+	var objs map[dbus.ObjectPath]map[string]map[string]dbus.Variant
+	if err := a.conn.Object(service, "/").Call(objMgrIfc+".GetManagedObjects", 0).Store(&objs); err != nil {
+		return fmt.Errorf("bluez: managed objects: %w", err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.devices = map[dbus.ObjectPath]*Device{}
+	for path, ifcs := range objs {
+		if _, ok := ifcs[adapterIfc]; ok && (a.path == "" || path < a.path) {
+			a.path = path
+		}
+		if props, ok := ifcs[deviceIfc]; ok {
+			a.devices[path] = deviceFrom(path, props)
+		}
+	}
+	return nil
+}
+
+func deviceFrom(path dbus.ObjectPath, props map[string]dbus.Variant) *Device {
+	d := &Device{Path: path}
+	d.update(props)
+	return d
+}
+
+func (d *Device) update(props map[string]dbus.Variant) {
+	for k, v := range props {
+		switch k {
+		case "Address":
+			d.Address, _ = v.Value().(string)
+		case "Name":
+			d.Name, _ = v.Value().(string)
+		case "Alias":
+			if d.Name == "" {
+				d.Name, _ = v.Value().(string)
+			}
+		case "Icon":
+			d.Icon, _ = v.Value().(string)
+		case "RSSI":
+			d.RSSI, _ = v.Value().(int16)
+		case "Paired":
+			d.Paired, _ = v.Value().(bool)
+		case "Trusted":
+			d.Trusted, _ = v.Value().(bool)
+		case "Connected":
+			d.Connected, _ = v.Value().(bool)
+		case "UUIDs":
+			if uuids, ok := v.Value().([]string); ok {
+				d.AudioSink = false
+				for _, u := range uuids {
+					if strings.EqualFold(u, AudioSink) {
+						d.AudioSink = true
+					}
+				}
+			}
+		}
+	}
+}
+
+// watch follows device changes so Devices stays current without polling.
+func (a *Adapter) watch() error {
+	opts := [][]dbus.MatchOption{
+		{dbus.WithMatchInterface(objMgrIfc), dbus.WithMatchMember("InterfacesAdded")},
+		{dbus.WithMatchInterface(objMgrIfc), dbus.WithMatchMember("InterfacesRemoved")},
+		{dbus.WithMatchInterface(propsIfc), dbus.WithMatchMember("PropertiesChanged"), dbus.WithMatchArg(0, deviceIfc)},
+	}
+	for _, o := range opts {
+		if err := a.conn.AddMatchSignal(o...); err != nil {
+			return fmt.Errorf("bluez: match: %w", err)
+		}
+	}
+	ch := make(chan *dbus.Signal, 64)
+	a.conn.Signal(ch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.stop = cancel
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				a.conn.RemoveSignal(ch)
+				return
+			case s := <-ch:
+				if s == nil {
+					return
+				}
+				a.signal(s)
+			}
+		}
+	}()
+	return nil
+}
+
+func (a *Adapter) signal(s *dbus.Signal) {
+	changed := false
+	a.mu.Lock()
+	switch s.Name {
+	case objMgrIfc + ".InterfacesAdded":
+		if len(s.Body) == 2 {
+			path, _ := s.Body[0].(dbus.ObjectPath)
+			ifcs, _ := s.Body[1].(map[string]map[string]dbus.Variant)
+			if props, ok := ifcs[deviceIfc]; ok {
+				a.devices[path] = deviceFrom(path, props)
+				changed = true
+			}
+		}
+	case objMgrIfc + ".InterfacesRemoved":
+		if len(s.Body) == 2 {
+			path, _ := s.Body[0].(dbus.ObjectPath)
+			ifcs, _ := s.Body[1].([]string)
+			for _, i := range ifcs {
+				if i == deviceIfc {
+					delete(a.devices, path)
+					changed = true
+				}
+			}
+		}
+	case propsIfc + ".PropertiesChanged":
+		if len(s.Body) >= 2 {
+			if ifc, _ := s.Body[0].(string); ifc == deviceIfc {
+				if d, ok := a.devices[s.Path]; ok {
+					props, _ := s.Body[1].(map[string]dbus.Variant)
+					d.update(props)
+					changed = true
+				}
+			}
+		}
+	}
+	a.mu.Unlock()
+	if changed {
+		a.Changed.Emit(struct{}{})
+	}
+}
+
+// Devices is what the adapter knows, strongest signal first.
+func (a *Adapter) Devices() []Device {
+	a.mu.Lock()
+	out := make([]Device, 0, len(a.devices))
+	for _, d := range a.devices {
+		out = append(out, *d)
+	}
+	a.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Connected != out[j].Connected {
+			return out[i].Connected
+		}
+		if out[i].Paired != out[j].Paired {
+			return out[i].Paired
+		}
+		return out[i].RSSI > out[j].RSSI
+	})
+	return out
+}
+
+// Device finds one by address.
+func (a *Adapter) Device(address string) (Device, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.devices {
+		if strings.EqualFold(d.Address, address) {
+			return *d, true
+		}
+	}
+	return Device{}, false
+}
+
+func (a *Adapter) set(prop string, v any) error {
+	return a.obj.Call(propsIfc+".Set", 0, adapterIfc, prop, dbus.MakeVariant(v)).Err
+}
+
+func (a *Adapter) get(prop string) (dbus.Variant, error) {
+	var v dbus.Variant
+	err := a.obj.Call(propsIfc+".Get", 0, adapterIfc, prop).Store(&v)
+	return v, err
+}
+
+// Powered turns the controller on or off.
+func (a *Adapter) Powered(on bool) error { return a.set("Powered", on) }
+
+// IsPowered reports the controller's state.
+func (a *Adapter) IsPowered() bool {
+	v, err := a.get("Powered")
+	if err != nil {
+		return false
+	}
+	on, _ := v.Value().(bool)
+	return on
+}
+
+// Alias is the name other devices see.
+func (a *Adapter) Alias(name string) error { return a.set("Alias", name) }
+
+// Address is the controller's own.
+func (a *Adapter) Address() string {
+	v, err := a.get("Address")
+	if err != nil {
+		return ""
+	}
+	s, _ := v.Value().(string)
+	return s
+}
+
+// Pairing makes the adapter findable and willing to bond, or neither. Discoverable mode has no
+// timeout of its own here: the caller ends it.
+func (a *Adapter) Pairing(on bool) error {
+	if err := a.set("DiscoverableTimeout", uint32(0)); err != nil {
+		return err
+	}
+	if err := a.set("Pairable", on); err != nil {
+		return err
+	}
+	return a.set("Discoverable", on)
+}
+
+// Discover starts or stops looking for devices. Scanning shares the antenna with Wi-Fi, so it is
+// only on while someone is pairing.
+func (a *Adapter) Discover(on bool) error {
+	if on {
+		filter := map[string]dbus.Variant{"Transport": dbus.MakeVariant("auto")}
+		if err := a.obj.Call(adapterIfc+".SetDiscoveryFilter", 0, filter).Err; err != nil {
+			slog.Debug("discovery filter", "err", err)
+		}
+		err := a.obj.Call(adapterIfc+".StartDiscovery", 0).Err
+		if err != nil && strings.Contains(err.Error(), "InProgress") {
+			return nil
+		}
+		return err
+	}
+	err := a.obj.Call(adapterIfc+".StopDiscovery", 0).Err
+	if err != nil && (strings.Contains(err.Error(), "NotReady") || strings.Contains(err.Error(), "Failed")) {
+		return nil // nothing was running
+	}
+	return err
+}
+
+func (a *Adapter) device(address string) (dbus.BusObject, error) {
+	d, ok := a.Device(address)
+	if !ok {
+		return nil, fmt.Errorf("bluez: no device %s", address)
+	}
+	return a.conn.Object(service, d.Path), nil
+}
+
+// Pair bonds with a device; bluetoothd asks the agent to confirm, which it does.
+func (a *Adapter) Pair(ctx context.Context, address string) error {
+	o, err := a.device(address)
+	if err != nil {
+		return err
+	}
+	err = o.CallWithContext(ctx, deviceIfc+".Pair", 0).Err
+	if err != nil && strings.Contains(err.Error(), "AlreadyExists") {
+		return nil
+	}
+	return err
+}
+
+// Trust lets the device connect on its own later, which earbuds do when they come out of the case.
+func (a *Adapter) Trust(address string, on bool) error {
+	o, err := a.device(address)
+	if err != nil {
+		return err
+	}
+	return o.Call(propsIfc+".Set", 0, deviceIfc, "Trusted", dbus.MakeVariant(on)).Err
+}
+
+// Connect brings up every profile the device offers, A2DP among them.
+func (a *Adapter) Connect(ctx context.Context, address string) error {
+	o, err := a.device(address)
+	if err != nil {
+		return err
+	}
+	return o.CallWithContext(ctx, deviceIfc+".Connect", 0).Err
+}
+
+// Disconnect drops the link.
+func (a *Adapter) Disconnect(ctx context.Context, address string) error {
+	o, err := a.device(address)
+	if err != nil {
+		return err
+	}
+	return o.CallWithContext(ctx, deviceIfc+".Disconnect", 0).Err
+}
+
+// Remove forgets the device and its keys.
+func (a *Adapter) Remove(address string) error {
+	d, ok := a.Device(address)
+	if !ok {
+		return nil
+	}
+	return a.obj.Call(adapterIfc+".RemoveDevice", 0, d.Path).Err
+}
+
+// RegisterAgent makes this process the pairing agent: everything bluetoothd asks is answered yes,
+// which is what a screen with no keyboard can do. The passkey a phone shows is accepted as shown.
+func (a *Adapter) RegisterAgent() error {
+	ag := &agent{}
+	if err := a.conn.Export(ag, agentPath, agentIfc); err != nil {
+		return fmt.Errorf("bluez: export agent: %w", err)
+	}
+	mgr := a.conn.Object(service, "/org/bluez")
+	if err := mgr.Call(agentMgrIfc+".RegisterAgent", 0, agentPath, "DisplayYesNo").Err; err != nil {
+		if !strings.Contains(err.Error(), "AlreadyExists") {
+			return fmt.Errorf("bluez: register agent: %w", err)
+		}
+	}
+	if err := mgr.Call(agentMgrIfc+".RequestDefaultAgent", 0, agentPath).Err; err != nil {
+		return fmt.Errorf("bluez: default agent: %w", err)
+	}
+	a.agent = ag
+	return nil
+}
+
+// agent is org.bluez.Agent1. Methods return *dbus.Error; nil is yes.
+type agent struct{}
+
+func (agent) Release() *dbus.Error { return nil }
+
+func (agent) RequestPinCode(dbus.ObjectPath) (string, *dbus.Error) { return "0000", nil }
+
+func (agent) DisplayPinCode(dbus.ObjectPath, string) *dbus.Error { return nil }
+
+func (agent) RequestPasskey(dbus.ObjectPath) (uint32, *dbus.Error) { return 0, nil }
+
+func (agent) DisplayPasskey(dbus.ObjectPath, uint32, uint16) *dbus.Error { return nil }
+
+func (agent) RequestConfirmation(path dbus.ObjectPath, passkey uint32) *dbus.Error {
+	slog.Info("bluetooth pairing confirmed", "device", string(path), "passkey", fmt.Sprintf("%06d", passkey))
+	return nil
+}
+
+func (agent) RequestAuthorization(dbus.ObjectPath) *dbus.Error { return nil }
+
+func (agent) AuthorizeService(dbus.ObjectPath, string) *dbus.Error { return nil }
+
+func (agent) Cancel() *dbus.Error { return nil }

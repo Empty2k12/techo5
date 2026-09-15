@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 )
 
@@ -44,6 +45,10 @@ type scene struct {
 	// volume is shown while it moves: the step out of media.VolumeSteps.
 	volume     int
 	showVolume bool
+
+	// bt is the Bluetooth audio state: the pairing page replaces everything while it is on, and a
+	// connected device is named in the footer.
+	bt btaudio.State
 }
 
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
@@ -94,6 +99,14 @@ func newRenderer(dst *image.RGBA) *renderer {
 // simpler than tracking what changed.
 func (r *renderer) draw(s scene) {
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(walnut), image.Point{}, draw.Src)
+
+	if s.bt.Pairing {
+		r.pairingPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
 
 	switch s.phase {
 	case "listening":
@@ -213,6 +226,12 @@ func (r *renderer) footer(s scene) {
 		right = "♪ playing"
 	case s.paused:
 		right = "♪ paused"
+	}
+	if s.bt.Connected != "" {
+		if right != "" {
+			right += "  ·  "
+		}
+		right += "BT " + s.bt.Connected
 	}
 	if right != "" {
 		r.text(r.tiny, right, r.w-r.margin-r.width(r.tiny, right), y, dim)
