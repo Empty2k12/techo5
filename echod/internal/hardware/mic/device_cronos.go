@@ -21,6 +21,10 @@ const (
 
 	// CenterMic is the one the canceller and the "Center mic" mix use: the left channel.
 	CenterMic = 0
+
+	// CancelOnMix runs the echo canceller on the mix rather than the center microphone. Off here until
+	// it is measured on this device; the Dot's result is in techo5-dot docs/microphones.md.
+	CancelOnMix = false
 )
 
 // adcs are the converters the microphone arrives on. The card exposes a single ADC_A.

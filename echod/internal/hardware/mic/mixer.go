@@ -51,6 +51,26 @@ func (Center) Mix(mics [][]int16) []int16 {
 	return mics[CenterMic]
 }
 
+// fixedPath marks a mix whose acoustic path never moves, which is what an echo canceller can learn.
+// Anything that steers is not one.
+type fixedPath interface{ fixedPath() }
+
+func (Center) fixedPath()  {}
+func (Average) fixedPath() {}
+
+// cancelInput is what the echo canceller reads for this frame. Where CancelOnMix, a fixed mix is
+// cancelled as it is, and a steered one falls back to the plain average, the fixed path nearest to it;
+// otherwise it is the center microphone, whatever the mix.
+func cancelInput(m Mixer, mics [][]int16, mixed []int16) []int16 {
+	if !CancelOnMix {
+		return mics[CenterMic]
+	}
+	if _, ok := m.(fixedPath); ok && mixed != nil {
+		return mixed
+	}
+	return Average{}.Mix(mics)
+}
+
 type mix struct {
 	name config.Mixing
 	make func() Mixer

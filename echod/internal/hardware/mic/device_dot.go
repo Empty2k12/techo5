@@ -17,6 +17,11 @@ const (
 	// CenterMic is the middle microphone: no arrival delay relative to the array, and usable with no
 	// beamformer at all.
 	CenterMic = 6
+
+	// CancelOnMix runs the echo canceller on the mix rather than the center microphone. Measured on a
+	// Dot (techo5-dot docs/microphones.md, 2026-09-15): the average of seven with one canceller heard
+	// speech over music 5.4 dB better than the cancelled center microphone, at the same cost.
+	CancelOnMix = true
 )
 
 // adcs are the four converters the seven microphones arrive on.

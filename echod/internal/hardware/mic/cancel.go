@@ -34,12 +34,15 @@ const refQuiet = 1e-7 * 32768 * 32768 / 4
 // covers it with room to spare, and rides across the pauses in a radio talk show.
 const refHold = Rate
 
-// canceller subtracts the playback loopback from one fixed microphone.
+// canceller subtracts the playback loopback from one fixed acoustic path, and replaces the mix while it
+// runs.
 //
-// It runs on the center microphone rather than the mix, and replaces the mix while it runs. Two reasons,
-// and simplicity is the lesser of them: the filter has to learn one acoustic path, so the microphone it
-// reads cannot move — and the beamformer steers at the loudest sound, which during playback is our own
-// speaker. Steering into the echo is the opposite of useful when the echo is what is being removed.
+// The path it reads cannot move: the filter learns one path from the speaker, and the beamformer steers
+// at the loudest sound, which during playback is our own speaker. Steering into the echo is the opposite
+// of useful when the echo is what is being removed. A fixed combination of microphones is as fixed as one
+// microphone, though, because the microphones do not move: on the Dot, the average of seven cancelled
+// once measured exactly as well as seven cancellers averaged, and 5 dB better than the center microphone
+// alone. Which path it reads is cancelInput's choice.
 type canceller struct {
 	filter *aec.Canceller
 
@@ -117,10 +120,10 @@ func (c *canceller) process(mic, ref []int16) ([]int16, float64, error) {
 	return out, c.filter.ERLE(), nil
 }
 
-// apply returns the center microphone with the echo removed, or nil when there is nothing playing and
-// the caller should use the mix it already has.
-func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
-	n := len(mics[CenterMic])
+// apply returns mic, one fixed path (see cancelInput), with the echo removed, or nil when there is
+// nothing playing and the caller should use the mix it already has.
+func (c *canceller) apply(raw []byte, mic []int16) []int16 {
+	n := len(mic)
 	if cap(c.ref) < n {
 		c.ref = make([]int16, n)
 	}
@@ -147,10 +150,10 @@ func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
 
 	if !c.active.Swap(true) {
 		slog.Info("echo cancellation running", "engine", c.engine, "taps", cancelTaps,
-			"ref_dbfs", level(c.ref), "mic_dbfs", level(mics[CenterMic]))
+			"ref_dbfs", blockDBFS(c.ref), "mic_dbfs", blockDBFS(mic))
 	}
 
-	out, erleDB, err := c.process(mics[CenterMic], c.ref)
+	out, erleDB, err := c.process(mic, c.ref)
 	if err != nil {
 		slog.Error("echo cancellation failed", "err", err)
 		return nil
@@ -170,8 +173,8 @@ func (c *canceller) apply(raw []byte, mics [][]int16) []int16 {
 	return c.mono
 }
 
-// level is the RMS of a block in dBFS, rounded, for the log.
-func level(s []int16) float64 {
+// blockDBFS is the RMS of a block in dBFS, rounded, for the log.
+func blockDBFS(s []int16) float64 {
 	if len(s) == 0 {
 		return -120
 	}

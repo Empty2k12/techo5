@@ -366,11 +366,11 @@ func (s *Source) broadcast(raw []byte) {
 	mics := Decode(raw)
 	frame := s.mixer.Mix(mics)
 
-	// While something is playing, the echo cancelled center microphone replaces the mix. It has to be
-	// one fixed microphone: the filter learns a single acoustic path, and the beamformer would steer at
-	// the loudest thing in the room, which during playback is the speaker being cancelled.
+	// While something is playing, an echo cancelled fixed path replaces the mix (cancelInput): the filter
+	// learns a single acoustic path, and the beamformer would steer at the loudest thing in the room,
+	// which during playback is the speaker being cancelled.
 	if s.cancelling && s.cancel != nil {
-		if cancelled := s.cancel.apply(raw, mics); cancelled != nil {
+		if cancelled := s.cancel.apply(raw, cancelInput(s.mixer, mics, frame)); cancelled != nil {
 			frame = cancelled
 		}
 	}
