@@ -249,8 +249,10 @@ worked with no Android userspace running. What it took, beyond the plan:
   builds an LK image with the TECHO5 mark (`logo/TECHO5_logo.png`) in the
   wordmark's place, keyed onto black. Flashed to `lk` (p3) 2026-09-15: bricked
   the boot (p3 is the stock LK that amonet's kaeru in `expdb` chains from; see
-  hardware.md "Boot logo"), recovered with amonet fastbrick. A second attempt
-  must patch the kaeru copy in `expdb` instead — not done, waits for the user. The daemon shows the same mark as a
+  hardware.md "Boot logo"), recovered with amonet fastbrick. DONE the same day
+  the right way: `--in-place --colors 16` puts the mark into the wordmark's own
+  6105-byte slot of the kaeru copy (`kaeru-techo5.bin` flashed to `expdb`
+  from kaeru's fastboot); the bench unit boots through it. The daemon shows the same mark as a
   splash from its start until Home Assistant is listening, with the signal
   arcs pulsing outward both ways (`feature/display/splash.go`), so power-on
   reads as one identity through to the clock.

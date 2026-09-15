@@ -438,7 +438,10 @@ preloader, flashes TWRP to recovery and reboots into TWRP; the boot slot,
 store and data were untouched. If the logo is ever changed, the bundle has to
 go into the kaeru copy in `expdb` (same LK layout, wordmark at the same
 offset), which kaeru's fastboot (reached via `rebootto bootloader`) can
-flash. `swdl` (p11) holds an Android boot image (Amazon's recovery/download
+flash — and only *in place*: kaeru's stage-2 code sits right after the LK
+payload, so the header size must stay and the new bundle must fit the old
+6105-byte slot (`--in-place --colors 16`: 16 flat colours compress the full
+315×170 mark to 5.5 KB). Done 2026-09-15; `fastboot flash expdb` accepted it. `swdl` (p11) holds an Android boot image (Amazon's recovery/download
 image).
 
 ## Factory data (`/proc/idme`)

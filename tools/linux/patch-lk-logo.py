@@ -105,6 +105,12 @@ def main():
     ap.add_argument("--key", type=int, default=0, metavar="TOL",
                     help="key the image's corner colour (within TOL per channel) to black first")
     ap.add_argument("--preview", metavar="PNG", help="write the image as LK will draw it")
+    ap.add_argument("--colors", type=int, default=0, metavar="N",
+                    help="quantize to N colours first (flat colours compress far better)")
+    ap.add_argument("--in-place", action="store_true",
+                    help="overwrite the old bundle in its own slot instead of appending; the new "
+                         "bundle must fit. Required for the kaeru copy in expdb, whose stage-2 code "
+                         "follows the LK payload and whose header size must not change")
     a = ap.parse_args()
     w, h = (int(v) for v in a.size.split("x"))
 
@@ -133,12 +139,26 @@ def main():
     if a.key:
         src = key_out(src, a.key)
     img = fit(src, (w, h))
+    if a.colors:
+        img = img.convert("RGB").quantize(a.colors, dither=Image.NONE).convert("RGBA")
     if a.preview:
         img.convert("RGB").save(a.preview)
     raw = img.tobytes("raw", "BGRA")
     assert len(raw) == rawlen
     z = zlib.compress(raw, 9)
     bundle = struct.pack("<III", 1, 12 + len(z), 12) + z
+    if a.in_place:
+        if len(bundle) > total:
+            sys.exit(f"new bundle is {len(bundle)} bytes, old slot holds {total}: shrink the image "
+                     f"or lower --colors")
+        print(f"new image: {len(raw)} raw -> {len(z)} zlib; bundle {len(bundle)} bytes in place of "
+              f"{total} at {off}")
+        if a.check:
+            return
+        d[off : off + total] = bundle + bytes(total - len(bundle))
+        open(a.lk_out, "wb").write(d)
+        print(f"wrote {a.lk_out}: header and pointer unchanged")
+        return
     new_off = (end + 15) & ~15
     if new_off + len(bundle) > len(d):
         sys.exit("new bundle does not fit the partition")
