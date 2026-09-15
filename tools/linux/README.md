@@ -91,17 +91,45 @@ KERNEL_IMAGE=.../boot-lineage-18.1-20260904-cronos-nodownmix.img \
 fastboot flash boot techo5-linux-boot.img && fastboot continue
 ```
 
-`patch-dtb.py` needs `pip install fdt`.
+`patch-dtb.py` needs `pip install fdt`; given a raw `Image.gz-dtb` instead of a
+boot image it patches that.
 
-Root filesystem: built **on the device** with `apk`, because the host has no
-armv7 chroot and a real package database is what makes `apk add bluez` and the
-like possible later. `deploy-rootfs.sh` builds the daemon and tools for
-armv7, ships them with the inputs and `tools/linux/rootfs/` (the overlay) and
-`packages-rootfs.txt`, runs `mkrootfs.sh` there, and can install the result:
+Kernel (since the Bluetooth work): the LineageOS cronos tree rebuilt in WSL at
+the exact commit the LineageOS boot image came from, so the vendor Wi-Fi and
+Bluetooth modules (`CONFIG_MODVERSIONS`) still load, with `CONFIG_BT`,
+`BT_HCIVHCI` and friends added. `build-kernel.sh` documents the checkout, the
+toolchain (Arm's GCC 8.3 tarball, no root needed) and the config; then:
 
 ```
-bash tools/linux/deploy-rootfs.sh --version v0.1.5 [--install [--reboot]]
+# in WSL
+bash tools/linux/build-kernel.sh -o /mnt/d/platform-tools/echoshow/linux-image/Image.gz-dtb-bt
+# on Windows
+python tools/linux/patch-dtb.py Image.gz-dtb-bt Image.gz-dtb-bt-nodownmix --delete /soc/spi@1100a000/spi@0 amzn,mic-downmix
+KERNEL=.../Image.gz-dtb-bt-nodownmix KERNEL_IMAGE=.../boot-lineage-18.1-20260904-cronos-nodownmix.img \
+  bash tools/linux/build-image.sh -o techo5-linux-boot-bt.img
 ```
+
+`KERNEL` replaces the kernel blob; the header, load addresses and command line
+still come from `KERNEL_IMAGE`.
+
+Root filesystem: `mkrootfs.sh` installs the packages in `packages-rootfs.txt`
+with `apk` into an Alpine base, adds the vendor tree, our binaries and the
+overlay (`tools/linux/rootfs/`), and packs a tarball. `deploy-rootfs.sh` builds
+the daemon and tools for armv7, stages everything, runs `mkrootfs.sh` and can
+install the result into the inactive slot:
+
+```
+bash tools/linux/deploy-rootfs.sh --version v0.1.5 [--install [--reboot]] [--on-device]
+```
+
+It builds **in WSL** when it can: apk needs to run the packages' triggers
+inside an armv7 root, which QEMU user emulation provides (`apt install
+qemu-user-static binfmt-support`), Alpine's static `apk` sits at
+`~/apk/apk.static` (from gitlab.alpinelinux.org, "apk-tools" package
+registry), and `unshare -Ur --map-auto` gives the build root-owned files
+without sudo. That takes a minute and only the tarball crosses the Wi-Fi.
+Without those it builds on the device (`--on-device` forces that), which takes
+about ten minutes.
 
 First conversion of a unit (once; erases LineageOS on `system`):
 
@@ -139,9 +167,31 @@ Windows paths to python and normalise line endings on the way to the device.
   `/data/techo5-linux/wpa_supplicant.conf`; nothing is typed and nothing leaves
   the device.
 
+## Bluetooth
+
+The MT7668's Bluetooth half is driven by the vendor `mt76x8_bt.ko`, which
+exposes a raw H4 channel at `/dev/stpbt` rather than a Linux HCI device.
+`btbridge` (cmd/btbridge) sets the factory address (MediaTek vendor command
+`0xFC1A`, from `/proc/idme/bt_mac_addr`, the one thing Android's HAL did) and
+copies packets between `/dev/stpbt` and the kernel's `/dev/vhci`, so BlueZ sees
+an ordinary `hci0`. `t5_bt_up` (techo5-lib.sh) loads the module, keeps the
+bridge running, starts `dbus-daemon`, `bluetoothd`, and `bluealsa -p
+a2dp-source` after it, and power-cycles `hci0` once: on the bench the
+controller answered commands but never reported an inquiry result or an
+advertisement until it had been powered off and on after the first bring-up.
+Bonds live on userdata (`/data/misc/techo5/bluetooth`, bind-mounted over
+`/var/lib/bluetooth`).
+
+The daemon (`feature/btaudio`) is the pairing agent and the player: pairing
+mode (Home Assistant switch, or a swipe left on the clock) makes the Show
+discoverable and scans, lists what it finds on the screen, a tap pairs, trusts
+and connects; while an A2DP stream exists the speaker hands its audio to
+bluez-alsa's PCM (`hardware/speaker/sink.go`) instead of the codec. Scanning is
+only on while pairing: the radio shares the antenna with Wi-Fi. `btmon` and
+`btmgmt` are in the image for the console.
+
 ## Next
 
-Touch and auto-brightness for the daemon's screen (it paints the clock and the
-conversation itself since v0.1.5; `fbprobe -hold 1m` remains for a bare-panel
-check), Bluetooth after a kernel rebuild with `CONFIG_BT`, a custom boot logo
-in the `logo` partition. See `docs/porting-plan.md`.
+A settings sheet on the screen (swipe down from the top edge): Bluetooth,
+brightness, mute, wake word, about. Then the Echo Dot on the same image. See
+`docs/porting-plan.md`.

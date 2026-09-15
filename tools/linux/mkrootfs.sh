@@ -1,13 +1,15 @@
 #!/bin/sh
 # mkrootfs.sh — build the TECHO5 persistent root filesystem as a tarball.
 #
-# Runs ON THE DEVICE (or in any armv7 Alpine environment with network): the
-# build host has no armv7 chroot, and apk needs one to install packages
-# properly, with their triggers and a package database — which is what makes
-# `apk add bluez` possible later. tools/linux/deploy-rootfs.sh ships the inputs
-# here and runs this.
+# Runs on the device, or on an x86 Linux host (WSL) with Alpine's static apk,
+# QEMU user emulation and binfmt so the packages' triggers can execute inside
+# the armv7 root, and a user namespace for the file ownership (see
+# deploy-rootfs.sh, which drives both ways). Either way apk installs the
+# packages properly, with their triggers and a package database — which is
+# what makes `apk add bluez` possible later.
 #
 #   mkrootfs.sh -i <indir> -o <out.tar.gz> [-w <workdir>] [-V <version>] [-z <timezone>]
+#               [-a <arch>] [-A <apk binary>]
 #
 # <indir> layout (what deploy-rootfs.sh stages):
 #   bin/techo5 bin/fbprobe bin/audioprobe bin/rebootto bin/btbridge  Go binaries, armv7
@@ -19,7 +21,7 @@
 #   inputs/authorized_keys                                 SSH public key(s) for root
 set -e
 
-IN=; OUT=; WORK=/data/techo5-linux/build; VERSION=dev; TZNAME=UTC
+IN=; OUT=; WORK=/data/techo5-linux/build; VERSION=dev; TZNAME=UTC; ARCH=; APK=apk
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-i) IN=$2; shift 2;;
@@ -27,6 +29,8 @@ while [ $# -gt 0 ]; do
 	-w) WORK=$2; shift 2;;
 	-V) VERSION=$2; shift 2;;
 	-z) TZNAME=$2; shift 2;;
+	-a) ARCH=$2; shift 2;;
+	-A) APK=$2; shift 2;;
 	*) echo "mkrootfs: unknown argument $1" >&2; exit 1;;
 	esac
 done
@@ -44,12 +48,15 @@ tar -xzf "$mini" -C "$R"
 # Package installation needs a resolver inside the root.
 cp /etc/resolv.conf "$R/etc/resolv.conf"
 
+# On a host the package architecture has to be said; on the device it is the machine's own.
+arch=
+[ -n "$ARCH" ] && arch="--arch $ARCH"
 pkgs=$(sed 's/#.*//' "$IN/tools/packages-rootfs.txt" | tr '\n' ' ')
 say "apk add: $pkgs"
-apk --root "$R" --no-cache add $pkgs
+$APK --root "$R" $arch --no-cache add $pkgs
 say "apk add (local): $(ls "$IN"/inputs/apks312/*.apk | xargs -n1 basename | tr '\n' ' ')"
-apk --root "$R" --no-cache add --allow-untrusted "$IN"/inputs/apks312/*.apk
-apk --root "$R" info -v | sort > "$R/etc/techo5-packages"
+$APK --root "$R" $arch --no-cache add --allow-untrusted "$IN"/inputs/apks312/*.apk
+$APK --root "$R" $arch info -v | sort > "$R/etc/techo5-packages"
 
 # Vendor tree: Wi-Fi/BT modules, firmware (firmware_class.path=/vendor/firmware on
 # the kernel command line), the audio tuning the daemon reads.
@@ -93,6 +100,7 @@ fi
 
 mkdir -p "$R/store" "$R/data" "$R/run" "$R/proc" "$R/sys" "$R/dev" "$R/tmp" "$R/newroot"
 chmod 1777 "$R/tmp"
+# The daemon's own version line comes from running it, which on a host goes through QEMU.
 echo "techo5 rootfs $VERSION built $(date -u '+%Y-%m-%dT%H:%MZ') on $(cat /proc/sys/kernel/hostname), daemon $("$R/usr/local/bin/techo5" --version 2>/dev/null | head -1)" > "$R/etc/techo5-release"
 
 say "packing"

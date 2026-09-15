@@ -3,12 +3,18 @@
 # the device needs to build a root filesystem, build it there
 # (tools/linux/mkrootfs.sh), and optionally install it into the inactive slot.
 #
-#   tools/linux/deploy-rootfs.sh [--install] [--reboot] [--version vX.Y.Z]
+#   tools/linux/deploy-rootfs.sh [--install] [--reboot] [--version vX.Y.Z] [--on-device]
+#
+# The rootfs is built in WSL when it is there (fast: the host's CPU and disk,
+# only the tarball crosses the Wi-Fi) and on the device otherwise or with
+# --on-device. The WSL side needs qemu-user-static + binfmt-support (apt) and
+# Alpine's static apk at ~/apk/apk.static; mkrootfs.sh runs inside a user
+# namespace so files can be owned by root without sudo.
 #
 # Environment: HOST (192.168.1.50), KEY (the SSH key), TECHO5_INPUTS (the
 # directory with the Alpine minirootfs, vendor.tar.gz, apks312/, and the
-# public key; kept out of the repo), TZ_NAME (America/New_York), GO (go binary).
-# Git Bash on Windows is the expected shell.
+# public key; kept out of the repo), TZ_NAME (America/New_York), GO (go binary),
+# WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
 set -euo pipefail
 
 HOST=${HOST:-192.168.1.50}
@@ -17,12 +23,14 @@ INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
 TZ_NAME=${TZ_NAME:-America/New_York}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 VERSION=${VERSION:-}
-INSTALL=; REBOOT=
+WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
+INSTALL=; REBOOT=; ONDEVICE=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--install) INSTALL=1; shift;;
 	--reboot) REBOOT=1; shift;;
 	--version) VERSION=$2; shift 2;;
+	--on-device) ONDEVICE=1; shift;;
 	*) echo "unknown argument: $1" >&2; exit 1;;
 	esac
 done
@@ -58,14 +66,33 @@ cp "$INPUTS/techo5_ed25519.pub" "$STAGE/inputs/authorized_keys"
 for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do sed -i 's/\r$//' "$f"; done
 find "$STAGE/overlay" -type f -exec sed -i 's/\r$//' {} +
 
-echo "== shipping to $HOST"
-REMOTE=/data/techo5-linux/build
-"${SSH[@]}" "rm -rf $REMOTE/in && mkdir -p $REMOTE/in"
-tar -czf - -C "$STAGE" . | "${SSH[@]}" "tar -xzf - -C $REMOTE/in"
-
 OUT=/data/techo5-linux/techo5-rootfs-$VERSION.tar.gz
-echo "== building the rootfs on the device"
-"${SSH[@]}" "sh $REMOTE/in/tools/mkrootfs.sh -i $REMOTE/in -o $OUT -w $REMOTE -V $VERSION -z $TZ_NAME"
+REMOTE=/data/techo5-linux/build
+host_build=
+if [ -z "$ONDEVICE" ] && command -v wsl.exe >/dev/null 2>&1 \
+	&& wsl.exe -d "$WSL_DISTRO" -- bash -c 'test -e /proc/sys/fs/binfmt_misc/qemu-arm -a -x "$HOME/apk/apk.static"' 2>/dev/null; then
+	host_build=1
+fi
+
+if [ -n "$host_build" ]; then
+	echo "== building the rootfs in WSL ($WSL_DISTRO)"
+	# Git Bash's /e/... is WSL's /mnt/e/...; no Windows path crosses over (wsl.exe eats backslashes).
+	stage_wsl=$(cygpath -u "$STAGE" | sed 's|^/\([a-zA-Z]\)/|/mnt/\L\1/|')
+	# The build itself lives in tools/linux/wsl-build.sh: one script, no quoting across wsl.exe.
+	helper=$(cygpath -u "$ROOT/tools/linux/wsl-build.sh" | sed 's|^/\([a-zA-Z]\)/|/mnt/\L\1/|')
+	tarball=$(MSYS_NO_PATHCONV=1 wsl.exe -d "$WSL_DISTRO" -- bash "$helper" "$stage_wsl" "$VERSION" "$TZ_NAME" | tr -d '\r' | tail -1)
+	[ -n "$tarball" ] || { echo "WSL build failed" >&2; exit 1; }
+	echo "== shipping the rootfs to $HOST"
+	"${SSH[@]}" "mkdir -p /data/techo5-linux"
+	scp -O -i "$KEY" -o StrictHostKeyChecking=no "$tarball" "root@$HOST:$OUT"
+else
+	echo "== shipping to $HOST"
+	"${SSH[@]}" "rm -rf $REMOTE/in && mkdir -p $REMOTE/in"
+	tar -czf - -C "$STAGE" . | "${SSH[@]}" "tar -xzf - -C $REMOTE/in"
+
+	echo "== building the rootfs on the device"
+	"${SSH[@]}" "sh $REMOTE/in/tools/mkrootfs.sh -i $REMOTE/in -o $OUT -w $REMOTE -V $VERSION -z $TZ_NAME"
+fi
 
 if [ -n "$INSTALL" ]; then
 	echo "== installing into the inactive slot"
