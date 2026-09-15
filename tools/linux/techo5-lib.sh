@@ -148,10 +148,16 @@ t5_bt_up() {
 		[ -e /dev/stpbt ] || { log "bt: driver loaded but no /dev/stpbt"; return 1; }
 	fi
 	command -v btbridge >/dev/null || { log "bt: no btbridge"; return 1; }
-	(while true; do btbridge >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
+	# The factory address from IDME; the firmware otherwise comes up with a random one.
+	addr=$(tr -d '\n\0' < /proc/idme/bt_mac_addr 2>/dev/null)
+	(while true; do btbridge ${addr:+-bdaddr "$addr"} >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
 	n=0; while [ $n -lt 10 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
 	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: bridge up but no hci0"; return 1; }
-	mkdir -p /run/dbus /var/lib/bluetooth
+	# Pairings and bluez-alsa's state must survive reboots and slot changes: keep
+	# them on userdata (the root is read-only).
+	mkdir -p /run/dbus /data/misc/techo5/bluetooth /data/misc/techo5/bluealsa /var/lib/bluetooth /var/lib/bluealsa
+	mountpoint -q /var/lib/bluetooth || mount --bind /data/misc/techo5/bluetooth /var/lib/bluetooth
+	mountpoint -q /var/lib/bluealsa || mount --bind /data/misc/techo5/bluealsa /var/lib/bluealsa
 	if ! pidof dbus-daemon >/dev/null; then
 		dbus-daemon --system --nofork --nopidfile >> "$logdir/dbus.log" 2>&1 &
 		sleep 1

@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -27,11 +28,27 @@ const vendorPkt = 0xff // HCI_VENDOR_PKT: vhci control packets, never forwarded
 func main() {
 	stpPath := flag.String("stp", "/dev/stpbt", "vendor driver's H4 character device")
 	vhciPath := flag.String("vhci", "/dev/vhci", "kernel virtual HCI device")
+	bdaddr := flag.String("bdaddr", "idme", "public address to give the controller first: 12 hex digits, "+
+		"\"idme\" for the factory one from /proc/idme/bt_mac_addr, \"\" to leave the firmware's")
 	flag.Parse()
 
 	stp, err := syscall.Open(*stpPath, syscall.O_RDWR, 0)
 	if err != nil {
 		die("open %s: %v", *stpPath, err)
+	}
+	if *bdaddr == "idme" {
+		b, err := os.ReadFile("/proc/idme/bt_mac_addr")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "btbridge: no factory address: %v\n", err)
+		}
+		*bdaddr = strings.TrimRight(strings.TrimSpace(string(b)), "\x00")
+	}
+	if *bdaddr != "" {
+		if err := setBdaddr(stp, *bdaddr); err != nil {
+			fmt.Fprintf(os.Stderr, "btbridge: set address %s: %v (keeping the controller's own)\n", *bdaddr, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "btbridge: controller address set to %s\n", *bdaddr)
+		}
 	}
 	vhci, err := os.OpenFile(*vhciPath, os.O_RDWR, 0)
 	if err != nil {
@@ -96,6 +113,47 @@ func wait(fd int) {
 	set.Bits[fd/32] |= 1 << (uint(fd) % 32)
 	tv := syscall.Timeval{Usec: 50000}
 	_, _ = syscall.Select(fd+1, &set, nil, nil, &tv)
+}
+
+// setBdaddr sends MediaTek's vendor Set_BD_ADDR command (opcode 0xFC1A, six
+// address bytes little-endian) straight to the controller before the kernel
+// stack sees it, so hci0 comes up with the factory address rather than the
+// firmware's default. Waits up to two seconds for the Command Complete.
+func setBdaddr(stp int, hexaddr string) error {
+	if len(hexaddr) != 12 {
+		return fmt.Errorf("want 12 hex digits")
+	}
+	cmd := []byte{0x01, 0x1a, 0xfc, 0x06}
+	for i := 5; i >= 0; i-- { // little-endian on the wire
+		var v byte
+		if _, err := fmt.Sscanf(hexaddr[2*i:2*i+2], "%02x", &v); err != nil {
+			return fmt.Errorf("bad address")
+		}
+		cmd = append(cmd, v)
+	}
+	if err := writeAll(stp, cmd); err != nil {
+		return err
+	}
+	buf := make([]byte, 512)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		n, err := syscall.Read(stp, buf)
+		if err != nil && err != syscall.EINTR && err != syscall.EAGAIN {
+			return err
+		}
+		if n == 0 {
+			wait(stp)
+			continue
+		}
+		// Command Complete for 0xFC1A: 04 0E len ncmd 1A FC status
+		if n >= 7 && buf[0] == 0x04 && buf[1] == 0x0e && buf[4] == 0x1a && buf[5] == 0xfc {
+			if buf[6] != 0 {
+				return fmt.Errorf("controller status 0x%02x", buf[6])
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no reply")
 }
 
 func writeAll(fd int, b []byte) error {
