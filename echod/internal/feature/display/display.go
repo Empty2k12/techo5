@@ -266,6 +266,13 @@ func (d *Display) changed(s voice.State) {
 		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
 			go home.Get().ShowCamera(entity, cameraVoiceShow)
 		}
+		// "Go home": whatever page is up comes down, back to the clock or the radio.
+		if h := strings.ToLower(s.Heard); strings.Contains(h, "go home") || strings.Contains(h, "home screen") || strings.Contains(h, "main screen") {
+			d.weatherArmed, d.weatherUntil = false, time.Time{}
+			d.sheet, d.radio, d.cameras = false, false, false
+			go home.Get().HideCamera()
+			slog.Info("screen: home by voice")
+		}
 	}
 	if s.Phase == "idle" && d.weatherArmed {
 		d.weatherArmed = false
