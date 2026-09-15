@@ -21,11 +21,14 @@ func (r *renderer) weatherPage(s scene) {
 
 	days := s.forecast
 	now := s.weather
-	// Today: a big icon, the reading beside it, the day's range and rain beneath.
 	cond := now.Condition
 	if cond == "" && len(days) > 0 {
 		cond = days[0].Condition
 	}
+	// The day's weather, large and faint, behind everything.
+	r.faded(40, func() { r.weatherIcon(cond, r.w/2, r.h/2+20, r.h*3/2) })
+
+	// Today: a big icon, the reading beside it, the day's range and rain beneath.
 	r.weatherIcon(cond, r.margin+80, 190, 150)
 	big := now.Temp
 	if big == "" && len(days) > 0 {
@@ -48,21 +51,22 @@ func (r *renderer) weatherPage(s scene) {
 		for i := 0; i < cols; i++ {
 			d := days[i+1]
 			x := left + i*colW
+			// Each day in its own box.
+			r.box(image.Rect(x+3, 88, x+colW-3, 360), ember, 2)
 			name := d.When.Format("Mon")
 			if d.When.IsZero() {
 				name = fmt.Sprintf("+%d", i+1)
 			}
-			r.text(r.small, name, x+(colW-r.width(r.small, name))/2, 120, amber)
-			r.weatherIcon(d.Condition, x+colW/2, 175, min(colW-6, 70))
+			r.text(r.small, name, x+(colW-r.width(r.small, name))/2, 122, amber)
+			r.weatherIcon(d.Condition, x+colW/2, 178, min(colW-10, 68))
 			hi := fmt.Sprintf("%.0f°", d.High)
 			lo := fmt.Sprintf("%.0f°", d.Low)
-			r.text(r.body, hi, x+(colW-r.width(r.body, hi))/2, 260, cream)
+			r.text(r.body, hi, x+(colW-r.width(r.body, hi))/2, 262, cream)
 			r.text(r.small, lo, x+(colW-r.width(r.small, lo))/2, 300, dim)
 			if d.Rain > 0 {
 				p := fmt.Sprintf("%d%%", d.Rain)
-				r.text(r.tiny, p, x+(colW-r.width(r.tiny, p))/2, 335, rainBlue)
+				r.text(r.tiny, p, x+(colW-r.width(r.tiny, p))/2, 338, rainBlue)
 			}
-			draw.Draw(r.dst, image.Rect(x+6, 352, x+colW-6, 354), image.NewUniform(ember), image.Point{}, draw.Src)
 		}
 	} else if len(days) == 0 {
 		msg := "No forecast yet: call the home_assistant action with a token"

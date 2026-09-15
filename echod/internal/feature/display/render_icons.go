@@ -22,6 +22,26 @@ var (
 	moonPale  = color.RGBA{0xd8, 0xdc, 0xe4, 0xff}
 )
 
+// box strokes a rectangle's outline, thick pixels wide.
+func (r *renderer) box(rect image.Rectangle, c color.Color, thick int) {
+	src := image.NewUniform(c)
+	draw.Draw(r.dst, image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+thick), src, image.Point{}, draw.Over)
+	draw.Draw(r.dst, image.Rect(rect.Min.X, rect.Max.Y-thick, rect.Max.X, rect.Max.Y), src, image.Point{}, draw.Over)
+	draw.Draw(r.dst, image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+thick, rect.Max.Y), src, image.Point{}, draw.Over)
+	draw.Draw(r.dst, image.Rect(rect.Max.X-thick, rect.Min.Y, rect.Max.X, rect.Max.Y), src, image.Point{}, draw.Over)
+}
+
+// faded runs paint onto a scratch layer and lays it over the canvas at the given opacity (0–255),
+// for a picture that sits behind the page rather than on it.
+func (r *renderer) faded(alpha uint8, paint func()) {
+	real := r.dst
+	layer := image.NewRGBA(real.Bounds())
+	r.dst = layer
+	paint()
+	r.dst = real
+	draw.DrawMask(real, real.Bounds(), layer, image.Point{}, image.NewUniform(color.Alpha{A: alpha}), image.Point{}, draw.Over)
+}
+
 // disc fills a circle.
 func (r *renderer) disc(cx, cy, rad int, c color.Color) {
 	src := image.NewUniform(c)
