@@ -269,6 +269,17 @@ func (s *Stream) Command(word string) error {
 	return nil
 }
 
+// Pause stops the Bluetooth transport; what is buffered is dropped so a resume starts fresh.
+func (s *Stream) Pause() error {
+	if err := s.Command("Pause"); err != nil {
+		return err
+	}
+	return s.Command("Drop")
+}
+
+// Resume starts the transport again.
+func (s *Stream) Resume() error { return s.Command("Resume") }
+
 // Close ends the stream; bluez-alsa stops the transport once nothing is open.
 func (s *Stream) Close() error {
 	err := syscall.Close(s.fd)

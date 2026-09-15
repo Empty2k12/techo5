@@ -18,14 +18,27 @@ import (
 // way to let them.
 type Sink interface {
 	Write([]byte) (int, error)
+	// Pause stops the transport while nothing is playing and Resume starts it again. A Bluetooth
+	// stream that carries silence keeps the radio busy, and it shares the antenna with Wi-Fi:
+	// measured on the bench, an idle A2DP stream held open dropped the Wi-Fi rate to 6.5 Mbit/s.
+	Pause() error
+	Resume() error
 	Close() error
 }
+
+// sinkQuietAfter is how many silent periods before the transport is paused: about two seconds,
+// so the gaps in speech and between a chime and a reply do not pump it.
+const sinkQuietAfter = 2 * Rate / period
 
 type sinkState struct {
 	sink     Sink
 	rate     int
 	channels int
 	name     string
+
+	// quiet counts silent periods in a row; paused is whether the transport is stopped for it.
+	quiet  int
+	paused bool
 
 	// Linear interpolation state for a rate that is not the codec's.
 	pos    float64
@@ -80,14 +93,44 @@ func sinkGain(step int) float32 {
 }
 
 // push converts one period (48 kHz stereo S16_LE, already at the sink's gain) and writes it.
+// Silence is counted rather than sent: after sinkQuietAfter periods of it the transport is
+// paused, and the next period with anything in it resumes it first.
 func (s *sinkState) push(buf []byte) {
 	n := len(buf) / 4
 	if cap(s.frames) < n*2 {
 		s.frames = make([]int16, n*2)
 	}
 	frames := s.frames[:n*2]
+	silent := true
 	for i := range frames {
 		frames[i] = int16(binary.LittleEndian.Uint16(buf[i*2:]))
+		if frames[i] != 0 {
+			silent = false
+		}
+	}
+	if silent {
+		s.quiet++
+		if s.quiet >= sinkQuietAfter && !s.paused {
+			if err := s.sink.Pause(); err != nil {
+				slog.Warn("audio sink pause", "name", s.name, "err", err)
+			} else {
+				s.paused = true
+				slog.Info("audio sink paused", "name", s.name)
+			}
+		}
+		if s.paused {
+			return
+		}
+	} else {
+		s.quiet = 0
+		if s.paused {
+			if err := s.sink.Resume(); err != nil {
+				slog.Warn("audio sink resume", "name", s.name, "err", err)
+			} else {
+				slog.Info("audio sink resumed", "name", s.name)
+			}
+			s.paused = false
+		}
 	}
 
 	out := s.out[:0]
