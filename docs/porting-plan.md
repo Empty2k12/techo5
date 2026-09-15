@@ -27,14 +27,21 @@ toggle the amp switch, treat the mute latch as one-way, decode announcement WAVs
 and keep Android's audio stack off the devices — for now by stopping the framework
 (`tools/bench-nofw.sh`).
 
+Later the same day: Android moved to its null primary audio HAL
+(`ro.hardware.audio.primary=default` in `/system/build.prop`), which keeps audioserver off the
+PCM devices for good, and the daemon became an init service (`tools/init/techo5.rc`,
+`/system/bin/techo5`) that starts on `sys.boot_completed`. Android, ShowAssist on screen and
+the daemon now run side by side, and the daemon survives a reboot.
+
 Still to do for M1:
 
-- Start the daemon from init on boot instead of by hand, and keep Android's audio stack away
-  from the devices without stopping the framework (a null primary audio HAL for Android).
-- Provisioning: name, key and wake models are placed by hand today (`/data/misc/techo5/`).
-- Volume curve: the middle step is a touch loud; pull the curve down a few dB.
+- Provisioning: name, key and wake models are placed by hand today (`/data/misc/techo5/`);
+  an installer should do it, and the device should be named for its room.
+- Retire the VACA satellite side of ShowAssist on this device (it now hears silence through
+  the null HAL) so only one satellite is registered, and decide what the screen shows (M2).
 - Understand the second capture channel (identical copy of the mic) and whether a second mic
   exists.
+- Volume: the curve reaches unity at the top; pick the default step by ear.
 
 The port covers:
 

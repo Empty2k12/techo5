@@ -148,9 +148,13 @@ Wi-Fi table when it dies (`ip rule` falls through to `unreachable`); adding `ip 
 all lookup <wlan0 table> pref 5000` restores it. DHCP renewal is the framework's, so the lease
 will lapse in this mode. Reboot to get Android back.
 
-A permanent Android+daemon arrangement needs a null audio HAL for Android
-(`audio.primary.default.so` is on the device) so audioserver never touches the hardware; that
-is M2/M3 work.
+**The fix, in place on the bench unit:** point Android at its null primary audio HAL.
+`/system/build.prop` selects the HAL with `ro.hardware.audio.primary`; `amazon_wrapper` is the
+stock value and `default` loads `/vendor/lib/hw/audio.primary.default.so`, which never opens a
+PCM device. With that one line changed (root, `mount -o remount,rw /`) Android boots normally,
+audioserver and the HAL run and hold nothing, and the daemon owns the hardware while the
+framework, launcher and ShowAssist keep running. Android apps get silence in and out. The
+original file is kept as `build.prop.cronos-lineage-orig` next to the LineageOS zip.
 
 ### Mute button
 
