@@ -3,6 +3,7 @@
 package display
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -51,6 +52,12 @@ func (d *Display) gather(s scene, restartArm time.Time) settings {
 		st.radio = "playing " + rd.Now + "  ·  tap to open"
 	default:
 		st.radio = "tap to choose a station"
+	}
+
+	if n := len(home.Get().Cameras()); n == 0 {
+		st.cameras = "not set up"
+	} else {
+		st.cameras = fmt.Sprintf("%d  ·  tap to open, or say \"show the …\"", n)
 	}
 
 	bt := btaudio.Get().State()

@@ -9,6 +9,15 @@ type Home struct {
 	Weather string `json:"weather,omitempty"`
 
 	Radio Radio `json:"radio"`
+
+	// Cameras are camera.* entities and the names to say for them, in the order the list shows.
+	Cameras []Camera `json:"cameras,omitempty"`
+}
+
+// Camera is one camera on the screen's list.
+type Camera struct {
+	Entity string `json:"entity"`
+	Name   string `json:"name"`
 }
 
 // Radio is how the screen's radio page is wired to the house's own radio setup.
@@ -42,4 +51,8 @@ func (w HomeWriter) Weather(entity string) error {
 
 func (w HomeWriter) Radio(r Radio) error {
 	return w.st.Update(func(c *Config) { c.Home.Radio = r })
+}
+
+func (w HomeWriter) Cameras(cams []Camera) error {
+	return w.st.Update(func(c *Config) { c.Home.Cameras = cams })
 }

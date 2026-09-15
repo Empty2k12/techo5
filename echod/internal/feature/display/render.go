@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
@@ -30,6 +31,7 @@ var (
 	cream  = color.RGBA{0xe8, 0xdc, 0xc8, 0xff}
 	dim    = color.RGBA{0x8a, 0x7d, 0x6c, 0xff}
 	ember  = color.RGBA{0x3a, 0x2c, 0x22, 0xff}
+	shade  = color.RGBA{0x00, 0x00, 0x00, 0x90} // a translucent strip for text over a picture
 )
 
 // scene is one frame's worth of facts.
@@ -65,6 +67,12 @@ type scene struct {
 	showWeather bool
 	forecast    forecastDays
 	nowPlaying  bool
+
+	// showCamera is a live camera view, over everything but the sheet; showCameras is the list.
+	showCamera  bool
+	camera      home.CameraView
+	showCameras bool
+	cameras     []config.Camera
 }
 
 const sheetVolumeSteps = media.VolumeSteps
@@ -129,6 +137,20 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showSheet {
 		r.settingsPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showCamera {
+		r.cameraView(s, s.camera)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showCameras {
+		r.camerasPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

@@ -13,9 +13,9 @@ import (
 // the bottom closes it. Geometry is shared with the gesture handler. The panel is 960 by 480 in
 // landscape, so everything here is laid out for 480 rows.
 const (
-	// Nine rows of 38 from 64 end at 406, above the bar at 416.
-	sheetRowTop    = 64
-	sheetRowHeight = 38
+	// Ten rows of 35 from 62 end at 412, above the bar at 416.
+	sheetRowTop    = 62
+	sheetRowHeight = 35
 	sheetDoneBar   = 64
 
 	// topEdge is how far from the top a swipe down has to start to be the sheet rather than the volume.
@@ -28,6 +28,7 @@ const (
 // Sheet rows, in order.
 const (
 	rowRadio = iota
+	rowCameras
 	rowBluetooth
 	rowBrightness
 	rowAuto
@@ -42,6 +43,7 @@ const (
 // settings is what the sheet shows, gathered by the display each frame.
 type settings struct {
 	radio      string // what is playing, or that the page is there
+	cameras    string // how many, or that none are set up
 	bluetooth  string // connected device, or what to say instead
 	brightness int    // ceiling, percent
 	auto       bool
@@ -79,6 +81,7 @@ func (r *renderer) settingsPage(s scene) {
 
 	rows := [sheetRows][2]string{}
 	rows[rowRadio] = [2]string{"Radio", st.radio}
+	rows[rowCameras] = [2]string{"Cameras", st.cameras}
 	rows[rowBluetooth] = [2]string{"Bluetooth", st.bluetooth}
 	auto := ""
 	if st.auto {
@@ -107,13 +110,13 @@ func (r *renderer) settingsPage(s scene) {
 		if i == rowRestart && restart != "tap twice" {
 			c = amber
 		}
-		r.text(r.small, row[0], r.margin, top+29, c)
+		r.text(r.small, row[0], r.margin, top+27, c)
 		right := row[1]
 		// Long values are trimmed from the left so the end, which changes, stays visible.
 		for r.width(r.tiny, right) > r.w-2*r.margin-260 && len(right) > 4 {
 			right = "…" + right[4:]
 		}
-		r.text(r.tiny, right, r.w-r.margin-r.width(r.tiny, right), top+28, dim)
+		r.text(r.tiny, right, r.w-r.margin-r.width(r.tiny, right), top+26, dim)
 	}
 
 	top := r.h - sheetDoneBar

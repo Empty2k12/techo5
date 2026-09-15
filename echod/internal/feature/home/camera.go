@@ -1,0 +1,189 @@
+package home
+
+import (
+	"bytes"
+	"image"
+	"image/jpeg"
+	"log/slog"
+	"strings"
+	"time"
+
+	esphome "github.com/ygelfand/go-esphome-device"
+	xdraw "golang.org/x/image/draw"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+)
+
+// The cameras page: "show the front door" puts a camera's live view up for a while, a tap takes it
+// down. Frames are Home Assistant's snapshots through the token, fetched one after another while
+// the view is up, decoded and scaled here; a few a second is what the panel and the SoC manage,
+// and enough to see who is there.
+
+const (
+	// cameraShow is how long a camera stays up when asked for by voice.
+	cameraShow = 30 * time.Second
+
+	// cameraFrameW and H are the size frames are scaled to fit: the panel.
+	cameraFrameW = 960
+	cameraFrameH = 480
+)
+
+// CameraView is what the screen shows.
+type CameraView struct {
+	Entity string
+	Name   string
+	Until  time.Time
+	Frame  *image.RGBA // the latest frame, scaled to fit; nil until the first arrives
+	Error  string      // why there is no frame, when there is none
+}
+
+// Cameras is the configured list.
+func (f *Feature) Cameras() []config.Camera { return config.Get().Home.Cameras }
+
+// Camera is the view in progress, if any.
+func (f *Feature) Camera() (CameraView, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cam.Entity == "" || time.Now().After(f.cam.Until) {
+		return CameraView{}, false
+	}
+	return f.cam, true
+}
+
+// ShowCamera puts a camera up for d.
+func (f *Feature) ShowCamera(entity string, d time.Duration) {
+	name := entity
+	for _, c := range f.Cameras() {
+		if c.Entity == entity {
+			name = c.Name
+		}
+	}
+	f.mu.Lock()
+	fresh := f.cam.Entity != entity || time.Now().After(f.cam.Until)
+	f.cam = CameraView{Entity: entity, Name: name, Until: time.Now().Add(d), Frame: f.cam.Frame}
+	if fresh {
+		f.cam.Frame = nil
+	}
+	f.mu.Unlock()
+	slog.Info("camera up", "entity", entity, "for", d)
+	if fresh {
+		go f.fetchFrames(entity)
+	}
+	f.Changed.Emit(struct{}{})
+}
+
+// HideCamera takes the view down.
+func (f *Feature) HideCamera() {
+	f.mu.Lock()
+	f.cam.Until = time.Time{}
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+}
+
+// fetchFrames pulls snapshots while the view is up, one after another.
+func (f *Feature) fetchFrames(entity string) {
+	for {
+		f.mu.Lock()
+		up := f.cam.Entity == entity && time.Now().Before(f.cam.Until)
+		f.mu.Unlock()
+		if !up {
+			return
+		}
+		frame, err := f.snapshot(entity)
+		f.mu.Lock()
+		if f.cam.Entity == entity {
+			if err != nil {
+				f.cam.Error = err.Error()
+			} else {
+				f.cam.Frame, f.cam.Error = frame, ""
+			}
+		}
+		f.mu.Unlock()
+		f.Changed.Emit(struct{}{})
+		if err != nil {
+			slog.Warn("camera frame", "entity", entity, "err", err)
+			time.Sleep(2 * time.Second)
+		}
+	}
+}
+
+// snapshot fetches one frame and scales it to fit the panel.
+func (f *Feature) snapshot(entity string) (*image.RGBA, error) {
+	b, err := hass.Get().Fetch("/api/camera_proxy/" + entity)
+	if err != nil {
+		return nil, err
+	}
+	src, err := jpeg.Decode(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	sw, sh := src.Bounds().Dx(), src.Bounds().Dy()
+	w, h := cameraFrameW, sh*cameraFrameW/sw
+	if h > cameraFrameH {
+		w, h = sw*cameraFrameH/sh, cameraFrameH
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+	return dst, nil
+}
+
+// MatchCamera finds a camera named in what was heard: "show the front door", "show me the deck
+// camera". Empty when nothing matches.
+func (f *Feature) MatchCamera(heard string) string {
+	h := strings.ToLower(heard)
+	if !strings.Contains(h, "show") && !strings.Contains(h, "camera") {
+		return ""
+	}
+	best, bestLen := "", 0
+	for _, c := range f.Cameras() {
+		n := strings.ToLower(c.Name)
+		if n != "" && strings.Contains(h, n) && len(n) > bestLen {
+			best, bestLen = c.Entity, len(n)
+		}
+	}
+	return best
+}
+
+// Camera actions: the list, and showing one — for an automation that wants the front door up when
+// the bell rings.
+func (f *Feature) cameraActions() []*esphome.Action {
+	return []*esphome.Action{
+		{
+			Name: "home_cameras",
+			Args: []esphome.Arg{{Name: "cameras", Type: esphome.ArgString}}, // "camera.x=Front door,camera.y=Deck"
+			Run: func(c esphome.Call) (any, error) {
+				var cams []config.Camera
+				for _, item := range strings.Split(c.String("cameras"), ",") {
+					entity, name, _ := strings.Cut(strings.TrimSpace(item), "=")
+					entity, name = strings.TrimSpace(entity), strings.TrimSpace(name)
+					if entity == "" {
+						continue
+					}
+					if name == "" {
+						name = strings.TrimPrefix(entity, "camera.")
+					}
+					cams = append(cams, config.Camera{Entity: entity, Name: name})
+				}
+				if err := config.Set().Home().Cameras(cams); err != nil {
+					return nil, err
+				}
+				slog.Info("home: cameras set", "count", len(cams))
+				f.Changed.Emit(struct{}{})
+				return nil, nil
+			},
+		},
+		{
+			Name: "home_show_camera",
+			Args: []esphome.Arg{{Name: "entity", Type: esphome.ArgString}, {Name: "seconds", Type: esphome.ArgInt}},
+			Run: func(c esphome.Call) (any, error) {
+				d := time.Duration(c.Int("seconds")) * time.Second
+				if d <= 0 {
+					d = cameraShow
+				}
+				f.ShowCamera(strings.TrimSpace(c.String("entity")), d)
+				return nil, nil
+			},
+		},
+	}
+}

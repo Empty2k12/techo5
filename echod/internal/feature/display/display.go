@@ -98,8 +98,9 @@ type Display struct {
 	sheet      bool
 	restartArm time.Time
 
-	// radio is the radio page being shown.
-	radio bool
+	// radio is the radio page being shown; cameras the cameras list.
+	radio   bool
+	cameras bool
 
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
@@ -258,6 +259,12 @@ func (d *Display) changed(s voice.State) {
 	if s.Heard != "" && aboutWeather(s.Heard) {
 		d.weatherArmed = true
 	}
+	// "Show the front door": the camera goes up at once, while the assistant answers.
+	if s.Heard != "" {
+		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
+			go home.Get().ShowCamera(entity, cameraVoiceShow)
+		}
+	}
 	if s.Phase == "idle" && d.weatherArmed {
 		d.weatherArmed = false
 		d.weatherUntil = time.Now().Add(weatherShow)
@@ -327,10 +334,28 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	// The radio page: a row plays (or stops), the bar closes it.
+	// A live camera: a tap takes it down.
+	if _, up := home.Get().Camera(); up {
+		if g.Kind == touch.Tap {
+			home.Get().HideCamera()
+		}
+		d.wake()
+		return
+	}
+
+	// The cameras page: a row shows that camera for a while, the bar closes the page.
 	d.mu.Lock()
-	sheet, radio := d.sheet, d.radio
+	sheet, radio, cameras := d.sheet, d.radio, d.cameras
 	d.mu.Unlock()
+	if cameras {
+		if g.Kind == touch.Tap && d.r != nil {
+			d.cameraTap(d.r.camRowAt(g.Y))
+		}
+		d.wake()
+		return
+	}
+
+	// The radio page: a row plays (or stops), the bar closes it.
 	if radio {
 		if g.Kind == touch.Tap && d.r != nil {
 			d.radioTap(d.r.radioRowAt(g.Y))
@@ -396,6 +421,28 @@ func (d *Display) nowPlaying() bool {
 	return home.Get().Radio().Configured
 }
 
+func (d *Display) showCameras(on bool) {
+	d.mu.Lock()
+	d.cameras = on
+	d.mu.Unlock()
+	slog.Info("cameras page", "open", on)
+	d.wake()
+}
+
+// cameraTap is a finger on a row of the cameras page.
+func (d *Display) cameraTap(row int) {
+	if row == camRows {
+		d.showCameras(false)
+		return
+	}
+	cams := home.Get().Cameras()
+	if row < 0 || row >= len(cams) {
+		return
+	}
+	d.showCameras(false)
+	home.Get().ShowCamera(cams[row].Entity, camListShow)
+}
+
 func (d *Display) showRadio(on bool) {
 	d.mu.Lock()
 	d.radio = on
@@ -442,6 +489,9 @@ func (d *Display) sheetTap(row, x int) {
 	case rowRadio:
 		d.showSheet(false)
 		d.showRadio(true)
+	case rowCameras:
+		d.showSheet(false)
+		d.showCameras(true)
 	case rowVolume:
 		// Left half down, right half up.
 		if d.r != nil && x < d.r.w/2 {
@@ -582,6 +632,13 @@ func (d *Display) frame() time.Duration {
 	if s.showSheet {
 		s.sheet = d.gather(s, restartArm)
 	}
+	s.camera, s.showCamera = home.Get().Camera()
+	d.mu.Lock()
+	s.showCameras = d.cameras
+	d.mu.Unlock()
+	if s.showCameras {
+		s.cameras = home.Get().Cameras()
+	}
 	s.nowPlaying = (s.phase == "idle") && d.nowPlaying()
 	if s.showRadio || s.nowPlaying {
 		s.radio = home.Get().Radio()
@@ -599,7 +656,10 @@ func (d *Display) frame() time.Duration {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
 
-	if s.bt.Pairing || s.showSheet || s.showRadio {
+	if s.showCamera {
+		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
+	}
+	if s.bt.Pairing || s.showSheet || s.showRadio || s.showCameras {
 		return 500 * time.Millisecond
 	}
 	if s.showWeather || s.nowPlaying {

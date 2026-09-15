@@ -53,6 +53,9 @@ type Feature struct {
 	forecast []hass.Day
 	fetched  time.Time
 	poke     chan struct{}
+
+	// cam is the camera view in progress; see camera.go.
+	cam CameraView
 }
 
 // forecastEvery is how often the forecast is refreshed while there is a weather entity.
@@ -186,7 +189,7 @@ func (f *Feature) want(h config.Home) {
 // Actions are how Home Assistant configures this: which weather entity to show, and how the
 // radio page is wired. Both persist and take effect at the next connection.
 func (f *Feature) Actions() []*esphome.Action {
-	return []*esphome.Action{
+	return append(f.cameraActions(), []*esphome.Action{
 		f.accessAction(),
 		{
 			Name: "home_weather",
@@ -238,7 +241,7 @@ func (f *Feature) Actions() []*esphome.Action {
 				return nil, nil
 			},
 		},
-	}
+	}...)
 }
 
 // rewire re-registers what to follow and asks for a reconnect, since Home Assistant only asks
