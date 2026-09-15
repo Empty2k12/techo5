@@ -14,6 +14,8 @@ the command line in the header.
 """
 import argparse
 import gzip
+import hashlib
+import lzma
 import io
 import os
 import stat
@@ -73,11 +75,16 @@ class Cpio:
         for i in range(1, len(parts) + 1):
             self.dir("/".join(parts[:i]))
 
-    def add_tar(self, path):
+    def add_tar(self, path, skip_dotfiles=False):
         with tarfile.open(path, "r:*") as tf:
             for m in tf:
                 name = m.name.lstrip("./").strip("/")
                 if not name:
+                    continue
+                if skip_dotfiles and name.startswith("."):
+                    continue  # apk metadata: .PKGINFO, .SIGN.*, .post-install
+                # apk archives may repeat a directory the rootfs already has
+                if m.isdir() and name in self.seen:
                     continue
                 if m.isdir():
                     self.dir(name, m.mode & 0o7777)
@@ -123,7 +130,13 @@ def write_bootimg(hdr, kernel, ramdisk, ps, out, cmdline_append=None):
         if len(cmd) > 511:
             sys.exit("command line too long")
         hdr[64:576] = cmd + b"\0" * (512 - len(cmd))
-    hdr[576 : 576 + 32] = b"\0" * 32  # id: LK does not check it
+    # id: SHA1 over kernel, ramdisk, second and (empty) dtb, each followed by its size,
+    # the way mkbootimg fills it. The stock images carry it; keep it valid.
+    h = hashlib.sha1()
+    for blob in (kernel, ramdisk, b"", b""):
+        h.update(blob)
+        h.update(struct.pack("<I", len(blob)))
+    hdr[576 : 576 + 32] = h.digest() + b"\0" * 12
     img = bytes(hdr) + kernel + b"\0" * (pg(len(kernel)) - len(kernel)) + ramdisk + b"\0" * (pg(len(ramdisk)) - len(ramdisk))
     open(out, "wb").write(img)
     return len(img)
@@ -149,14 +162,34 @@ def verify_cpio(data):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kernel-image", required=True, help="LineageOS boot.img to take header and kernel from")
-    ap.add_argument("--rootfs", required=True, help="Alpine minirootfs .tar.gz")
+    ap.add_argument("--rootfs", default=None, help="Alpine minirootfs .tar.gz (omit for --minimal)")
+    ap.add_argument("--minimal", action="store_true",
+                    help="no rootfs tarball: the static busybox (from --add) becomes /bin/busybox with applet symlinks")
     ap.add_argument("--init", required=True, help="init script to install as /init")
     ap.add_argument("--add", action="append", default=[], metavar="SRC=DEST", help="extra file (mode 755)")
+    ap.add_argument("--apk", action="append", default=[], metavar="FILE.apk",
+                    help="Alpine package to unpack into the rootfs (its files only; no install scripts)")
+    ap.add_argument("--copy", action="append", default=[], metavar="SRC=DEST", help="extra file, mode 644")
     ap.add_argument("--cmdline-append", default=None)
+    ap.add_argument("--ramdisk-addr", type=lambda v: int(v, 0), default=None,
+                    help="override the ramdisk load address in the header (e.g. 0x43400000)")
     ap.add_argument("--max-size", type=int, default=16 * 1024 * 1024)
+    ap.add_argument("--compress", choices=["gzip", "xz"], default="gzip",
+                    help="initramfs compression (the LineageOS kernel accepts gzip, lzma, xz and lz4)")
+    ap.add_argument("--ramdisk-file", default=None,
+                    help="use this ready-made ramdisk instead of building one (control experiments)")
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--ramdisk-out", default=None, help="also write the gzip initramfs here")
     a = ap.parse_args()
+
+    if a.ramdisk_file:
+        rd = open(a.ramdisk_file, "rb").read()
+        hdr, kernel, old_rd, ps = read_bootimg(a.kernel_image)
+        if a.ramdisk_addr is not None:
+            struct.pack_into("<I", hdr, 20, a.ramdisk_addr)
+        size = write_bootimg(hdr, kernel, rd, ps, a.output, a.cmdline_append)
+        print(f"ramdisk from file: {len(rd)} bytes; image: {size} bytes")
+        return
 
     c = Cpio()
     c.dir("dev"); c.chardev("dev/console", 5, 1); c.chardev("dev/null", 1, 3, 0o666)
@@ -165,23 +198,50 @@ def main():
     for n in (8, 12, 16):
         c.blockdev(f"dev/mmcblk0p{n}", 179, n)
     c.dir("proc"); c.dir("sys"); c.dir("tmp", 0o1777); c.dir("run"); c.dir("data"); c.dir("android")
-    c.add_tar(a.rootfs)
-    init = open(a.init, "rb").read().replace(b"\r\n", b"\n")
-    c.file("init", init, 0o755)
-    for spec in a.add:
+    if a.rootfs:
+        c.add_tar(a.rootfs)
+    for apk in a.apk:
+        c.add_tar(apk, skip_dotfiles=True)
+    for spec in a.copy:
         src, dest = spec.split("=", 1)
         dest = dest.strip("/")
         c.add_parents(dest)
+        c.file(dest, open(src, "rb").read().replace(b"\r\n", b"\n"), 0o644)
+    init = open(a.init, "rb").read().replace(b"\r\n", b"\n")
+    c.file("init", init, 0o755)
+    adds = {}
+    for spec in a.add:
+        src, dest = spec.split("=", 1)
+        dest = dest.strip("/")
+        adds[dest] = src
+        c.add_parents(dest)
         c.file(dest, open(src, "rb").read(), 0o755)
+    if a.minimal:
+        if not a.rootfs and "bin/busybox.static" not in adds:
+            sys.exit("--minimal needs --add <busybox.static>=/bin/busybox.static")
+        for d in ("bin", "sbin", "usr/bin", "usr/sbin", "etc", "lib", "root", "usr/local/bin"):
+            c.dir(d)
+        c.symlink("bin/busybox", "busybox.static")
+        for app in ("sh mount umount mkdir ln ls wc cat echo sleep dd printf uname mdev mknod tee head tail "
+                    "grep cut date dmesg ip insmod sync cp reboot setsid ifconfig tr od free cttyhack").split():
+            c.symlink(f"bin/{app}", "busybox")
+        c.file("etc/passwd", b"root::0:0:root:/root:/bin/sh\n")
     raw = c.finish()
     names = verify_cpio(raw)
     if "init" not in names or "bin/busybox" not in names or "bin/busybox.static" not in names:
         sys.exit("initramfs is missing /init, /bin/busybox or /bin/busybox.static (pass --add busybox.static=/bin/busybox.static)")
-    rd = gzip.compress(raw, 9)
+    if a.compress == "xz":
+        # the kernel's xz decompressor wants CRC32 checks and no BCJ filter
+        rd = lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
+                           filters=[{"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME, "dict_size": 32 << 20}])
+    else:
+        rd = gzip.compress(raw, 9)
     if a.ramdisk_out:
         open(a.ramdisk_out, "wb").write(rd)
 
     hdr, kernel, old_rd, ps = read_bootimg(a.kernel_image)
+    if a.ramdisk_addr is not None:
+        struct.pack_into("<I", hdr, 20, a.ramdisk_addr)
     size = write_bootimg(hdr, kernel, rd, ps, a.output, a.cmdline_append)
     print(f"initramfs: {len(names)} entries, {len(raw)} bytes raw, {len(rd)} bytes gzip")
     print(f"kernel: {len(kernel)} bytes; image: {size} bytes ({size / a.max_size:.0%} of {a.max_size})")

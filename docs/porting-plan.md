@@ -208,6 +208,31 @@ Surveyed 2026-09-15, all details in `docs/hardware.md` (Kernels, Wi-Fi/Bluetooth
   (~4 MB gz, or lzma/xz which the kernel accepts). The real rootfs can live on
   `system`/`userdata` later; a self-contained initramfs is the first target.
 
+### Status 2026-09-15 evening: steps 1–3 done in initramfs form
+
+`tools/linux/` builds a boot image (LineageOS kernel + Alpine armv7 initramfs)
+that, flashed to **`boot`**, comes up in 12 s with a root shell on USB serial,
+joins the Wi-Fi network Android had saved, sets the clock, routes the
+microphone, starts dropbear and the daemon; Home Assistant reconnected to the
+same "Bench Show" device and a full voice turn ("Alexa, what time is it?")
+worked with no Android userspace running. What it took, beyond the plan:
+
+- The bootloader boots 64-bit kernels only from `boot`; from `recovery` even
+  the stock LineageOS image dies before the first kernel message and the
+  watchdog falls back to `boot`. Hours went into that. TWRP's kernel is 32-bit,
+  which is why `recovery` works for it. Layout now: Linux in `boot`, TWRP in
+  `recovery`, the LineageOS boot image on disk to restore Android.
+- wpa_supplicant 2.11 cannot associate through the vendor driver (RSN
+  capability mismatch, see `tools/linux/README.md`); 2.9 can.
+- A bare boot leaves the codec unrouted: init selects the DIF1 inputs and sets
+  the mic gain (the daemon should own this).
+- The daemon's firewall helper expects Android's iptables; harmless on Linux.
+- `reboot recovery` is marked in the RTC spare register, not MISC; a failed
+  boot ends in the watchdog and a normal boot; the bootloader's boot counter
+  (idme) eventually parks the unit in fastboot, which is reachable and fine.
+- Custom boot logo (user request): the `logo` partition (1 MB) holds what LK
+  paints; replace it later with a TECHO5 image.
+
 ### Steps
 
 1. **First Linux boot** (no kernel build): LineageOS kernel + an initramfs built

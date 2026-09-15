@@ -108,6 +108,17 @@ is MT7663 only; `btmtksdio` does list MT7668). Not usable for this project.
 - Driver sources: the LineageOS vendor tree, mirrored as
   `gitlab.com/echo-pmos/amazon-checkers-vendor` (`amazon/wlan/mediatek/driver/mt76x8`,
   `amazon/bluetooth/mediatek/mt76xx/driver/mt76x8/sdio`).
+- **Associating from Linux (verified 2026-09-15):** the driver ignores the RSN
+  element the supplicant supplies and generates its own for the association
+  request (`rsnGenerateRSNIE`, capabilities field 0 unless PMF is requested).
+  wpa_supplicant 2.11 puts capabilities 0x000c (16 PTKSA replay counters, added
+  whenever WMM is on) into message 2/4, hostapd on the access points compares the two
+  elements and deauthenticates with reason 2, which the supplicant reports as a
+  wrong key. wpa_supplicant 2.9 (no replay-counter advertisement) associates and
+  completes the handshake. Driver trace: `echo "0x11:0xff" > /proc/net/wlan/dbg_level`
+  (module 0x11 = RSN), then `dmesg | grep "Gen RSN IE"`.
+- The firmware picks the BSS itself (by SSID, any band), whatever BSSID the
+  supplicant asked for; pinning `bssid=` just makes the join fail.
 - The Bluetooth driver does **not** register a Linux HCI device. It creates the
   character device `/dev/stpbt` (plus `/dev/stpbtfwlog`) carrying raw H4 packets
   (leading type byte `0x01` command, `0x02` ACL, `0x04` event), which Android's
@@ -211,6 +222,17 @@ Speech from Home Assistant is normalised to −18 dBFS RMS before the volume cur
 (`media.Normalize`/`SpeechGain`). The cronos volume curve is linear in dB: −45 dB at step 1,
 −24 dB at half the dial, −6 dB at the top (`paths_cronos.go`). Tuned by ear in a small room
 on 2026-09-15 across v0.1.1–v0.1.4; half the dial was judged "perfect" for conversation.
+
+### A bare Linux boot leaves the codec unconfigured
+
+Without Android's audio HAL the mixer is at the drivers' power-on state on both
+kernels: `Ext_Speaker_Amp_Switch` Off, `Speaker Safe Mode A` 1, `ADC_A MICPGA
+Volume Ctrl` 0, no `ADC_A * Ip Select` input chosen. Playback is audible as is
+(the "Off" amp switch is only the control's cached value; do not touch it, see
+below). Capture reads −95 dBFS until the inputs are routed: set `ADC_A Left Ip
+Select ADC_A DIF1_L switch` and `… Right … DIF1_R switch` to 1 and `ADC_A MICPGA
+Volume Ctrl` to 40, after which the floor is −70 dBFS, the same as under
+LineageOS. `tools/linux/init` does this; the daemon should take it over.
 
 ### Do not toggle `Ext_Speaker_Amp_Switch`
 
@@ -364,10 +386,22 @@ and `productid2` read `0` on the unit seen.
 - Fastboot reports `product: CRONOS`, `version: 0.5`, `kaeru-version: 2.0.0`;
   `unlock_status` flips to `true` afterwards. `max-download-size` is 109 MB.
 - amonet's LK does **not** implement `fastboot boot` ("unknown command"): test
-  images must be flashed (`fastboot flash recovery …`). After
-  `adb reboot bootloader`, `fastboot reboot` lands back in fastboot; use
-  `fastboot continue` to boot normally. Volume-down at power-up enters fastboot
-  (`TW_HACKED_BL_BUTTON`).
+  images must be flashed. After `adb reboot bootloader`, `fastboot reboot` lands
+  back in fastboot; use `fastboot continue` to boot normally. Volume-down while
+  plugging in enters fastboot (`TW_HACKED_BL_BUTTON`).
+- **The `recovery` slot boots 32-bit kernels only.** The 64-bit LineageOS
+  kernel flashed to `recovery` (even the untouched stock image) produces no
+  kernel output at all; the watchdog resets the unit (`bootreason
+  wdt_by_pass_pwk`) and LK boots `boot` instead. Verified with a command-line
+  marker. 64-bit images go in `boot`.
+- `reboot recovery` is signalled through the RTC spare register
+  (`rtc_mark_recovery` in the kernel log), not the MISC bootloader message;
+  MISC stays zero. LK keeps a boot counter in idme (`/proc/idme/bootcount`) and
+  after enough boots that never complete Android it parks in "hacked fastboot
+  mode", which is reachable over USB; `fastboot continue` resumes.
+- From Linux, a plain `reboot` on the LineageOS kernel is a normal boot; on
+  the 4.9.77 kernel it lands in fastboot. `cmd/rebootto` (RESTART2 with
+  `bootloader`/`recovery`) enters fastboot or recovery from Linux.
 - TWRP works over `adb shell twrp ...` (format data, wipe, install zip) and is
   a 4.9.77 32-bit kernel (`cm-14.1` branch) with a small userspace; `adb shell`
   in TWRP is root, and `/dev/snd`, `/dev/input`, `/dev/graphics/fb0` are all

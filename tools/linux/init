@@ -154,15 +154,93 @@ fi
 # --- Wi-Fi: load the vendor module from the Android system partition.
 # firmware_class.path=/vendor/firmware comes from the kernel command line.
 WLAN=/android/system/vendor/lib/modules/mt76x8_wlan.ko
+WIFI_OK=
 if [ -e "$WLAN" ]; then
 	if insmod $WLAN 2>/tmp/insmod.err; then
-		sleep 5
-		ip link show wlan0 >/dev/null 2>&1 && crumb "mt76x8_wlan loaded, wlan0 present" || crumb "mt76x8_wlan loaded, no wlan0"
+		sleep 3
+		ip link show wlan0 >/dev/null 2>&1 && WIFI_OK=1 && crumb "mt76x8_wlan loaded, wlan0 present" || crumb "mt76x8_wlan loaded, no wlan0"
 	else
 		crumb "insmod mt76x8_wlan failed: $(cat /tmp/insmod.err)"
 	fi
 else
 	crumb "vendor wlan module not found at $WLAN"
+fi
+
+# --- Join the network Android already knows: its saved networks live in
+# /data/misc/wifi/WifiConfigStore.xml on userdata (SSID and pre-shared key as
+# XML strings). Build a wpa_supplicant config from the first PSK network, get
+# a lease with udhcpc, and start dropbear so the USB cable becomes optional.
+STORE=/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml   # Android 11
+[ -r "$STORE" ] || STORE=/data/misc/wifi/WifiConfigStore.xml         # older Android
+if [ -n "$WIFI_OK" ] && [ -x /sbin/wpa_supplicant ] && [ -r "$STORE" ]; then
+	xmlval() { sed -n "s/.*<string name=\"$1\">\(.*\)<\/string>.*/\1/p" "$STORE" | head -1 | sed 's/&quot;//g; s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g'; }
+	SSID=$(xmlval SSID); PSK=$(xmlval PreSharedKey)
+	if [ -n "$SSID" ] && [ -n "$PSK" ]; then
+		mkdir -p /run/wpa
+		printf 'ctrl_interface=/run/wpa\nnetwork={\n\tssid="%s"\n\tpsk="%s"\n}\n' "$SSID" "$PSK" > /run/wpa.conf
+		chmod 600 /run/wpa.conf
+		ip link set wlan0 up
+		wpa_supplicant -B -i wlan0 -c /run/wpa.conf -P /run/wpa.pid > /tmp/wpa.log 2>&1
+		# the vendor driver's first full scan alone takes several seconds; allow a minute
+		n=0; while [ $n -lt 60 ]; do
+			wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break
+			sleep 1; n=$((n+1))
+		done
+		if wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED'; then
+			udhcpc -i wlan0 -n -q -t 8 -s /usr/share/udhcpc/default.script > /tmp/udhcpc.log 2>&1
+			IP=$(ip -4 addr show wlan0 | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
+			crumb "wifi joined '$SSID', ip ${IP:-none}"
+			if [ -n "$IP" ] && [ -x /usr/sbin/dropbear ]; then
+				mkdir -p $LOGDIR/dropbear /etc/dropbear
+				for t in rsa ed25519; do
+					[ -e $LOGDIR/dropbear/dropbear_${t}_host_key ] || dropbearkey -t $t -f $LOGDIR/dropbear/dropbear_${t}_host_key >/dev/null 2>&1
+					ln -sf $LOGDIR/dropbear/dropbear_${t}_host_key /etc/dropbear/dropbear_${t}_host_key
+				done
+				# test phase: key in /root/.ssh/authorized_keys (baked into the image), and
+				# root with an empty password (-B) as the fallback until a real policy exists
+				printf 'root::0:0:root:/root:/bin/sh\n' > /etc/passwd
+				printf 'root::0:0:99999:7:::\n' > /etc/shadow
+				chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
+				dropbear -R -B -p 22 > /tmp/dropbear.log 2>&1 && crumb "dropbear listening on $IP:22" || crumb "dropbear failed to start"
+			fi
+		else
+			crumb "wifi: wpa_supplicant did not reach COMPLETED for '$SSID' ($(wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep wpa_state))"
+		fi
+	else
+		crumb "wifi: no PSK network found in WifiConfigStore"
+	fi
+fi
+
+# --- Clock: no RTC worth trusting on this boot; take NTP once the network is up.
+if [ -n "$IP" ]; then
+	ntpd -n -q -p pool.ntp.org > /tmp/ntpd.log 2>&1 && crumb "clock set: $(date)" || crumb "ntp failed"
+fi
+
+# --- Audio codec: a bare boot leaves the AIC3101 mic path unrouted (Android's
+# HAL normally does this). Route DIF1 into the ADC and set the mic gain the way
+# LineageOS leaves it; leave the amplifier switch alone (toggling it silences
+# the speaker until reboot) — the daemon clears the amp's safe mode itself.
+A=/usr/local/bin/audioprobe
+if [ -x $A ]; then
+	$A -set-int 'ADC_A Left Ip Select ADC_A DIF1_L switch=1' -seconds 1 -no-capture >/dev/null 2>&1
+	$A -set-int 'ADC_A Right Ip Select ADC_A DIF1_R switch=1' -seconds 1 -no-capture >/dev/null 2>&1
+	$A -set-int 'ADC_A MICPGA Volume Ctrl=40' -seconds 1 -no-capture >/dev/null 2>&1
+	crumb "mic routed: $($A -seconds 1 2>&1 | grep -o 'ch0: rms.*')"
+fi
+
+# --- The daemon: the same static binary the Android install put in /system/bin,
+# with its identity, key and wake-word models under /data/misc/techo5.
+DAEMON=/android/system/bin/techo5
+if [ -n "$IP" ] && [ -x $DAEMON ]; then
+	killall fbprobe 2>/dev/null
+	(setsid $DAEMON run >> $LOGDIR/techo5.log 2>&1 &)
+	sleep 3
+	if pidof techo5 >/dev/null; then
+		crumb "techo5 daemon running (pid $(pidof techo5)); staying up"
+		touch /tmp/stay
+	else
+		crumb "techo5 daemon failed to start: $(tail -2 $LOGDIR/techo5.log | tr '\n' ' ')"
+	fi
 fi
 
 snapshot
