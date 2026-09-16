@@ -96,11 +96,26 @@ func (r *Registry) Actions() []*esphome.Action {
 	return out
 }
 
-// Handlers is the components that answer protocol messages themselves.
+// Handlers is the components that answer protocol messages themselves, Describers left out: they
+// go through Describers, ahead of the entity list.
 func (r *Registry) Handlers() []esphome.Handler {
 	var out []esphome.Handler
 	for _, e := range r.sorted() {
+		if _, ok := e.c.(Describer); ok {
+			continue
+		}
 		if h, ok := e.c.(Handler); ok {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// Describers is the components that add entries to the entity list themselves.
+func (r *Registry) Describers() []esphome.Handler {
+	var out []esphome.Handler
+	for _, e := range r.sorted() {
+		if h, ok := e.c.(Describer); ok {
 			out = append(out, h)
 		}
 	}

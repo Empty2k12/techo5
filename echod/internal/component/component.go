@@ -90,6 +90,14 @@ type Handler interface {
 	esphome.Handler
 }
 
+// Describer is a Handler that adds entries to the entity list the library does not carry itself
+// (the camera). It runs before the library's own list so its entries arrive before Done, which is
+// the only time Home Assistant reads them.
+type Describer interface {
+	Handler
+	DescribesEntities()
+}
+
 // Restorer puts the component back the way the device was left, once, at start-up.
 type Restorer interface {
 	Restore(config.Config)

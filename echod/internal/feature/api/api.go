@@ -124,7 +124,8 @@ func (a *API) Start(context.Context) error {
 
 		// The handlers components answer for themselves rather than through an entity: the voice
 		// satellite's pipeline traffic, and the Bluetooth proxy's subscribe and set-mode messages.
-		Handler: esphome.Chain(append([]esphome.Handler{ents}, component.Default().Handlers()...)...),
+		// Describers go first so what they add to the entity list lands before the library's Done.
+		Handler: esphome.Chain(append(append(component.Default().Describers(), ents), component.Default().Handlers()...)...),
 	}
 	return nil
 }
