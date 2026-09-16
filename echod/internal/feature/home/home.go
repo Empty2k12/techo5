@@ -19,7 +19,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
-	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
@@ -36,7 +35,11 @@ type Weather struct {
 
 // Radio is what the radio page shows.
 type Radio struct {
-	Configured bool
+	Configured bool   // there is a list to show: favourites wired, or a token for Radio Browser
+	Source     string // the list shown, config.RadioFavourites, RadioLocal or RadioPopular
+	Sources    int    // how many lists there are to step through
+	Loading    bool   // the list is being fetched
+	Problem    string // why the list is empty, when fetching it failed
 	Stations   []string
 	Now        string // the station Home Assistant says is playing, empty for none
 	Playing    bool   // the device's own player is running
@@ -54,8 +57,24 @@ type Feature struct {
 	// Changed fires when anything shown changes; listeners must not block.
 	Changed hook.Hook[struct{}]
 
-	mu       sync.Mutex
-	chosen   string
+	mu     sync.Mutex
+	chosen string
+
+	// listed is the Radio Browser station tapped last, at listedAt, to name the stream that follows.
+	listed   string
+	listedAt time.Time
+
+	// weatherSel picks the weather entity; weathers is Home Assistant's list of them, fetched at
+	// weathersAt.
+	weatherSel *esphome.Select
+	weathers   []hass.Entity
+	weathersAt time.Time
+
+	// The radio's lists from Home Assistant's Radio Browser; see local.go.
+	lists radioLists
+
+	// radar is the rain map; see radar.go.
+	radar    radarState
 	url      string // the stream playing, from the media player
 	urlName  string // its station name once found
 	forecast []hass.Day
@@ -78,6 +97,7 @@ const forecastEvery = 30 * time.Minute
 func (f *Feature) Run(ctx context.Context) error {
 	go f.metaLoop(ctx)
 	for {
+		f.refreshSources()
 		f.refreshForecast()
 		select {
 		case <-ctx.Done():
@@ -89,7 +109,7 @@ func (f *Feature) Run(ctx context.Context) error {
 }
 
 func (f *Feature) refreshForecast() {
-	entity := config.Get().Home.Weather
+	entity := config.Get().Home.WeatherEntity()
 	if entity == "" || !hass.Get().Ready() {
 		return
 	}
@@ -119,6 +139,7 @@ var (
 func Get() *Feature {
 	once.Do(func() {
 		shared = &Feature{poke: make(chan struct{}, 1), metaPoke: make(chan struct{}, 1)}
+		shared.buildWeatherSelect()
 		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
 		media.Get().OnPlay.Listen(shared.played)
 	})
@@ -130,6 +151,13 @@ func Get() *Feature {
 func (f *Feature) played(url string) {
 	f.mu.Lock()
 	f.url, f.urlName, f.chosen = url, "", ""
+	if f.listed != "" && time.Since(f.listedAt) < listedFor {
+		f.urlName, f.listed = f.listed, ""
+		f.mu.Unlock()
+		f.Changed.Emit(struct{}{})
+		f.pokeMeta()
+		return
+	}
 	f.mu.Unlock()
 	f.Changed.Emit(struct{}{})
 	go func() {
@@ -185,14 +213,20 @@ func (f *Feature) wake() {
 func (f *Feature) Name() string { return "home" }
 
 // Restore registers what to follow from the saved configuration, before Home Assistant connects.
-func (f *Feature) Restore(c config.Config) { f.want(c.Home) }
+func (f *Feature) Restore(c config.Config) {
+	f.weatherSel.Options = weatherOptions(c.Home)
+	f.weatherSel.Set(chosenOption(c.Home))
+	f.want(c.Home)
+}
 
 func (f *Feature) want(h config.Home) {
 	var keys []hastate.Key
-	if h.Weather != "" {
-		keys = append(keys, hastate.Key{Entity: h.Weather}, hastate.Key{Entity: h.Weather, Attribute: "temperature"},
-			hastate.Key{Entity: h.Weather, Attribute: "temperature_unit"})
+	if w := h.WeatherEntity(); w != "" {
+		keys = append(keys, hastate.Key{Entity: w}, hastate.Key{Entity: w, Attribute: "temperature"},
+			hastate.Key{Entity: w, Attribute: "temperature_unit"}, hastate.Key{Entity: w, Attribute: "friendly_name"})
 	}
+	// Home's location, for the rain map.
+	keys = append(keys, hastate.Key{Entity: "zone.home", Attribute: "latitude"}, hastate.Key{Entity: "zone.home", Attribute: "longitude"})
 	for _, s := range h.Radio.Stations {
 		keys = append(keys, hastate.Key{Entity: s, Attribute: "options"})
 	}
@@ -211,12 +245,15 @@ func (f *Feature) Actions() []*esphome.Action {
 			Name: "home_weather",
 			Args: []esphome.Arg{{Name: "entity", Type: esphome.ArgString}},
 			Run: func(c esphome.Call) (any, error) {
-				entity := strings.TrimSpace(c.String("entity"))
-				if err := config.Set().Home().Weather(entity); err != nil {
-					return nil, err
+				// An entity; "default" for Home Assistant's own forecast, "none" for no weather.
+				switch entity := strings.TrimSpace(c.String("entity")); strings.ToLower(entity) {
+				case "", "default":
+					f.ChooseWeather(config.DefaultWeather)
+				case config.WeatherOff:
+					f.ChooseWeather("")
+				default:
+					f.ChooseWeather(entity)
 				}
-				slog.Info("home: weather entity set", "entity", entity)
-				f.rewire()
 				return nil, nil
 			},
 		},
@@ -288,13 +325,16 @@ func (f *Feature) accessAction() *esphome.Action {
 
 // Weather is the current reading for the clock.
 func (f *Feature) Weather() Weather {
-	h := config.Get().Home
-	if h.Weather == "" {
+	entity := config.Get().Home.WeatherEntity()
+	if entity == "" {
 		return Weather{}
 	}
 	t := hastate.Get()
-	w := Weather{Condition: t.State(h.Weather)}
-	if temp, ok := t.Value(h.Weather, "temperature"); ok && temp != "" && temp != "None" {
+	w := Weather{Condition: t.State(entity)}
+	if w.Condition == "unknown" || w.Condition == "unavailable" {
+		w.Condition = ""
+	}
+	if temp, ok := t.Value(entity, "temperature"); ok && temp != "" && temp != "None" {
 		if i := strings.IndexByte(temp, '.'); i > 0 {
 			temp = temp[:i]
 		}
@@ -306,25 +346,37 @@ func (f *Feature) Weather() Weather {
 // Radio is the page's content.
 func (f *Feature) Radio() Radio {
 	h := config.Get().Home.Radio
-	r := Radio{Configured: h.Configured()}
+	sources := RadioSources()
+	r := Radio{Configured: len(sources) > 0, Source: radioSource(), Sources: len(sources)}
 	if !r.Configured {
 		return r
 	}
 	t := hastate.Get()
-	seen := map[string]bool{}
-	for _, entity := range h.Stations {
-		v, ok := t.Value(entity, "options")
-		if !ok {
-			continue
-		}
-		for _, name := range hastate.Options(v) {
-			name = strings.TrimSpace(name)
-			if name == "" || seen[name] || strings.HasPrefix(strings.ToLower(name), "select a") {
+	if r.Source == config.RadioFavourites {
+		seen := map[string]bool{}
+		for _, entity := range h.Stations {
+			v, ok := t.Value(entity, "options")
+			if !ok {
 				continue
 			}
-			seen[name] = true
-			r.Stations = append(r.Stations, name)
+			for _, name := range hastate.Options(v) {
+				name = strings.TrimSpace(name)
+				if name == "" || seen[name] || strings.HasPrefix(strings.ToLower(name), "select a") {
+					continue
+				}
+				seen[name] = true
+				r.Stations = append(r.Stations, name)
+			}
 		}
+	} else {
+		f.fetchList(r.Source)
+		f.mu.Lock()
+		l := f.list(r.Source)
+		for _, st := range l.stations {
+			r.Stations = append(r.Stations, st.Name)
+		}
+		r.Loading, r.Problem = l.busy && len(l.stations) == 0, l.err
+		f.mu.Unlock()
 	}
 	r.Playing, _ = media.Get().Playing()
 	f.mu.Lock()
@@ -343,23 +395,25 @@ func (f *Feature) Radio() Radio {
 	return r
 }
 
-// Play asks Home Assistant to play a station on this device.
+// Play plays a station of the list shown on this device: a favourite through Home Assistant's
+// script, a Radio Browser station through the device's own player entity.
 func (f *Feature) Play(station string) {
+	source := radioSource()
+	if source != config.RadioFavourites {
+		if f.playListed(source, station) {
+			f.Changed.Emit(struct{}{})
+			f.pokeMeta()
+		}
+		return
+	}
 	h := config.Get().Home.Radio
 	if !h.Configured() {
 		return
 	}
-	speaker := h.Speaker
-	if speaker == "" {
-		speaker = "media_player." + layout.Slug(config.Get().Device.Name) + "_speaker"
-	}
 	f.mu.Lock()
 	f.chosen = station
 	f.mu.Unlock()
-	component.CallService.Emit(component.Call{
-		Service: h.Service,
-		Data:    map[string]string{h.Field: askFor(station), h.SpeakerField: speaker},
-	})
+	callFavourite(h, station)
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()
 }

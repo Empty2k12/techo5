@@ -5,10 +5,19 @@ package config
 // stations, the text that names what is playing, and the script that plays one. All of it is
 // set from Home Assistant through the device's actions, so nothing here is baked in.
 type Home struct {
-	// Weather is a weather.* entity shown on the idle screen; empty shows none.
+	// Weather is a weather.* entity shown on the idle screen. Empty is DefaultWeather, the forecast
+	// every Home Assistant sets up on its own; WeatherOff shows none.
 	Weather string `json:"weather,omitempty"`
 
+	// WeatherSources are the weather entities Home Assistant listed last, offered as choices.
+	WeatherSources []string `json:"weather_sources,omitempty"`
+
 	Radio Radio `json:"radio"`
+
+	// RadioSource is the list the radio page shows: RadioFavourites (the stations wired with
+	// home_radio), RadioLocal or RadioPopular (Home Assistant's Radio Browser). Empty picks
+	// favourites when they are wired, local stations otherwise.
+	RadioSource string `json:"radio_source,omitempty"`
 
 	// Cameras are camera.* entities and the names to say for them, in the order the list shows.
 	Cameras []Camera `json:"cameras,omitempty"`
@@ -36,6 +45,31 @@ type Radio struct {
 	Speaker      string `json:"speaker,omitempty"`
 }
 
+// DefaultWeather is Home Assistant's own forecast (Met.no), which a new installation sets up for its
+// home location.
+const DefaultWeather = "weather.forecast_home"
+
+// WeatherOff is the choice of no weather at all.
+const WeatherOff = "none"
+
+// WeatherEntity is the weather entity to show, empty for none.
+func (h Home) WeatherEntity() string {
+	switch h.Weather {
+	case "":
+		return DefaultWeather
+	case WeatherOff:
+		return ""
+	}
+	return h.Weather
+}
+
+// The radio page's lists.
+const (
+	RadioFavourites = "favourites"
+	RadioLocal      = "local"
+	RadioPopular    = "popular"
+)
+
 func defaultHome() Home {
 	return Home{Radio: Radio{Field: "station", SpeakerField: "speaker"}}
 }
@@ -51,6 +85,14 @@ func (w HomeWriter) Weather(entity string) error {
 
 func (w HomeWriter) Radio(r Radio) error {
 	return w.st.Update(func(c *Config) { c.Home.Radio = r })
+}
+
+func (w HomeWriter) WeatherSources(ids []string) error {
+	return w.st.Update(func(c *Config) { c.Home.WeatherSources = ids })
+}
+
+func (w HomeWriter) RadioSource(source string) error {
+	return w.st.Update(func(c *Config) { c.Home.RadioSource = source })
 }
 
 func (w HomeWriter) Cameras(cams []Camera) error {

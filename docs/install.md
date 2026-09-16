@@ -154,6 +154,15 @@ Then:
   connects, and keeps it from then on.
 - **Wake word**: the default is "Alexa". Change it on the device (swipe down from the top, Device tab,
   Wake word, Next) or in Home Assistant; the other follows.
+- **Home Assistant token** (optional, for the forecast page, local radio stations and the list of
+  weather sources): create a long-lived access token on your Home Assistant profile page, then run
+  the `esphome.<device>_home_assistant` action with `url` (like `http://192.168.1.20:8123`) and
+  `token`.
+- **Weather**: Home Assistant's own forecast by default. To show another weather entity, use the
+  Device tab (Weather, Next), the "Weather source" select, or `esphome.<device>_home_weather`.
+- **Radio**: with the token, the Radio tab lists stations near home and popular ones, from the Radio
+  Browser integration Home Assistant sets up on its own (add it under Devices & services if it is
+  missing). Your own favourites can be wired with `esphome.<device>_home_radio`.
 - **Security**: SSH, and the camera and screen pages on port 8181, have switches on the Security tab
   and in Home Assistant. SSH keys only come from Home Assistant (`esphome.<device>_ssh_keys`).
 - **Updates**: the firmware update entity installs new releases into the other slot, reboots, and

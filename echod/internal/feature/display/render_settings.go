@@ -9,6 +9,9 @@ import (
 	"image/draw"
 	"strings"
 	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 )
 
 // The settings sheet: a swipe down from the top opens it. The tabs run down the left with Done at
@@ -76,17 +79,20 @@ const (
 	rowWifi
 	rowNight
 	rowWake
-	rowAbout
-	rowRestart
+	rowWeather
+	rowAbout // with Restart on it
 )
 
 // pageOf slices a list for the rows: which items page shows, and whether the last row is the
 // "More" row that turns the page. Lists that fit take every row.
-func pageOf(n, page int) (start, end int, more bool) {
-	if n <= sheetRows {
+func pageOf(n, page int) (start, end int, more bool) { return pageIn(n, page, sheetRows) }
+
+// pageIn is pageOf for a list given only the last rows of the tab.
+func pageIn(n, page, rows int) (start, end int, more bool) {
+	if n <= rows {
 		return 0, n, false
 	}
-	per := sheetRows - 1
+	per := rows - 1
 	pages := (n + per - 1) / per
 	page %= pages
 	start = page * per
@@ -98,8 +104,11 @@ func pageOf(n, page int) (start, end int, more bool) {
 }
 
 // moreRow draws the last row as the page turner.
-func (r *renderer) moreRow(n, page int) {
-	per := sheetRows - 1
+func (r *renderer) moreRow(n, page int) { r.moreRowIn(n, page, sheetRows) }
+
+// moreRowIn is moreRow for a list given only the last rows of the tab.
+func (r *renderer) moreRowIn(n, page, rows int) {
+	per := rows - 1
 	pages := (n + per - 1) / per
 	top := r.row(sheetRows-1, "More", dim)
 	r.value(top, fmt.Sprintf("page %d of %d", page%pages+1, pages), 1)
@@ -129,7 +138,8 @@ type settings struct {
 	auto        bool
 	muted       bool
 	wakeWord    string
-	volume      int // step out of media.VolumeSteps
+	weather     string // the weather source's name
+	volume      int    // step out of media.VolumeSteps
 	night       string
 	wifi        string
 	name        string
@@ -299,16 +309,19 @@ func (r *renderer) deviceTab(s scene) {
 	r.value(top, st.wakeWord, 1)
 	r.button(top, 2, "Next", false)
 
-	top = r.row(rowAbout, "About", cream)
-	r.value(top, fmt.Sprintf("%s  ·  %s  ·  slot %s", st.name, st.version, st.slot), 0)
+	top = r.row(rowWeather, "Weather", cream)
+	r.value(top, st.weather, 2)
+	r.button(top, 1, "Show", false)
+	r.button(top, 2, "Next", false)
 
+	// About, with Restart on the same row: it asks twice.
 	armed := !st.restartArm.IsZero() && st.now.Sub(st.restartArm) < restartWindow
-	top = r.row(rowRestart, "Restart", cream)
+	top = r.row(rowAbout, "About", cream)
 	if armed {
 		r.value(top, "tap again to restart now", 1)
 		r.button(top, 2, "Confirm", true)
 	} else {
-		r.value(top, "asks twice", 1)
+		r.value(top, fmt.Sprintf("%s  ·  %s  ·  slot %s", st.name, st.version, st.slot), 1)
 		r.button(top, 2, "Restart", false)
 	}
 }
@@ -356,20 +369,40 @@ func (r *renderer) camerasTab(s scene) {
 	}
 }
 
+// radioRowSource is the Radio tab's first row, the list shown; the stations take the rows under it.
+const radioRowSource = 0
+
 func (r *renderer) radioTab(s scene) {
 	rd := s.radio
 	if !rd.Configured {
-		r.note(0, "Not set up: call the home_radio action from Home Assistant")
+		r.note(0, "No stations yet. Give the device a Home Assistant token (the home_assistant action) "+
+			"for local and popular stations from Radio Browser, or wire your own with home_radio.")
 		return
+	}
+	top := r.row(radioRowSource, "Stations", cream)
+	r.value(top, home.SourceLabel(rd.Source), 1)
+	if rd.Sources > 1 {
+		r.button(top, 2, "Next", false)
 	}
 	rows := radioList(rd)
-	if len(rows) == 0 {
-		r.note(0, "No stations yet")
+	switch {
+	case rd.Loading:
+		r.note(1, "Asking Home Assistant for stations…")
+		return
+	case len(rows) == 0 && rd.Problem != "":
+		r.note(1, "Could not list the stations: "+rd.Problem)
+		return
+	case len(rows) == 0 && rd.Source == config.RadioLocal:
+		r.note(1, "Radio Browser knows no stations within 100 km of home. Try Popular.")
+		return
+	case len(rows) == 0:
+		r.note(1, "No stations in this list yet")
 		return
 	}
-	start, end, more := pageOf(len(rows), s.sheet.page)
+	listRows := sheetRows - 1
+	start, end, more := pageIn(len(rows), s.sheet.page, listRows)
 	if more {
-		r.moreRow(len(rows), s.sheet.page)
+		r.moreRowIn(len(rows), s.sheet.page, listRows)
 	}
 	for i, name := range rows[start:end] {
 		c := color.Color(cream)
@@ -384,7 +417,7 @@ func (r *renderer) radioTab(s scene) {
 		case name == rd.Chosen && rd.Chosen != rd.Now:
 			right = "Starting…"
 		}
-		top := r.row(i, label, c)
+		top := r.row(1+i, label, c)
 		r.button(top, 2, right, playing)
 	}
 }

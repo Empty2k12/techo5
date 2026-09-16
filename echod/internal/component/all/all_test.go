@@ -121,6 +121,7 @@ var registered = []string{
 	"wake_threshold_2",
 	"wake_tone_1",
 	"wake_tone_2",
+	"weather_source",
 	"wifi_received",
 	"wifi_sent",
 	"wifi_signal",

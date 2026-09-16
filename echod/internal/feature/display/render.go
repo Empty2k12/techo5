@@ -84,7 +84,10 @@ type scene struct {
 	// idle screen while the radio plays or sits paused.
 	showWeather bool
 	forecast    forecastDays
-	nowPlaying  bool
+	// showRadar is the rain map in place of the forecast.
+	showRadar  bool
+	radar      home.RadarView
+	nowPlaying bool
 
 	// showCamera is a live camera view, over everything but the sheet; cameras feeds the sheet's tab.
 	showCamera bool
@@ -175,6 +178,13 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showCamera {
 		r.cameraView(s, s.camera)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showRadar {
+		r.radarPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
@@ -43,6 +44,7 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 	if st.wakeWord == "" {
 		st.wakeWord = "off"
 	}
+	st.weather = home.Get().WeatherSource()
 	st.version = layout.Version
 	st.night = config.Get().Screen.Night
 	d.mu.Lock()

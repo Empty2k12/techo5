@@ -35,11 +35,12 @@ the Show into a fast, private Home Assistant voice satellite with a touch screen
 |  |  |
 |---|---|
 | 🐧 **Real Linux, no Android** | The Show boots straight into a minimal Alpine Linux root filesystem. No Android framework, no Google services, no app store: one daemon drives the microphones, speaker, screen, camera and radios directly. |
-| 🚫 **No Alexa, no Amazon account, no Amazon cloud** | Your voice goes only to *your* Home Assistant, over its encrypted ESPHome API. The Show reaches the internet just for what you use: update checks against this repo, network time, and radio streams with their song and cover lookups. Voice and control keep working with the internet down, as long as your Home Assistant pipeline is local. |
+| 🚫 **No Alexa, no Amazon account, no Amazon cloud** | Your voice goes only to *your* Home Assistant, over its encrypted ESPHome API. The Show reaches the internet just for what you use: update checks against this repo, network time, radio streams with their song and cover lookups, and the rain radar map. Voice and control keep working with the internet down, as long as your Home Assistant pipeline is local. |
 | 🎙️ **Wake word on the device** | microWakeWord runs locally: "Alexa", "Okay Nabu", "Hey Jarvis" or "Hey Mycroft", chosen on the screen or in Home Assistant. Echo cancellation keeps it listening over music. |
 | 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed. No password logins, not even in rescue. |
 | 🔄 **Updates that can't brick it** | Releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. |
-| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, now playing with song and cover art, forecasts, live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes. |
+| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, now playing with song and cover art, forecasts and a live rain radar, live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes. |
+| 📻 **Weather and radio with no setup** | A new Show uses the forecast every Home Assistant has, and lists the radio stations near home from Home Assistant's Radio Browser. Pick another weather entity (your own station, say) on the screen, and keep your own favourite stations too. |
 | ⏰ **Alarms that ring on their own** | Set on the screen, by Home Assistant, or followed from its helpers; they ring from the Show's own clock even when Home Assistant is down. Snooze included. |
 | 🎧 **Bluetooth, rebuilt** | Earbuds and speakers over A2DP, plus a Home Assistant Bluetooth proxy, on a kernel rebuilt with Bluetooth from the LineageOS source. |
 | 📷 **A camera you control** | The front camera becomes a Home Assistant camera entity, off unless something is watching, and physically off while the mute button is engaged. |
@@ -150,6 +151,9 @@ TECHO5 exists because of these projects and the people behind them.
 - [Home Assistant](https://www.home-assistant.io/) and [ESPHome](https://esphome.io/): Assist, the
   native API, and the reason to build any of this.
 - [Music Assistant](https://www.music-assistant.io/) and [Sendspin](https://github.com/Sendspin/sendspin-go).
+- [Radio Browser](https://www.radio-browser.info/), through Home Assistant's integration, for stations
+  near home; [RainViewer](https://www.rainviewer.com/api.html) for the radar and
+  [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors for the map under it.
 - [Alpine Linux](https://alpinelinux.org/), BusyBox, Dropbear, wpa_supplicant, [BlueZ](https://www.bluez.org/),
   [bluez-alsa](https://github.com/arkq/bluez-alsa) (arkq), and
   [webrtc-audio-processing](https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing).
