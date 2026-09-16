@@ -166,7 +166,7 @@ func (f *Feature) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := a.RegisterAgent(); err != nil {
+	if err := a.RegisterAgent(f.Pairing); err != nil {
 		a.Close()
 		return err
 	}

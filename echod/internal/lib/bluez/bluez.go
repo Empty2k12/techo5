@@ -469,10 +469,13 @@ func (a *Adapter) Remove(address string) error {
 	return a.obj.Call(adapterIfc+".RemoveDevice", 0, d.Path).Err
 }
 
-// RegisterAgent makes this process the pairing agent: everything bluetoothd asks is answered yes,
-// which is what a screen with no keyboard can do. The passkey a phone shows is accepted as shown.
-func (a *Adapter) RegisterAgent() error {
-	ag := &agent{}
+// RegisterAgent makes this process the pairing agent. While pairing (which reports whether pairing
+// mode is on) says yes, a pairing is answered yes, which is what a device with no keyboard can do, and
+// the passkey a phone shows is accepted as shown. At any other time pairing is refused, so nothing
+// nearby can bond with the device unasked. A connection bluetoothd asks about is allowed only for the
+// audio profiles, whatever the device.
+func (a *Adapter) RegisterAgent(pairing func() bool) error {
+	ag := &agent{pairing: pairing}
 	if err := a.conn.Export(ag, agentPath, agentIfc); err != nil {
 		return fmt.Errorf("bluez: export agent: %w", err)
 	}
@@ -490,25 +493,74 @@ func (a *Adapter) RegisterAgent() error {
 }
 
 // agent is org.bluez.Agent1. Methods return *dbus.Error; nil is yes.
-type agent struct{}
+type agent struct {
+	pairing func() bool
+}
+
+// audioProfiles are the service classes a connection may be authorized for: A2DP source and sink,
+// AVRCP target and controller, and the A/V control and distribution transports under them.
+var audioProfiles = map[string]bool{
+	"0000110a-0000-1000-8000-00805f9b34fb": true, // Audio Source
+	"0000110b-0000-1000-8000-00805f9b34fb": true, // Audio Sink
+	"0000110c-0000-1000-8000-00805f9b34fb": true, // A/V Remote Control Target
+	"0000110d-0000-1000-8000-00805f9b34fb": true, // Advanced Audio Distribution
+	"0000110e-0000-1000-8000-00805f9b34fb": true, // A/V Remote Control
+	"0000110f-0000-1000-8000-00805f9b34fb": true, // A/V Remote Control Controller
+	"00000017-0000-1000-8000-00805f9b34fb": true, // AVCTP
+	"00000019-0000-1000-8000-00805f9b34fb": true, // AVDTP
+}
+
+func rejected(what string) *dbus.Error {
+	return dbus.NewError("org.bluez.Error.Rejected", []any{what})
+}
+
+// open is whether a pairing may go ahead now.
+func (g agent) open(path dbus.ObjectPath, what string) *dbus.Error {
+	if g.pairing != nil && g.pairing() {
+		return nil
+	}
+	slog.Warn("bluetooth: refused a pairing outside pairing mode", "device", string(path), "request", what)
+	return rejected("not in pairing mode")
+}
 
 func (agent) Release() *dbus.Error { return nil }
 
-func (agent) RequestPinCode(dbus.ObjectPath) (string, *dbus.Error) { return "0000", nil }
+func (g agent) RequestPinCode(path dbus.ObjectPath) (string, *dbus.Error) {
+	if err := g.open(path, "pin"); err != nil {
+		return "", err
+	}
+	return "0000", nil
+}
 
 func (agent) DisplayPinCode(dbus.ObjectPath, string) *dbus.Error { return nil }
 
-func (agent) RequestPasskey(dbus.ObjectPath) (uint32, *dbus.Error) { return 0, nil }
+func (g agent) RequestPasskey(path dbus.ObjectPath) (uint32, *dbus.Error) {
+	if err := g.open(path, "passkey"); err != nil {
+		return 0, err
+	}
+	return 0, nil
+}
 
 func (agent) DisplayPasskey(dbus.ObjectPath, uint32, uint16) *dbus.Error { return nil }
 
-func (agent) RequestConfirmation(path dbus.ObjectPath, passkey uint32) *dbus.Error {
+func (g agent) RequestConfirmation(path dbus.ObjectPath, passkey uint32) *dbus.Error {
+	if err := g.open(path, "confirmation"); err != nil {
+		return err
+	}
 	slog.Info("bluetooth pairing confirmed", "device", string(path), "passkey", fmt.Sprintf("%06d", passkey))
 	return nil
 }
 
-func (agent) RequestAuthorization(dbus.ObjectPath) *dbus.Error { return nil }
+func (g agent) RequestAuthorization(path dbus.ObjectPath) *dbus.Error {
+	return g.open(path, "authorization")
+}
 
-func (agent) AuthorizeService(dbus.ObjectPath, string) *dbus.Error { return nil }
+func (agent) AuthorizeService(path dbus.ObjectPath, uuid string) *dbus.Error {
+	if audioProfiles[strings.ToLower(uuid)] {
+		return nil
+	}
+	slog.Warn("bluetooth: refused a connection for a profile other than audio", "device", string(path), "uuid", uuid)
+	return rejected("only audio profiles are allowed")
+}
 
 func (agent) Cancel() *dbus.Error { return nil }
