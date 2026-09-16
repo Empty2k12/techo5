@@ -32,10 +32,10 @@ timers and alarms, a camera entity, and a touch settings sheet; it updates itsel
 from these releases into A/B slots with automatic fallback. [docs/overview.md](docs/overview.md) is
 the one-page description; [docs/porting-plan.md](docs/porting-plan.md) is how it got here.
 
-Getting there still takes an unlocked bootloader
+Getting there takes an unlocked bootloader
 ([amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/))
-and the first-install steps in [tools/linux/README.md](tools/linux/README.md). A step-by-step
-guide for a new unit is being written from a first install on a second Show.
+and a boot image built with your own key; [docs/install.md](docs/install.md) walks through the rest,
+from LineageOS to a unit in Home Assistant.
 
 ## Screenshots
 
