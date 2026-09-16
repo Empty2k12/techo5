@@ -107,6 +107,9 @@ type Display struct {
 	tab  int
 	page int
 
+	// theme is the palette to draw with; the frame applies it when it changes.
+	theme, themeOn string
+
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
 	weatherArmed bool
@@ -524,6 +527,13 @@ func (d *Display) deviceTap(h hit) {
 		if h.button == 2 {
 			mute.Get().Toggle()
 		}
+	case rowTheme:
+		if h.button == 2 {
+			name := nextTheme()
+			d.mu.Lock()
+			d.theme = name
+			d.mu.Unlock()
+		}
 	case rowRestart:
 		if h.button != 2 {
 			return
@@ -609,6 +619,18 @@ func (d *Display) Screenshot(ctx context.Context) (*image.RGBA, error) {
 	}
 }
 
+// SetTheme switches the palette by name and saves it.
+func (d *Display) SetTheme(name string) {
+	name = themes[themeIndex(name)].name
+	if err := config.Set().Screen().Theme(name); err != nil {
+		slog.Warn("saving the theme failed", "err", err)
+	}
+	d.mu.Lock()
+	d.theme = name
+	d.mu.Unlock()
+	d.wake()
+}
+
 // OpenSheet puts the settings sheet up on a tab, or takes it down for a tab below zero.
 func (d *Display) OpenSheet(tab int) {
 	if tab < 0 {
@@ -680,6 +702,19 @@ func (d *Display) frame() time.Duration {
 		// Dark panel: nothing to draw, and nothing to redraw until told.
 		d.answerShots()
 		return time.Hour
+	}
+	d.mu.Lock()
+	if d.theme == "" {
+		d.theme = config.Get().Screen.Theme
+		if d.theme == "" {
+			d.theme = themes[0].name
+		}
+	}
+	theme, themeOn := d.theme, d.themeOn
+	d.themeOn = theme
+	d.mu.Unlock()
+	if theme != themeOn {
+		applyTheme(theme)
 	}
 
 	d.mu.Lock()

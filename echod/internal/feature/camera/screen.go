@@ -12,10 +12,13 @@ import (
 )
 
 // registerScreen adds /screen.png: what the panel shows. ?sheet= opens the settings sheet on a
-// tab first (device, bluetooth, cameras, radio; "off" closes it), so the sheet can be looked at
-// without a finger on the device.
+// tab first (device, bluetooth, cameras, radio; "off" closes it) and ?theme= switches the palette,
+// so the sheet and the themes can be looked at without a finger on the device.
 func (f *Feature) registerScreen(mux *http.ServeMux) {
 	mux.HandleFunc("/screen.png", func(w http.ResponseWriter, r *http.Request) {
+		if theme := r.URL.Query().Get("theme"); theme != "" {
+			display.Get().SetTheme(theme)
+		}
 		if tab := r.URL.Query().Get("sheet"); tab != "" {
 			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "off": -1}
 			if t, ok := tabs[tab]; ok {

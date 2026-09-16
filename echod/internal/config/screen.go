@@ -6,6 +6,9 @@ type Screen struct {
 	On         bool `json:"on"`
 	Brightness int  `json:"brightness"`
 	Auto       bool `json:"auto"`
+
+	// Theme names the screen's palette; empty is the first one.
+	Theme string `json:"theme,omitempty"`
 }
 
 // DefaultScreenBrightness is comfortable on a desk in a lit room; the panel's own top is glaring.
@@ -27,4 +30,8 @@ func (w ScreenWriter) Brightness(v int) error {
 
 func (w ScreenWriter) Auto(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.Auto = v })
+}
+
+func (w ScreenWriter) Theme(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.Theme = v })
 }

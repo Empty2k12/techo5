@@ -453,6 +453,10 @@ session.
    past seven). The separate radio and cameras pages are gone. A swipe down
    from the top quarter opens it. `/screen.png[?sheet=<tab>|off]` on port
    8181 is a screenshot of the panel, for checking layouts from the PC.
+   Later: tabs and buttons are bevelled blocks with a drop shadow (theme.go),
+   and the Device tab has a Theme row cycling six palettes — Walnut, Slate,
+   Midnight, Forest, Plum, Paper (a light one) — saved in the screen config;
+   `?theme=<name>` on /screen.png switches it from the PC.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
    shows the weather on the clock and a radio page whose stations come from

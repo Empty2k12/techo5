@@ -20,12 +20,12 @@ const (
 	// sheetRowTop end at 408, above the bar at 416.
 	tabBarBottom   = 70
 	sheetRowTop    = 86
-	sheetRowHeight = 46
-	sheetRows      = 7
+	sheetRowHeight = 40
+	sheetRows      = 8
 	sheetDoneBar   = 64
 
 	// Buttons sit at the right of a row: a wide one, or a narrow (−) beside it.
-	buttonH     = 34
+	buttonH     = 30
 	buttonWide  = 130
 	buttonSmall = 70
 	buttonGap   = 10
@@ -56,6 +56,7 @@ const (
 	rowBrightness
 	rowAuto
 	rowMic
+	rowTheme
 	rowWake
 	rowAbout
 	rowRestart
@@ -105,6 +106,7 @@ type hit struct {
 type settings struct {
 	tab        int
 	page       int // of the open tab's list, when it does not fit
+	theme      string
 	brightness int // ceiling, percent
 	auto       bool
 	muted      bool
@@ -141,16 +143,20 @@ func (r *renderer) sheetHit(x, y int) hit {
 
 func (r *renderer) settingsPage(s scene) {
 	st := s.sheet
+	// Tabs as raised blocks: the open one stands proud in the accent, the rest sit back, sunk into
+	// the rules colour. The open tab runs into the content with no rule under it.
 	tabW := r.w / tabs
+	draw.Draw(r.dst, image.Rect(0, tabBarBottom-2, r.w, tabBarBottom), image.NewUniform(ember), image.Point{}, draw.Src)
 	for i, name := range tabNames {
-		c := color.Color(dim)
+		rect := image.Rect(i*tabW+8, 14, (i+1)*tabW-8, tabBarBottom-2)
 		if i == st.tab {
-			c = amber
-			draw.Draw(r.dst, image.Rect(i*tabW+12, tabBarBottom-4, (i+1)*tabW-12, tabBarBottom), image.NewUniform(amber), image.Point{}, draw.Src)
+			r.bevel(image.Rect(rect.Min.X, rect.Min.Y-4, rect.Max.X, tabBarBottom), amber, true)
+			r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, walnut)
+			continue
 		}
-		r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, c)
+		r.bevel(rect, ember, false)
+		r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, dim)
 	}
-	draw.Draw(r.dst, image.Rect(0, tabBarBottom, r.w, tabBarBottom+1), image.NewUniform(ember), image.Point{}, draw.Src)
 
 	switch st.tab {
 	case tabDevice:
@@ -173,7 +179,7 @@ func (r *renderer) settingsPage(s scene) {
 func (r *renderer) row(i int, label string, c color.Color) int {
 	top := sheetRowTop + i*sheetRowHeight
 	draw.Draw(r.dst, image.Rect(r.margin, top+sheetRowHeight-1, r.w-r.margin, top+sheetRowHeight), image.NewUniform(ember), image.Point{}, draw.Src)
-	r.text(r.small, label, r.margin, top+33, c)
+	r.text(r.small, label, r.margin, top+29, c)
 	return top
 }
 
@@ -190,7 +196,7 @@ func (r *renderer) value(top int, text string, buttons int) {
 	for r.width(r.tiny, text) > right-r.margin-230 && len(text) > 4 {
 		text = "…" + text[4:]
 	}
-	r.text(r.tiny, text, right-r.width(r.tiny, text), top+31, dim)
+	r.text(r.tiny, text, right-r.width(r.tiny, text), top+28, dim)
 }
 
 // button draws a box with a label: slot 1 is the narrow left one, 2 the wide right one.
@@ -201,12 +207,12 @@ func (r *renderer) button(top int, slot int, label string, lit bool) {
 		x0, x1 = right-buttonWide-buttonGap-buttonSmall, right-buttonWide-buttonGap
 	}
 	y0 := top + (sheetRowHeight-buttonH)/2
-	fill, ink := color.Color(ember), color.Color(cream)
+	fill, ink := shift(ember, 12), color.Color(cream)
 	if lit {
 		fill, ink = amber, walnut
 	}
-	draw.Draw(r.dst, image.Rect(x0, y0, x1, y0+buttonH), image.NewUniform(fill), image.Point{}, draw.Src)
-	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+25, ink)
+	r.bevel(image.Rect(x0, y0, x1, y0+buttonH), fill, true)
+	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+23, ink)
 }
 
 func (r *renderer) deviceTab(s scene) {
@@ -232,6 +238,10 @@ func (r *renderer) deviceTab(s scene) {
 	}
 	r.value(top, "the mute button does this too", 1)
 	r.button(top, 2, mic, lit)
+
+	top = r.row(rowTheme, "Theme", cream)
+	r.value(top, st.theme, 1)
+	r.button(top, 2, "Next", false)
 
 	top = r.row(rowWake, "Wake word", cream)
 	r.value(top, st.wakeWord, 0)
