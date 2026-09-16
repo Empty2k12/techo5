@@ -42,8 +42,6 @@ const (
 	// Far enough down that a reply wins, not so far that the track sounds stopped.
 	DefaultDuckDB = -15
 
-	// On: a near miss over playback is somebody about to say it again.
-	DefaultDuckOnNearMiss = true
 )
 
 func defaultMedia() Media {

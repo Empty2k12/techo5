@@ -62,3 +62,25 @@ func TestForTakesTheArchitectureTheDeviceRuns(t *testing.T) {
 		}
 	}
 }
+
+// A release with only the Show's build serves no Dot, and one with the Dot's serves it. (Off a slot
+// system, which is where tests run; on a slot device the rootfs map decides.)
+func TestServesOnlyWhatThisDeviceCanInstall(t *testing.T) {
+	if slotSystem() {
+		t.Skip("running on a slot device")
+	}
+	restore := arch
+	t.Cleanup(func() { arch = restore })
+	arch = "arm-dot"
+
+	show := Manifest{Version: "0.0.9", Binaries: map[string]Binary{
+		"arm": {URL: "https://example/echod-arm", SHA256: strings.Repeat("b", 64), Size: 22 << 20},
+	}}
+	if show.Serves() {
+		t.Error("a Show-only release was offered to a Dot")
+	}
+	show.Binaries["arm-dot"] = Binary{URL: "https://example/echod-arm-dot", SHA256: strings.Repeat("c", 64), Size: 22 << 20}
+	if !show.Serves() {
+		t.Error("a release carrying the Dot's build was not offered to it")
+	}
+}

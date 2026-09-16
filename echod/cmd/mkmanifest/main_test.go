@@ -33,7 +33,7 @@ func write(t *testing.T) (deployed, update.Manifest) {
 	err := run(update.Manifest{Version: "0.0.7"}, "https://example/download/0.0.7", map[string]string{
 		"arm64": filepath.Join(dir, "echod-arm64"),
 		"arm":   filepath.Join(dir, "echod-arm"),
-	}, "", out)
+	}, nil, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,5 +91,43 @@ func TestEachArchitectureGetsItsOwnBuild(t *testing.T) {
 
 	if now.Binaries["arm64"].SHA256 == now.Binaries["arm"].SHA256 {
 		t.Error("both architectures were measured as the same file")
+	}
+}
+
+// The Dot's build and rootfs are keyed apart from the Show's, and neither lands in the flat fields an
+// older device reads.
+func TestTheDotIsKeyedApart(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"echod-arm": "show", "echod-arm-dot": "dot", "show.tar.gz": "s", "dot.tar.gz": "d"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "manifest.json")
+	err := run(update.Manifest{Version: "0.0.8"}, "https://example/download/0.0.8",
+		map[string]string{"arm": filepath.Join(dir, "echod-arm"), "arm-dot": filepath.Join(dir, "echod-arm-dot")},
+		map[string]string{"arm": filepath.Join(dir, "show.tar.gz"), "arm-dot": filepath.Join(dir, "dot.tar.gz")}, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m update.Manifest
+	if err := json.Unmarshal(encoded, &m); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Binaries["arm-dot"].URL; got != "https://example/download/0.0.8/echod-arm-dot" {
+		t.Errorf("dot binary at %q", got)
+	}
+	if got := m.Rootfs["arm-dot"].URL; got != "https://example/download/0.0.8/dot.tar.gz" {
+		t.Errorf("dot rootfs at %q", got)
+	}
+	if got := m.Rootfs["arm"].URL; got != "https://example/download/0.0.8/show.tar.gz" {
+		t.Errorf("show rootfs at %q", got)
+	}
+	if m.URL != "https://example/download/0.0.8/echod-arm" {
+		t.Errorf("flat fields carry %q, want the Show's arm build", m.URL)
 	}
 }

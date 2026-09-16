@@ -26,6 +26,10 @@ func main() {
 		arm64  = flag.String("arm64", "", "the arm64 build, hashed and measured")
 		arm    = flag.String("arm", "", "the arm build, hashed and measured")
 		rootfs = flag.String("rootfs-arm", "", "the arm rootfs tarball for slot devices, hashed and measured")
+		// The Echo Dot 2 shares the Show's architecture but not its hardware, so its builds are keyed
+		// apart ("arm-dot", see internal/update/arch_dot.go) and a device only ever sees its own.
+		armDot    = flag.String("arm-dot", "", "the Echo Dot build (-tags dot), hashed and measured")
+		rootfsDot = flag.String("rootfs-arm-dot", "", "the Echo Dot rootfs tarball, hashed and measured")
 		out    = flag.String("out", "", "where to write the manifest, or stdout")
 	)
 	flag.StringVar(&m.Version, "version", "", "version as Home Assistant will compare it")
@@ -34,15 +38,17 @@ func main() {
 	flag.StringVar(&m.ReleaseURL, "release-url", "", "what the card's link points at")
 	flag.Parse()
 
-	if err := run(m, *from, map[string]string{"arm64": *arm64, "arm": *arm}, *rootfs, *out); err != nil {
+	builds := map[string]string{"arm64": *arm64, "arm": *arm, "arm-dot": *armDot}
+	rootfses := map[string]string{"arm": *rootfs, "arm-dot": *rootfsDot}
+	if err := run(m, *from, builds, rootfses, *out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(m update.Manifest, from string, builds map[string]string, rootfs string, out string) error {
-	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "") {
-		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm are required")
+func run(m update.Manifest, from string, builds map[string]string, rootfses map[string]string, out string) error {
+	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "" && builds["arm-dot"] == "") {
+		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm/-arm-dot are required")
 	}
 
 	m.Binaries = make(map[string]update.Binary, len(builds))
@@ -60,13 +66,19 @@ func run(m update.Manifest, from string, builds map[string]string, rootfs string
 
 	// The flat fields are what an older device reads; they carry the arm64 build where there is one,
 	// and the arm build for a release that only has that (TECHO5 on cronos is 32-bit).
-	if rootfs != "" {
-		b, err := measure(rootfs)
+	for arch, path := range rootfses {
+		if path == "" {
+			continue
+		}
+		b, err := measure(path)
 		if err != nil {
 			return err
 		}
-		b.URL = from + "/" + filepath.Base(rootfs)
-		m.Rootfs = map[string]update.Binary{"arm": b}
+		b.URL = from + "/" + filepath.Base(path)
+		if m.Rootfs == nil {
+			m.Rootfs = make(map[string]update.Binary)
+		}
+		m.Rootfs[arch] = b
 	}
 	flat, ok := m.Binaries["arm64"]
 	if !ok {

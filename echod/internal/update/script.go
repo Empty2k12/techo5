@@ -56,6 +56,9 @@ func Script(path string) string {
 	return Stub
 }
 
+// onAndroid is layout.OnAndroid, a variable so a test can stand on either side of it.
+var onAndroid = layout.OnAndroid
+
 // Ensure writes the boot hooks when they are not already what this build expects, which is how the
 // rollback improves without anybody reinstalling. Nothing is written when nothing differs, so an
 // ordinary start does not touch /system at all.
@@ -65,7 +68,7 @@ func Script(path string) string {
 // read-write and then read-only — which on the Echo Dot's Linux image is the root filesystem itself.
 // The slot came up read-only a few seconds into every boot, the moment the daemon started.
 func Ensure() {
-	if !layout.OnAndroid() {
+	if !onAndroid() {
 		return
 	}
 	var stale []string

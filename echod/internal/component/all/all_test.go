@@ -34,6 +34,7 @@ var registered = []string{
 	"cpu_cores",
 	"cpu_cores_online",
 	"cpu_temperature",
+	"duck_on_near_miss",
 	"failure_effect",
 	"firmware",
 	"follow_up_1",

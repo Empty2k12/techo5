@@ -74,8 +74,9 @@ func TestEnsureLeavesCurrentHooksAlone(t *testing.T) {
 	paths := []string{filepath.Join(dir, "start.sh"), filepath.Join(dir, "stop.sh")}
 
 	restore := layout.AnimationScripts
-	t.Cleanup(func() { layout.AnimationScripts = restore; writable = remount })
+	t.Cleanup(func() { layout.AnimationScripts = restore; writable = remount; onAndroid = layout.OnAndroid })
 	layout.AnimationScripts = paths
+	onAndroid = func() bool { return true }
 
 	var remounts int
 	writable = func(bool) error { remounts++; return nil }
@@ -101,5 +102,25 @@ func TestEnsureLeavesCurrentHooksAlone(t *testing.T) {
 	}
 	if got, err := os.ReadFile(paths[0]); err != nil || string(got) != Script(paths[0]) {
 		t.Errorf("the stale hook was not rewritten: %v", err)
+	}
+}
+
+// Off Android the hooks are not Fire OS's to keep: nothing is written and nothing remounted, however
+// stale they look. On the Dot's Linux image the remount was of the root filesystem itself.
+func TestEnsureStandsDownOffAndroid(t *testing.T) {
+	dir := t.TempDir()
+	restore := layout.AnimationScripts
+	t.Cleanup(func() { layout.AnimationScripts = restore; writable = remount; onAndroid = layout.OnAndroid })
+	layout.AnimationScripts = []string{filepath.Join(dir, "start.sh")}
+	onAndroid = func() bool { return false }
+
+	var remounts int
+	writable = func(bool) error { remounts++; return nil }
+	Ensure()
+	if remounts != 0 {
+		t.Errorf("remounted %d times off Android", remounts)
+	}
+	if _, err := os.Stat(layout.AnimationScripts[0]); err == nil {
+		t.Error("a hook was written off Android")
 	}
 }

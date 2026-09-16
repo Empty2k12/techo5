@@ -227,8 +227,8 @@ func (u *Firmware) Install(ctx context.Context) {
 		u.mu.Unlock()
 	}
 
-	if found.Version == "" || found.Version == layout.Version {
-		slog.Warn("an install was asked for with nothing to install", "running", layout.Version)
+	if found.Version == "" || found.Version == layout.Version || !found.Serves() {
+		slog.Warn("an install was asked for with nothing to install", "running", layout.Version, "offered", found.Version)
 		return
 	}
 
@@ -269,9 +269,15 @@ func (u *Firmware) publish(found update.Manifest) { u.entity.Set(u.state(found))
 // state names the channel rather than the version, which Home Assistant already shows twice on its own.
 // The channel is the device's, not the release's, so it is not something a manifest could say.
 func (u *Firmware) state(found update.Manifest) esphome.UpdateState {
+	// Home Assistant offers an update whenever the two versions differ. A release with nothing this
+	// device can install reports the running version as the latest, so there is no card to press.
+	latest := found.Version
+	if latest != "" && !found.Serves() {
+		latest = layout.Version
+	}
 	return esphome.UpdateState{
 		CurrentVersion: layout.Version,
-		LatestVersion:  found.Version,
+		LatestVersion:  latest,
 		Title:          "EchoLocal (" + u.Channel().Label() + " channel)",
 		ReleaseSummary: found.Notes,
 		ReleaseURL:     found.ReleaseURL,

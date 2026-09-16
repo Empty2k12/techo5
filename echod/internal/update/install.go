@@ -191,3 +191,15 @@ func (c *counter) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// Serves reports whether this device could install what the manifest offers: a rootfs for its
+// architecture when it boots from slots, a binary otherwise. A release made for another device (the
+// Show's, seen from a Dot) is then not offered at all, rather than offered and failing on install.
+func (m Manifest) Serves() bool {
+	if slotSystem() {
+		_, ok := m.Rootfs[arch]
+		return ok
+	}
+	_, err := m.For(arch)
+	return err == nil
+}
