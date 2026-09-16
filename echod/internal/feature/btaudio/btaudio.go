@@ -159,9 +159,19 @@ func (f *Feature) wake() {
 	}
 }
 
-// Start connects to bluetoothd and bluez-alsa. Both come up after the daemon on a fresh boot, so
-// failing here is expected for a while; the supervisor tries again.
+// Start connects to bluetoothd and bluez-alsa if they are there already. They can come up well after
+// the daemon (on the Echo Dot the Bluetooth bring-up takes over a minute), and a service that fails
+// to start is not started again, so their absence is not a failure: Run keeps looking. The daemon,
+// and with it the voice satellite, does not wait for Bluetooth.
 func (f *Feature) Start(ctx context.Context) error {
+	if err := f.open(ctx); err != nil {
+		slog.Info("bluetooth audio not up yet; looking again every few seconds", "err", err)
+	}
+	return nil
+}
+
+// open connects to bluetoothd and bluez-alsa.
+func (f *Feature) open(ctx context.Context) error {
 	a, err := bluez.Open(ctx)
 	if err != nil {
 		return err
@@ -215,8 +225,21 @@ func (f *Feature) Close() error {
 // Run follows the devices and streams: attaches the speaker to an A2DP stream when one appears,
 // lets it go when it does, and keeps the screen's list current.
 func (f *Feature) Run(ctx context.Context) error {
-	safe.Go("bluetooth first connect", func() { f.tryRemembered(ctx) })
+	reconnecting := false
 	for {
+		f.mu.Lock()
+		up := f.adapter != nil
+		f.mu.Unlock()
+		if !up {
+			if err := f.open(ctx); err == nil {
+				up = true
+			}
+		}
+		// The remembered device gets its chance once Bluetooth is there, however long that took.
+		if up && !reconnecting {
+			reconnecting = true
+			safe.Go("bluetooth first connect", func() { f.tryRemembered(ctx) })
+		}
 		f.refresh()
 		select {
 		case <-ctx.Done():

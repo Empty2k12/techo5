@@ -183,7 +183,10 @@ func (r *Radio) begin(scanning, active bool, advertisement []byte) error {
 	if r.kernel {
 		// bluetoothd has set the controller up and may be scanning for its own reasons: no reset under
 		// it, and a scan of its own is stopped first, since new parameters are refused while one runs.
+		// Advertising the same: a daemon that restarted without its Stop left it on, and the controller
+		// then answers new advertising parameters with Command Disallowed for as long as it stays on.
 		_ = r.send("scan disable", cmdLEScanEnable, []byte{0x00, 0x00})
+		_ = r.send("advertising disable", cmdLEAdvertisingEnable, []byte{0x00})
 	} else if err := r.send("reset", cmdReset, nil); err != nil {
 		return err
 	}
