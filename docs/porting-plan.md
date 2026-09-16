@@ -521,6 +521,16 @@ session.
    Verified on the bench: alarm set from Home Assistant rang on the minute,
    stopped from the screen; snoozed from Home Assistant, shown as snoozed,
    cancelled with Stop.
+   EXPOSURE 2026-09-16: the loop metered the plain mean of the frame, so a
+   window or ceiling lamp set the exposure and a face went dark; the tone put
+   the top percentile at white with nothing at black (darkest pixel 44/255,
+   milky). Now `meter` averages an 8x6 zone grid of green samples weighted to
+   the centre (x4) with zones over 870/1023 at 0.15; `convert` takes the
+   darkest 0.1% as black (capped at 64 on the summed-green scale; a room's
+   floor measured 43) and steepens gamma from 1/1.8 up to 1/2.7 when the top
+   percentile is over 3x the central median. Synthetic backlit frame: metered
+   262 against a plain mean of 564. Bench, face under an overhead light:
+   readable face, dark furniture black (darkest 5/255).
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

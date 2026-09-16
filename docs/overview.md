@@ -24,7 +24,9 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 - **Radio**: stations from Home Assistant's lists, playing on the device's own speaker or on
   Bluetooth earbuds; song, artist and cover from iHeartRadio or TuneIn behind the page.
 - **Camera**: the front camera as a Home Assistant camera entity (plus JPEG and MJPEG over HTTP
-  when switched on), with auto-exposure. Off unless something is looking, and off while the mute button is engaged.
+  when switched on). Auto-exposure meters a centre-weighted zone grid, so a window behind somebody
+  no longer sets it, and the tone curve finds black and lifts the middle of a backlit frame. Off
+  unless something is looking, and off while the mute button is engaged.
 - **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant (scanning
   through BlueZ on the Show), off by default.
 - **Security**: nothing is open to the network by default except Home Assistant's encrypted link
@@ -76,5 +78,7 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   switched on. The rescue environment (boot image) still trusts the key built into that image.
 - Song metadata rests on two undocumented service endpoints; when one changes shape the page
   falls back to the station logo.
-- Exposure has no scene awareness: a bright window behind a face still darkens the face.
+- Exposure knows the middle of the frame, not faces: somebody off to one side of a window is still
+  metered as the edge.
+- Camera stills can show a faint horizontal seam near the top edge; not yet investigated.
 - The Wi-Fi keyboard offers letters, digits and common symbols; no other alphabets.
