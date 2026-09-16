@@ -1,0 +1,406 @@
+//go:build spot
+
+package display
+
+import (
+	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"math"
+	"strings"
+	"time"
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/math/fixed"
+
+	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
+)
+
+// The round panel: everything is laid out from its centre, and nothing may sit where the circle
+// cuts it off.
+const (
+	side    = 480
+	centre  = side / 2
+	rimOut  = 236 // outer edge of the status ring
+	rimIn   = 222 // inner edge
+	menuR   = 162 // radius the menu items sit on
+	itemR   = 44  // radius of a menu item
+	menuHub = 96  // inside this a finger is on no item
+)
+
+var (
+	colBackground = color.RGBA{10, 13, 18, 255}
+	colText       = color.RGBA{236, 240, 244, 255}
+	colDim        = color.RGBA{128, 138, 150, 255}
+	colTrack      = color.RGBA{34, 40, 48, 255}
+	colListening  = color.RGBA{58, 160, 255, 255}
+	colThinking   = color.RGBA{64, 214, 230, 255}
+	colReplying   = color.RGBA{60, 203, 127, 255}
+	colMuted      = color.RGBA{229, 72, 77, 255}
+	colTimer      = color.RGBA{255, 176, 32, 255}
+	colItem       = color.RGBA{30, 36, 44, 255}
+	colItemSel    = color.RGBA{58, 160, 255, 255}
+)
+
+type roundScene struct {
+	now          time.Time
+	phase        string // idle, listening, thinking, replying, lingering
+	heard, reply string
+	muted        bool
+	playing      bool
+	paused       bool
+	volume       int
+	maxVolume    int
+	showVolume   bool
+	timers       []timer.Countdown
+	menuOpen     bool
+	menuSel      int
+}
+
+type itemID string
+
+const (
+	itemTalk       itemID = "talk"
+	itemVolumeUp   itemID = "volume_up"
+	itemMute       itemID = "mute"
+	itemPlayPause  itemID = "play_pause"
+	itemVolumeDown itemID = "volume_down"
+	itemScreenOff  itemID = "screen_off"
+)
+
+type menuItem struct {
+	id    itemID
+	label string
+}
+
+// menuItems go clockwise from the top.
+var menuItems = []menuItem{
+	{itemTalk, "Talk"},
+	{itemVolumeUp, "Vol +"},
+	{itemMute, "Mute"},
+	{itemPlayPause, "Play"},
+	{itemVolumeDown, "Vol −"},
+	{itemScreenOff, "Off"},
+}
+
+// itemAngle is where item i sits, in radians clockwise from straight up.
+func itemAngle(i int) float64 { return float64(i) * 2 * math.Pi / float64(len(menuItems)) }
+
+// menuAt is the item a point on the screen is over: by its direction from the centre, once it is out
+// of the hub. -1 is none.
+func menuAt(x, y int) int {
+	dx, dy := float64(x-centre), float64(y-centre)
+	if math.Hypot(dx, dy) < menuHub {
+		return -1
+	}
+	a := math.Atan2(dx, -dy) // clockwise from up
+	if a < 0 {
+		a += 2 * math.Pi
+	}
+	step := 2 * math.Pi / float64(len(menuItems))
+	return int(math.Floor(a/step+0.5)) % len(menuItems)
+}
+
+type roundRenderer struct {
+	dst                              *image.RGBA
+	clock, title, body, small, label font.Face
+}
+
+func newRoundRenderer(dst *image.RGBA) *roundRenderer {
+	bold, err := opentype.Parse(gobold.TTF)
+	if err != nil {
+		panic(err)
+	}
+	regular, err := opentype.Parse(goregular.TTF)
+	if err != nil {
+		panic(err)
+	}
+	face := func(f *opentype.Font, size float64) font.Face {
+		fc, err := opentype.NewFace(f, &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingFull})
+		if err != nil {
+			panic(err)
+		}
+		return fc
+	}
+	return &roundRenderer{
+		dst:   dst,
+		clock: face(bold, 104),
+		title: face(bold, 34),
+		body:  face(regular, 26),
+		small: face(regular, 24),
+		label: face(bold, 20),
+	}
+}
+
+func (r *roundRenderer) draw(s roundScene) {
+	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colBackground), image.Point{}, draw.Src)
+
+	r.rim(s)
+	switch {
+	case s.showVolume:
+		r.volume(s)
+	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering":
+		r.conversation(s)
+	default:
+		r.clockFace(s)
+	}
+	if s.menuOpen {
+		r.menu(s)
+	}
+}
+
+// rim is the status ring: red while muted, the conversation's colour while one runs, the soonest
+// timer's time left, or a quiet track.
+func (r *roundRenderer) rim(s roundScene) {
+	switch {
+	case s.muted:
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, colMuted)
+	case s.phase == "listening":
+		pulse := 0.55 + 0.45*math.Sin(float64(s.now.UnixMilli())/180)
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, fade(colListening, pulse))
+	case s.phase == "thinking":
+		start := math.Mod(float64(s.now.UnixMilli())/300, 2*math.Pi)
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
+		r.arc(rimIn, rimOut, start, start+math.Pi/2, colThinking)
+	case s.phase == "replying":
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, colReplying)
+	case len(s.timers) > 0 && s.timers[0].Total > 0:
+		t := s.timers[0]
+		left := float64(t.Left) / float64(t.Total)
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
+		r.arc(rimIn, rimOut, 0, 2*math.Pi*math.Min(math.Max(left, 0), 1), colTimer)
+	default:
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
+	}
+}
+
+func (r *roundRenderer) clockFace(s roundScene) {
+	now := s.now
+	hm := now.Format("3:04")
+	r.centred(r.clock, hm, 240, colText)
+	r.centred(r.small, strings.ToUpper(now.Format("PM")), 290, colDim)
+	r.centred(r.small, now.Format("Monday, January 2"), 330, colDim)
+
+	line := 372
+	if len(s.timers) > 0 {
+		t := s.timers[0]
+		r.centred(r.body, "Timer "+clockDuration(t.Left), line, colTimer)
+		line += 34
+	}
+	switch {
+	case s.muted:
+		r.centred(r.label, "MICROPHONE OFF", 118, colMuted)
+	case s.playing:
+		r.centred(r.label, "PLAYING", 118, colDim)
+	case s.paused:
+		r.centred(r.label, "PAUSED", 118, colDim)
+	}
+}
+
+func (r *roundRenderer) conversation(s roundScene) {
+	title, col := "", colText
+	switch s.phase {
+	case "listening":
+		title, col = "Listening", colListening
+	case "thinking":
+		title, col = "Thinking", colThinking
+	}
+	y := 150
+	if title != "" {
+		r.centred(r.title, title, y, col)
+		y += 50
+	}
+	if s.heard != "" {
+		y = r.paragraph(r.body, s.heard, y, colDim, 3)
+		y += 12
+	}
+	if s.reply != "" && (s.phase == "replying" || s.phase == "lingering") {
+		r.paragraph(r.body, s.reply, y, colText, 5)
+	}
+}
+
+func (r *roundRenderer) volume(s roundScene) {
+	frac := 0.0
+	if s.maxVolume > 0 {
+		frac = float64(s.volume) / float64(s.maxVolume)
+	}
+	// An inner arc for the level, from the bottom-left round to the bottom-right.
+	const from, span = 1.25 * math.Pi, 1.5 * math.Pi
+	r.arc(170, 190, from, from+span, colTrack)
+	r.arc(170, 190, from, from+span*frac, colListening)
+	r.centred(r.clock, fmt.Sprintf("%d", s.volume), 270, colText)
+	r.centred(r.small, "VOLUME", 320, colDim)
+}
+
+func (r *roundRenderer) menu(s roundScene) {
+	// Dim what is behind the menu.
+	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.RGBA{0, 0, 0, 225}), image.Point{}, draw.Over)
+	for i, it := range menuItems {
+		a := itemAngle(i)
+		cx := centre + int(math.Round(menuR*math.Sin(a)))
+		cy := centre - int(math.Round(menuR*math.Cos(a)))
+		fill := colItem
+		if i == s.menuSel {
+			fill = colItemSel
+		}
+		label := it.label
+		switch it.id {
+		case itemMute:
+			if s.muted {
+				label, fill = "Unmute", pick(i == s.menuSel, colItemSel, colMuted)
+			}
+		case itemPlayPause:
+			if s.playing {
+				label = "Pause"
+			}
+		}
+		r.disc(cx, cy, itemR, fill)
+		w := r.width(r.label, label)
+		r.text(r.label, label, cx-w/2, cy+7, colText)
+	}
+	hub := "Hold, slide, let go"
+	if s.menuSel >= 0 {
+		hub = ""
+	}
+	r.centred(r.label, hub, centre+7, colDim)
+}
+
+// arc fills the ring between radii r0 and r1 from angle a0 to a1, clockwise from straight up, with
+// a one-pixel soft edge on both circles.
+func (r *roundRenderer) arc(r0, r1 float64, a0, a1 float64, c color.RGBA) {
+	full := a1-a0 >= 2*math.Pi-1e-9
+	b := r.dst.Rect
+	for y := max(centre-int(r1)-1, b.Min.Y); y <= min(centre+int(r1)+1, b.Max.Y-1); y++ {
+		dy := float64(y) + 0.5 - centre
+		for x := max(centre-int(r1)-1, b.Min.X); x <= min(centre+int(r1)+1, b.Max.X-1); x++ {
+			dx := float64(x) + 0.5 - centre
+			d := math.Hypot(dx, dy)
+			if d < r0-1 || d > r1+1 {
+				continue
+			}
+			if !full {
+				a := math.Atan2(dx, -dy)
+				if a < 0 {
+					a += 2 * math.Pi
+				}
+				lo := math.Mod(a0, 2*math.Pi)
+				if lo < 0 {
+					lo += 2 * math.Pi
+				}
+				rel := a - lo
+				if rel < 0 {
+					rel += 2 * math.Pi
+				}
+				if rel > a1-a0 {
+					continue
+				}
+			}
+			cover := math.Min(math.Min(d-(r0-1), (r1+1)-d), 1)
+			r.blend(x, y, c, cover)
+		}
+	}
+}
+
+func (r *roundRenderer) disc(cx, cy, rad int, c color.RGBA) {
+	fr := float64(rad)
+	for y := cy - rad - 1; y <= cy+rad+1; y++ {
+		for x := cx - rad - 1; x <= cx+rad+1; x++ {
+			if !(image.Point{x, y}.In(r.dst.Rect)) {
+				continue
+			}
+			d := math.Hypot(float64(x)+0.5-float64(cx), float64(y)+0.5-float64(cy))
+			if d > fr+1 {
+				continue
+			}
+			r.blend(x, y, c, math.Min(fr+1-d, 1))
+		}
+	}
+}
+
+func (r *roundRenderer) blend(x, y int, c color.RGBA, cover float64) {
+	if cover <= 0 {
+		return
+	}
+	i := r.dst.PixOffset(x, y)
+	a := cover * float64(c.A) / 255
+	p := r.dst.Pix[i : i+4 : i+4]
+	p[0] = uint8(float64(p[0])*(1-a) + float64(c.R)*a)
+	p[1] = uint8(float64(p[1])*(1-a) + float64(c.G)*a)
+	p[2] = uint8(float64(p[2])*(1-a) + float64(c.B)*a)
+	p[3] = 255
+}
+
+func (r *roundRenderer) text(face font.Face, s string, x, baseline int, c color.Color) {
+	d := &font.Drawer{Dst: r.dst, Src: image.NewUniform(c), Face: face, Dot: fixed.P(x, baseline)}
+	d.DrawString(s)
+}
+
+func (r *roundRenderer) width(face font.Face, s string) int {
+	return font.MeasureString(face, s).Round()
+}
+
+func (r *roundRenderer) centred(face font.Face, s string, baseline int, c color.Color) {
+	if s == "" {
+		return
+	}
+	r.text(face, s, centre-r.width(face, s)/2, baseline, c)
+}
+
+// paragraph wraps s to the width of the circle at each line's height and draws up to maxLines,
+// centred. It returns the baseline after the last line.
+func (r *roundRenderer) paragraph(face font.Face, s string, baseline int, c color.Color, maxLines int) int {
+	lineH := face.Metrics().Height.Round() + 4
+	words := strings.Fields(s)
+	for n := 0; n < maxLines && len(words) > 0; n++ {
+		avail := chord(baseline-10) - 56
+		line := words[0]
+		k := 1
+		for ; k < len(words); k++ {
+			try := line + " " + words[k]
+			if r.width(face, try) > avail {
+				break
+			}
+			line = try
+		}
+		words = words[k:]
+		if n == maxLines-1 && len(words) > 0 {
+			line += "…"
+		}
+		r.centred(face, line, baseline, c)
+		baseline += lineH
+	}
+	return baseline
+}
+
+// chord is the width of the circle at height y.
+func chord(y int) int {
+	dy := float64(y - centre)
+	if math.Abs(dy) >= centre {
+		return 0
+	}
+	return int(2 * math.Sqrt(float64(centre*centre)-dy*dy))
+}
+
+func clockDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h, m, s := int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func fade(c color.RGBA, k float64) color.RGBA {
+	return color.RGBA{c.R, c.G, c.B, uint8(float64(c.A) * math.Min(math.Max(k, 0), 1))}
+}
+
+func pick(cond bool, a, b color.RGBA) color.RGBA {
+	if cond {
+		return a
+	}
+	return b
+}

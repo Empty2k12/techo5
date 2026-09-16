@@ -1,13 +1,12 @@
-//go:build !dot && !spot
+//go:build !dot
 
-// Package touch owns the Echo Show's touchscreen and says what a finger did: a tap, or a swipe as
-// it travels. It does not know what either means; the display decides.
+// Package touch owns the touchscreen and says what a finger did: a tap, or a swipe as it travels,
+// and on a device that wants them (the Echo Spot's ring menu) a hold, the drag that follows it and
+// the release. It does not know what any of it means; the display decides.
 //
-// The Goodix controller speaks multitouch protocol B (slots and tracking ids, no single-touch
-// axes) in the panel's own portrait frame, 480 wide and 960 tall, while the device sits landscape.
-// Coordinates are reported in the landscape frame the screen draws in, using the same quarter turn
-// as hardware/screen: landscape x runs along the panel's y, landscape y runs back along the
-// panel's x.
+// The Goodix controllers speak multitouch protocol B (slots and tracking ids). Coordinates are
+// reported in the frame the screen draws in: on the Show the panel's portrait frame turned a quarter
+// turn into landscape, as hardware/screen does; on the Spot the panel's own 480x480 (device_*.go).
 package touch
 
 import (
@@ -29,17 +28,11 @@ func init() {
 }
 
 const (
-	deviceName = "goodix-ts"
-
 	absMTSlot       = 0x2f
 	absMTPositionX  = 0x35
 	absMTPositionY  = 0x36
 	absMTTrackingID = 0x39
 	synReport       = 0
-
-	// Landscape frame the coordinates are reported in.
-	Width  = 960
-	Height = 480
 
 	// tapMove is how far a finger may wander and still be a tap; tapHold how long it may stay.
 	tapMove = 24
@@ -51,6 +44,9 @@ const (
 
 	// swipeMin is how far a horizontal movement has to go to be a swipe at release.
 	swipeMin = 120
+
+	// holdAfter is how long a finger stays put before it is a hold, where holds are reported.
+	holdAfter = 450 * time.Millisecond
 )
 
 // Kind is what the finger did.
@@ -62,9 +58,17 @@ const (
 	SwipeDown  Kind = "swipe_down" // likewise
 	SwipeLeft  Kind = "swipe_left" // reported once, at release
 	SwipeRight Kind = "swipe_right"
+
+	// Hold, Drag and Release follow one finger that stayed put for holdAfter, on a device with
+	// holdGestures: Hold once, Drag as it moves, Release where it lifts. No tap or swipe comes from
+	// that finger.
+	Hold    Kind = "hold"
+	Drag    Kind = "drag"
+	Release Kind = "release"
 )
 
-// Gesture is one thing the finger did, with where it started in the landscape frame.
+// Gesture is one thing the finger did, with where it started in the screen's frame (for Drag and
+// Release: where the finger is).
 type Gesture struct {
 	Kind Kind
 	X, Y int
@@ -112,8 +116,8 @@ func (s *Screen) Start(context.Context) error {
 	x, errX := dev.Abs(absMTPositionX)
 	y, errY := dev.Abs(absMTPositionY)
 	if errX != nil || errY != nil || x.Max <= x.Min || y.Max <= y.Min {
-		// The panel's raw axes, from docs/hardware.md, when the controller will not say.
-		x.Min, x.Max, y.Min, y.Max = 0, 479, 0, 959
+		// The panel's raw axes, from the device's hardware notes, when the controller will not say.
+		x.Min, x.Max, y.Min, y.Max = 0, int32(rawFallbackW-1), 0, int32(rawFallbackH-1)
 		slog.Warn("touch: using the documented ranges", "errX", errX, "errY", errY)
 	}
 	s.dev = dev
@@ -134,14 +138,16 @@ func (s *Screen) Close() error {
 
 // finger is the one contact being followed: the first slot that went down, until it lifts.
 type finger struct {
-	slot          int
-	id            int32
-	x, y          int // raw, current
-	sx, sy        int // raw, where it started
-	at            time.Time
-	notched       int  // steps already reported along the vertical travel
-	swiped        bool // a notch went out, so this is not a tap
-	seenX, seenY  bool
+	slot         int
+	id           int32
+	x, y         int // raw, current
+	sx, sy       int // raw, where it started
+	at           time.Time
+	notched      int  // steps already reported along the vertical travel
+	swiped       bool // a notch went out, so this is not a tap
+	seenX, seenY bool
+	held         bool        // it became a hold: Drag and Release follow
+	holdTimer    *time.Timer // pending hold, stopped by movement or a lift
 }
 
 // Run reads until ctx is cancelled; the node is closed from the side to end the blocking read.
@@ -177,19 +183,34 @@ func (s *Screen) Run(ctx context.Context) error {
 			case absMTPositionX:
 				p.x = e.Value
 				if f != nil && f.slot == slot {
+					s.mu.Lock()
 					f.x, f.seenX = int(e.Value), true
+					s.mu.Unlock()
 				}
 			case absMTPositionY:
 				p.y = e.Value
 				if f != nil && f.slot == slot {
+					s.mu.Lock()
 					f.y, f.seenY = int(e.Value), true
+					s.mu.Unlock()
 				}
 			case absMTTrackingID:
 				switch {
 				case e.Value >= 0 && f == nil:
 					f = &finger{slot: slot, id: e.Value, at: time.Now(), sx: -1}
 					s.setDown(true)
+					if holdGestures {
+						nf := f
+						s.mu.Lock()
+						nf.holdTimer = time.AfterFunc(holdAfter, func() { s.holdFired(nf) })
+						s.mu.Unlock()
+					}
 				case e.Value < 0 && f != nil && f.slot == slot:
+					s.mu.Lock()
+					if f.holdTimer != nil {
+						f.holdTimer.Stop()
+					}
+					s.mu.Unlock()
 					s.lift(f)
 					f = nil
 					s.setDown(false)
@@ -199,9 +220,11 @@ func (s *Screen) Run(ctx context.Context) error {
 			if e.Code != synReport || f == nil {
 				continue
 			}
+			s.mu.Lock()
 			if f.sx < 0 && f.seenX && f.seenY {
 				f.sx, f.sy = f.x, f.y
 			}
+			s.mu.Unlock()
 			if f.sx >= 0 {
 				s.moved(f)
 			}
@@ -215,16 +238,49 @@ func (s *Screen) setDown(v bool) {
 	s.mu.Unlock()
 }
 
-// landscape turns a raw panel point into the frame the screen draws in.
+// landscape turns a raw panel point into the frame the screen draws in (device_*.go).
 func (s *Screen) landscape(rx, ry int) (x, y int) {
-	x = ry * Width / max(s.rawH, 1)
-	y = (s.rawW - 1 - rx) * Height / max(s.rawW, 1)
+	x, y = toFrame(s.rawW, s.rawH, rx, ry)
 	return min(max(x, 0), Width-1), min(max(y, 0), Height-1)
+}
+
+// holdFired is the hold timer: the finger is a hold if it is still down, has a position and has not
+// moved or swiped.
+func (s *Screen) holdFired(f *finger) {
+	s.mu.Lock()
+	if !s.down || f.sx < 0 || f.swiped || f.held {
+		s.mu.Unlock()
+		return
+	}
+	x0, y0 := s.landscape(f.sx, f.sy)
+	x1, y1 := s.landscape(f.x, f.y)
+	if abs(x1-x0) > tapMove || abs(y1-y0) > tapMove {
+		s.mu.Unlock()
+		return
+	}
+	f.held = true
+	s.mu.Unlock()
+	s.Gestures.Emit(Gesture{Kind: Hold, X: x0, Y: y0})
 }
 
 // moved reports vertical travel a notch at a time while the finger is down. "Up" on the landscape
 // screen is towards smaller landscape y.
 func (s *Screen) moved(f *finger) {
+	s.mu.Lock()
+	if f.held {
+		x, y := s.landscape(f.x, f.y)
+		s.mu.Unlock()
+		s.Gestures.Emit(Gesture{Kind: Drag, X: x, Y: y})
+		return
+	}
+	if f.holdTimer != nil {
+		x0, y0 := s.landscape(f.sx, f.sy)
+		x1, y1 := s.landscape(f.x, f.y)
+		if abs(x1-x0) > tapMove || abs(y1-y0) > tapMove {
+			f.holdTimer.Stop()
+		}
+	}
+	s.mu.Unlock()
 	_, y0 := s.landscape(f.sx, f.sy)
 	_, y1 := s.landscape(f.x, f.y)
 	steps := (y0 - y1) / notch // positive: finger moved up
@@ -246,6 +302,14 @@ func (s *Screen) moved(f *finger) {
 // travelled sideways, nothing otherwise (its vertical notches already went out).
 func (s *Screen) lift(f *finger) {
 	if f.sx < 0 {
+		return
+	}
+	s.mu.Lock()
+	isHold := f.held
+	s.mu.Unlock()
+	if isHold {
+		x, y := s.landscape(f.x, f.y)
+		s.Gestures.Emit(Gesture{Kind: Release, X: x, Y: y})
 		return
 	}
 	x0, y0 := s.landscape(f.sx, f.sy)

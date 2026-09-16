@@ -1,10 +1,11 @@
-//go:build !dot && !spot
+//go:build !dot
 
-// Package screen owns the Echo Show's panel: the kernel framebuffer it is painted through and the
+// Package screen owns the panel of a device with a screen (the Echo Show 5, the Echo Spot): the kernel framebuffer it is painted through and the
 // backlight that lights it.
 //
-// The panel is portrait, 480 wide and 960 tall, and the device sits landscape, so the canvas anyone
-// draws on is 960×480 and Present rotates it onto the panel. The framebuffer has room for several
+// On the Show the panel is portrait, 480 wide and 960 tall, and the device sits landscape, so the canvas
+// anyone draws on is 960×480 and Present rotates it onto the panel (rotated, geometry_cronos.go). The
+// Spot's round panel is 480×480 and drawn as it is. The framebuffer has room for several
 // pages; each Present paints the page not on show and pans to it, so a frame is never seen half
 // drawn. Nothing here decides what is on the screen — that is the display feature's.
 //
@@ -148,13 +149,17 @@ func Open() (*Device, error) {
 		d.page = 0
 	}
 
-	// Landscape canvas: the panel turned a quarter turn.
-	d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelH, d.panelW))
+	// Landscape canvas: the panel turned a quarter turn, where the device needs it.
+	if rotated {
+		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelH, d.panelW))
+	} else {
+		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelW, d.panelH))
+	}
 	return d, nil
 }
 
-// Size is the landscape canvas, 960×480 on this panel.
-func (d *Device) Size() (w, h int) { return d.panelH, d.panelW }
+// Size is the canvas: 960×480 on the Show, 480×480 on the Spot.
+func (d *Device) Size() (w, h int) { return d.canvas.Rect.Dx(), d.canvas.Rect.Dy() }
 
 // Pages is how many frames the buffer holds; more than one means Present does not tear.
 func (d *Device) Pages() int { return d.pages }
@@ -181,6 +186,17 @@ func (d *Device) Present() error {
 	img := d.canvas
 	w, h := img.Rect.Dx(), img.Rect.Dy()
 	sr, sg, sb, sa := d.shift[0], d.shift[1], d.shift[2], d.shift[3]
+	if !rotated {
+		for y := 0; y < h && y < d.panelH; y++ {
+			row := dst[y*d.line : y*d.line+d.panelW*4]
+			for x := 0; x < w && x < d.panelW; x++ {
+				i := y*img.Stride + x*4
+				pixel := uint32(img.Pix[i])<<sr | uint32(img.Pix[i+1])<<sg | uint32(img.Pix[i+2])<<sb | uint32(img.Pix[i+3])<<sa
+				binary.LittleEndian.PutUint32(row[x*4:x*4+4], pixel)
+			}
+		}
+		return d.pan(next)
+	}
 	for x := 0; x < w && x < d.panelH; x++ {
 		row := dst[x*d.line : x*d.line+d.panelW*4]
 		for y := 0; y < h && y < d.panelW; y++ {
@@ -191,6 +207,11 @@ func (d *Device) Present() error {
 		}
 	}
 
+	return d.pan(next)
+}
+
+// pan shows page next.
+func (d *Device) pan(next int) error {
 	v := d.v
 	v.Xoffset = 0
 	v.Yoffset = uint32(next * d.panelH)
