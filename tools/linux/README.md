@@ -120,7 +120,7 @@ the daemon and tools for armv7, stages everything, runs `mkrootfs.sh` and can
 install the result into the inactive slot:
 
 ```
-bash tools/linux/deploy-rootfs.sh --version v0.1.5 [--install [--reboot]] [--on-device]
+HOST=<device address> bash tools/linux/deploy-rootfs.sh --version v0.1.5 [--install [--reboot]] [--on-device]
 ```
 
 It builds **in WSL** when it can: apk needs to run the packages' triggers

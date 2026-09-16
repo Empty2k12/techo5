@@ -6,3 +6,8 @@ bin/
 .DS_Store
 Thumbs.db
 __pycache__/
+# probe binaries built at the root by hand
+/audioprobe
+/fbprobe
+/rebootto
+/btbridge

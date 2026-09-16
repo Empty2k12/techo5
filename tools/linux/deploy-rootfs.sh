@@ -11,16 +11,22 @@
 # Alpine's static apk at ~/apk/apk.static; mkrootfs.sh runs inside a user
 # namespace so files can be owned by root without sudo.
 #
-# Environment: HOST (192.168.1.50), KEY (the SSH key), TECHO5_INPUTS (the
+# Environment: HOST (the device, required), KEY (the SSH key), TECHO5_INPUTS (the
 # directory with the Alpine minirootfs, vendor.tar.gz and apks312/; kept out
-# of the repo), TZ_NAME (America/New_York), GO (go binary),
+# of the repo), TZ_NAME (default: this PC's time zone), GO (go binary),
 # WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
 set -euo pipefail
 
-HOST=${HOST:-192.168.1.50}
+HOST=${HOST:-}
 KEY=${KEY:-D:/platform-tools/echoshow/linux-image/techo5_ed25519}
 INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
-TZ_NAME=${TZ_NAME:-America/New_York}
+TZ_NAME=${TZ_NAME:-}
+# The device's clock zone: this PC's own unless given. Windows names its zones differently; .NET
+# converts them to the IANA names the image uses.
+if [ -z "$TZ_NAME" ] && command -v pwsh >/dev/null 2>&1; then
+	TZ_NAME=$(pwsh -NoProfile -Command '$iana = $null; [void][TimeZoneInfo]::TryConvertWindowsIdToIanaId([TimeZoneInfo]::Local.Id, [ref]$iana); $iana' 2>/dev/null | tr -d '\r')
+fi
+TZ_NAME=${TZ_NAME:-UTC}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 VERSION=${VERSION:-}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
@@ -35,6 +41,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+[ -n "$HOST" ] || { echo "HOST is not set: HOST=<the device's address> $0 ..." >&2; exit 1; }
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "$VERSION" ] || VERSION="dev-$(git -C "$ROOT" rev-parse --short HEAD)-$(date +%Y%m%d%H%M)"
 STAGE=$ROOT/bin/rootfs-stage
