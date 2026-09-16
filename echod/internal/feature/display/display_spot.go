@@ -48,6 +48,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -137,8 +138,11 @@ type Display struct {
 	weatherUntil time.Time
 
 	poke chan struct{}
-	dev  *screen.Device
-	r    *roundRenderer
+
+	// shots are screenshot requests, answered with a copy of the next frame once it is drawn whole.
+	shots chan chan *image.RGBA
+	dev   *screen.Device
+	r     *roundRenderer
 }
 
 var (
@@ -165,8 +169,9 @@ func build() *Display {
 				Category: esphome.CategoryConfig,
 			},
 		},
-		poke: make(chan struct{}, 1),
-		view: voice.State{Phase: "idle"},
+		poke:  make(chan struct{}, 1),
+		shots: make(chan chan *image.RGBA, 4),
+		view:  voice.State{Phase: "idle"},
 	}
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
@@ -312,6 +317,20 @@ func (d *Display) changed(s voice.State) {
 	if newHeard && aboutWeather(s.Heard) {
 		d.weatherArmed = true
 	}
+	// "Show the front door" goes up at once, while the assistant answers; "go home" takes it down.
+	if newHeard {
+		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
+			d.weatherArmed = false
+			go home.Get().ShowCamera(entity, cameraShow)
+		}
+		if aboutGoingHome(s.Heard) {
+			d.weatherArmed = false
+			if d.menuOpen {
+				d.closeMenu()
+			}
+			go home.Get().HideCamera()
+		}
+	}
 	if s.Phase == "idle" && d.weatherArmed {
 		d.weatherArmed = false
 		if !d.menuOpen || d.menuMode == modeWeather {
@@ -348,6 +367,19 @@ func (d *Display) gesture(g touch.Gesture) {
 	if open {
 		d.menuGesture(g)
 		return
+	}
+	if v, up := home.Get().Camera(); up {
+		switch g.Kind {
+		case touch.Tap:
+			go home.Get().HideCamera()
+			return
+		case touch.SwipeLeft:
+			go stepCamera(v.Entity, +1)
+			return
+		case touch.SwipeRight:
+			go stepCamera(v.Entity, -1)
+			return
+		}
 	}
 	switch g.Kind {
 	case touch.Tap:
@@ -536,6 +568,9 @@ func (d *Display) act(id itemID) {
 		}
 	case itemVolume:
 		d.locked(func() { d.openMenu(modeVolume, "") })
+	case itemCamera:
+		d.locked(d.closeMenu)
+		go home.Get().ShowCamera(home.LocalCamera, cameraStep)
 	case itemWeather:
 		d.locked(func() {
 			d.openMenu(modeWeather, "")
@@ -800,6 +835,8 @@ func (d *Display) frame() time.Duration {
 	}
 	s.timerRinging = timer.Get().Ringing()
 	s.weather = home.Get().Weather()
+	s.camera, s.showCamera = home.Get().Camera()
+	s.cameraLive = camera.Get().Running()
 	bt := btaudio.Get().State()
 	s.btAvailable, s.btPairing, s.btConnected, s.btRemembered, s.btStatus = bt.Available, bt.Pairing, bt.Connected, bt.Remembered, bt.Status
 	if s.menuOpen && s.menuMode == modeWeather {
@@ -826,10 +863,24 @@ func (d *Display) frame() time.Duration {
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
+	for pending := true; pending; {
+		select {
+		case reply := <-d.shots:
+			src := d.dev.Canvas()
+			cp := image.NewRGBA(src.Rect)
+			copy(cp.Pix, src.Pix)
+			reply <- cp
+		default:
+			pending = false
+		}
+	}
 
 	switch {
 	case turning || (s.menuOpen && d.isSpinning()):
 		return dialFrame
+	case s.showCamera:
+		// New frames wake the loop themselves; this only brings the view down when its time is up.
+		return activeFrame
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing:
 		return activeFrame
 	default:
@@ -837,13 +888,23 @@ func (d *Display) frame() time.Duration {
 	}
 }
 
-// Screenshot is the canvas as last drawn, for checking a layout from a PC.
+// Screenshot is the next frame drawn, whole, for checking a layout from a PC; nil if the screen is
+// not open or draws nothing within two seconds (a dark panel does not draw).
 func (d *Display) Screenshot() *image.RGBA {
 	if d.dev == nil {
 		return nil
 	}
-	src := d.dev.Canvas()
-	cp := image.NewRGBA(src.Rect)
-	copy(cp.Pix, src.Pix)
-	return cp
+	reply := make(chan *image.RGBA, 1)
+	select {
+	case d.shots <- reply:
+	default:
+		return nil
+	}
+	d.wake()
+	select {
+	case img := <-reply:
+		return img
+	case <-time.After(2 * time.Second):
+		return nil
+	}
 }

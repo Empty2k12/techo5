@@ -24,10 +24,6 @@ import (
 const (
 	// cameraShow is how long a camera stays up when asked for by voice.
 	cameraShow = 30 * time.Second
-
-	// cameraFrameW and H are the size frames are scaled to fit: the panel.
-	cameraFrameW = 960
-	cameraFrameH = 480
 )
 
 // CameraView is what the screen shows.
@@ -49,7 +45,7 @@ const LocalCamera = "local"
 func (f *Feature) Cameras() []config.Camera {
 	cams := config.Get().Home.Cameras
 	if camera.Available() {
-		return append([]config.Camera{{Entity: LocalCamera, Name: "This Show"}}, cams...)
+		return append([]config.Camera{{Entity: LocalCamera, Name: localCameraName}}, cams...)
 	}
 	return cams
 }

@@ -53,6 +53,7 @@ const (
 	itemMedia      itemID = "media"
 	itemVolume     itemID = "volume"
 	itemWeather    itemID = "weather"
+	itemCamera     itemID = "camera"
 	itemTimers     itemID = "timers"
 	itemSettings   itemID = "settings"
 	itemSleep      itemID = "sleep"
@@ -80,6 +81,7 @@ var mainItems = []menuItem{
 	{itemMedia, color.RGBA{60, 203, 127, 255}},
 	{itemVolume, color.RGBA{58, 160, 255, 255}},
 	{itemWeather, color.RGBA{255, 196, 64, 255}},
+	{itemCamera, color.RGBA{60, 203, 127, 255}},
 	{itemTimers, color.RGBA{255, 176, 32, 255}},
 	{itemSettings, color.RGBA{176, 150, 255, 255}},
 	{itemSleep, color.RGBA{120, 140, 255, 255}},
@@ -205,6 +207,8 @@ func itemName(s roundScene, id itemID) string {
 		return "Volume"
 	case itemWeather:
 		return "Weather"
+	case itemCamera:
+		return "Camera"
 	case itemTimers:
 		return "Timers"
 	case itemSettings:
@@ -260,6 +264,11 @@ func itemHint(s roundScene, id itemID) string {
 		return "nothing playing"
 	case itemVolume:
 		return fmt.Sprintf("%d · tap, then turn", s.volume)
+	case itemCamera:
+		if s.muted {
+			return "off while muted"
+		}
+		return "this Spot · swipe for others"
 	case itemWeather:
 		if l := weatherLine(s.weather); l != "" {
 			return l
@@ -458,6 +467,16 @@ func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c colo
 		r.speakerIcon(x-0.2*u, y, u*0.9, w, c)
 		r.ringAt(x+0.05*u, y, 0.45*u-w/2, 0.45*u+w/2, 0.25*math.Pi, 0.75*math.Pi, c)
 		r.ringAt(x+0.05*u, y, 0.85*u-w/2, 0.85*u+w/2, 0.25*math.Pi, 0.75*math.Pi, c)
+	case itemCamera:
+		// A camera body with its lens.
+		r.line(x-0.9*u, y-0.45*u, x+0.9*u, y-0.45*u, w, c)
+		r.line(x-0.9*u, y+0.65*u, x+0.9*u, y+0.65*u, w, c)
+		r.line(x-0.9*u, y-0.45*u, x-0.9*u, y+0.65*u, w, c)
+		r.line(x+0.9*u, y-0.45*u, x+0.9*u, y+0.65*u, w, c)
+		r.line(x-0.35*u, y-0.45*u, x-0.2*u, y-0.72*u, w, c)
+		r.line(x-0.2*u, y-0.72*u, x+0.2*u, y-0.72*u, w, c)
+		r.line(x+0.2*u, y-0.72*u, x+0.35*u, y-0.45*u, w, c)
+		r.ringAt(x, y+0.1*u, 0.36*u-w/2, 0.36*u+w/2, 0, 2*math.Pi, c)
 	case itemWeather:
 		r.sunIcon(x+0.38*u, y-0.32*u, 0.62*u, w*0.8, c)
 		r.cloud(x-0.12*u, y+0.22*u, 1.02*u, colIconGround)

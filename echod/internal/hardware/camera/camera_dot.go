@@ -1,4 +1,4 @@
-//go:build dot || spot
+//go:build dot
 
 // Package camera is the front camera; the Dot has none.
 package camera
@@ -44,4 +44,5 @@ var errNone = errors.New("no camera on this device")
 func (c *Camera) Acquire() (func(), error)                     { return nil, errNone }
 func (c *Camera) Snapshot(ctx context.Context) (*Frame, error) { return nil, errNone }
 func (c *Camera) Last() *Frame                                 { return nil }
+func (c *Camera) Running() bool                                { return false }
 func (f *Frame) Full() *image.RGBA                             { return f.RGBA }

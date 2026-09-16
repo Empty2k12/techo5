@@ -2,6 +2,5 @@
 
 package security
 
-// webPages: the Echo Spot build draws no screen and serves no camera yet, so their web access switches
-// are not offered.
-const webPages = false
+// webPages: the Echo Spot's camera and screen pages each have a switch, as on the Show.
+const webPages = true

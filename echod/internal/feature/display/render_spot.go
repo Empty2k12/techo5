@@ -68,6 +68,10 @@ type roundScene struct {
 	weather  home.Weather
 	forecast forecastDays
 
+	camera     home.CameraView
+	showCamera bool
+	cameraLive bool // the sensor is running
+
 	btAvailable, btPairing    bool
 	btConnected, btRemembered string
 	btStatus                  string
@@ -110,6 +114,9 @@ func (r *roundRenderer) draw(s roundScene) {
 
 	r.rim(s)
 	switch {
+	case s.showCamera && !s.showVolume:
+		r.cameraView(s)
+		r.rim(s) // the view clears the panel; the rim still says muted or listening
 	case s.showVolume:
 		r.volume(s)
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering":
@@ -119,6 +126,9 @@ func (r *roundRenderer) draw(s roundScene) {
 	}
 	if s.menuOpen {
 		r.menu(s)
+	}
+	if s.cameraLive {
+		r.cameraDot()
 	}
 }
 

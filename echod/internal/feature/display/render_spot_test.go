@@ -46,6 +46,21 @@ func TestDialGeometry(t *testing.T) {
 	}
 }
 
+// testPicture is a 640x480 gradient with a bright square, to see the crop and the mirror.
+func testPicture() *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, 640, 480))
+	for y := 0; y < 480; y++ {
+		for x := 0; x < 640; x++ {
+			j := (y*640 + x) * 4
+			img.Pix[j], img.Pix[j+1], img.Pix[j+2], img.Pix[j+3] = uint8(x*255/639), uint8(y*255/479), 120, 255
+			if x > 380 && x < 460 && y > 200 && y < 280 {
+				img.Pix[j], img.Pix[j+1], img.Pix[j+2] = 255, 255, 255
+			}
+		}
+	}
+	return img
+}
+
 // Every scene draws without panicking; with SPOT_PREVIEW set to a directory, each is written there as
 // a PNG to look at.
 func TestRoundScenesDraw(t *testing.T) {
@@ -63,6 +78,9 @@ func TestRoundScenesDraw(t *testing.T) {
 		"weather-none":   {now: at, phase: "idle", menuOpen: true, menuMode: modeWeather},
 		"menu-bluetooth": {now: at, phase: "idle", menuOpen: true, menuMode: modeSettings, menuSel: 3, menuRot: restFor(3, len(settingsItems)), btAvailable: true, btConnected: "Kitchen speaker"},
 		"bt-dial":        {now: at, phase: "idle", menuOpen: true, menuMode: modeBluetooth, menuSel: 1, menuRot: restFor(1, len(bluetoothItems)), btAvailable: true, btConnected: "Kitchen speaker", btRemembered: "Kitchen speaker"},
+		"camera-none":    {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "camera.front_door", Name: "Front door"}},
+		"camera":         {now: at, phase: "idle", showCamera: true, cameraLive: true, camera: home.CameraView{Entity: home.LocalCamera, Name: "This Spot", Frame: testPicture()}},
+		"menu-camera":    {now: at, phase: "idle", cameraLive: true, menuOpen: true, menuMode: modeMain, menuSel: 5, menuRot: restFor(5, len(mainItems))},
 		"bt-pairing":     {now: at, phase: "idle", btAvailable: true, btPairing: true, weather: sky},
 		"clock":          {now: at, phase: "idle", volume: 12, maxVolume: 30},
 		"clock-timer":    {now: at, phase: "idle", timers: []timer.Countdown{{Name: "pasta", Left: 4*time.Minute + 32*time.Second, Total: 10 * time.Minute, Active: true}}},
@@ -72,7 +90,7 @@ func TestRoundScenesDraw(t *testing.T) {
 		"replying":       {now: at, phase: "replying", heard: "what time is it", reply: "It's 2:07 PM. Have a great afternoon, and don't forget the pasta timer is still running in the kitchen."},
 		"volume":         {now: at, phase: "idle", volume: 18, maxVolume: 30, showVolume: true},
 		"menu":           {now: at, phase: "idle", volume: 12, menuOpen: true, menuMode: modeMain, menuSel: 0, menuRot: restFor(0, len(mainItems))},
-		"menu-timers":    {now: at, phase: "idle", menuOpen: true, menuMode: modeMain, menuSel: 5, menuRot: restFor(5, len(mainItems)) + 0.3, timers: []timer.Countdown{{Left: 272 * time.Second, Total: 600 * time.Second, Active: true}}},
+		"menu-timers":    {now: at, phase: "idle", menuOpen: true, menuMode: modeMain, menuSel: 6, menuRot: restFor(6, len(mainItems)) + 0.3, timers: []timer.Countdown{{Left: 272 * time.Second, Total: 600 * time.Second, Active: true}}},
 		"menu-settings":  {now: at, phase: "idle", menuOpen: true, menuMode: modeSettings, menuSel: 1, menuRot: restFor(1, len(settingsItems)), nightFrom: 22, nightTo: 7, brightness: 72},
 		"jog-volume":     {now: at, phase: "idle", menuOpen: true, menuMode: modeVolume, volume: 14, maxVolume: 30},
 		"jog-brightness": {now: at, phase: "idle", menuOpen: true, menuMode: modeBrightness, brightness: 72},
