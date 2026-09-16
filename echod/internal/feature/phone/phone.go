@@ -7,7 +7,8 @@
 //
 // To Home Assistant: a status sensor, the other party, answer and hang up buttons, the phone_call,
 // phone_answer and phone_hangup actions, and an esphome.techo5_phone event for each thing a call does,
-// so automations can announce a caller or send a message when a call is missed.
+// so automations can announce a caller or send a message when a call is missed. Each event carries the
+// device's name, the other party, the direction and, when it ends, who ended it and how long it lasted.
 package phone
 
 import (
@@ -26,6 +27,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
@@ -221,7 +223,8 @@ func statusText(s State) string {
 }
 
 func fire(event string, st State, extra ...string) {
-	data := map[string]string{"event": event, "peer": st.Peer}
+	// device names which one this was: every device's events arrive on the one bus under one name.
+	data := map[string]string{"event": event, "peer": st.Peer, "device": config.Get().Device.Name}
 	if st.Incoming {
 		data["direction"] = "incoming"
 	} else {
