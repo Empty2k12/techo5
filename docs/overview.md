@@ -33,6 +33,9 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   and the Sendspin player. SSH (keys only), the camera page and the screen page each have a switch
   on the Security tab and in Home Assistant, all off on a new device. SSH keys come only from Home
   Assistant (`ssh_keys` action) and live on userdata; the image carries none.
+- **Time zone**: taken from Home Assistant on each connection (the POSIX rule it sends ESPHome devices)
+  and kept on userdata, so the images carry none and a unit keeps its zone while Home Assistant is
+  away; a new unit is on UTC until its first connection.
 - **Updates**: two root filesystem slots with a trial and automatic fallback; a release that
   carries a rootfs tarball installs over the air from Home Assistant's update entity.
 

@@ -541,6 +541,16 @@ session.
    scan shows it at -70 dBm or better, on the running supplicant only, and
    backs off for 30 minutes if that does not associate in 30 s. Tested by
    forcing 2.4 GHz: back on 5180 MHz in 6 s with address and route intact.
+   TIME ZONE FROM HOME ASSISTANT 2026-09-16: images baked the build PC's
+   zone. Now /etc/localtime and /etc/timezone link to userdata, boot.sh
+   creates them from /etc/techo5/default-timezone (UTC) when missing, and
+   `feature/timezone` sends GetTimeRequest once Home Assistant subscribes.
+   Home Assistant answers with a POSIX rule, not a zone name
+   ("MST7MDT,M3.2.0,M11.1.0"); the daemon writes it as the footer of a
+   minimal TZif v2 file (one transition in 1901 so the footer governs every
+   later time), which Go and musl both apply, and sets time.Local. A zone
+   name is still accepted and linked into zoneinfo. Tested on the second
+   Show: rule applied 1.3 s after start, date prints MDT.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

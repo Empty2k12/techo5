@@ -143,6 +143,8 @@ ESPHome integration by hand with host `<address>` and port 6053.
 
 Then:
 
+- **Time zone**: nothing to set. The unit starts on UTC and takes Home Assistant's zone as soon as it
+  connects, and keeps it from then on.
 - **Wake word**: the default is "Alexa". Change it on the device (swipe down from the top, Device tab,
   Wake word, Next) or in Home Assistant; the other follows.
 - **Security**: SSH, and the camera and screen pages on port 8181, have switches on the Security tab
