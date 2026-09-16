@@ -14,9 +14,9 @@ type Home struct {
 
 	Radio Radio `json:"radio"`
 
-	// RadioSource is the list the radio page shows: RadioFavourites (the stations wired with
+	// RadioSource is the list the radio page shows: RadioFavorites (the stations wired with
 	// home_radio), RadioLocal or RadioPopular (Home Assistant's Radio Browser). Empty picks
-	// favourites when they are wired, local stations otherwise.
+	// favorites when they are wired, local stations otherwise.
 	RadioSource string `json:"radio_source,omitempty"`
 
 	// Cameras are camera.* entities and the names to say for them, in the order the list shows.
@@ -65,7 +65,7 @@ func (h Home) WeatherEntity() string {
 
 // The radio page's lists.
 const (
-	RadioFavourites = "favourites"
+	RadioFavorites = "favorites"
 	RadioLocal      = "local"
 	RadioPopular    = "popular"
 )

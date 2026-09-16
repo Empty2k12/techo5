@@ -1,6 +1,6 @@
 // Package home is the house on the screen: the weather on the clock, and a radio page that lists
 // the stations Home Assistant knows and plays one through Home Assistant's own script — the same
-// path the old dashboard's chips used, so favourites, search and the station finder stay where
+// path the old dashboard's chips used, so favorites, search and the station finder stay where
 // they are. Nothing here is baked in: Home Assistant tells the device which entities to follow and
 // which script to call, through two actions (esphome.<device>_home_weather and _home_radio).
 package home
@@ -35,8 +35,8 @@ type Weather struct {
 
 // Radio is what the radio page shows.
 type Radio struct {
-	Configured bool   // there is a list to show: favourites wired, or a token for Radio Browser
-	Source     string // the list shown, config.RadioFavourites, RadioLocal or RadioPopular
+	Configured bool   // there is a list to show: favorites wired, or a token for Radio Browser
+	Source     string // the list shown, config.RadioFavorites, RadioLocal or RadioPopular
 	Sources    int    // how many lists there are to step through
 	Loading    bool   // the list is being fetched
 	Problem    string // why the list is empty, when fetching it failed
@@ -167,7 +167,7 @@ func (f *Feature) played(url string) {
 }
 
 // nameStream finds a station name for a stream URL in the lists Home Assistant keeps —
-// favourites and the last search — and falls back to the stream's host.
+// favorites and the last search — and falls back to the stream's host.
 func (f *Feature) nameStream(url string) {
 	name := ""
 	if hass.Get().Ready() {
@@ -352,7 +352,7 @@ func (f *Feature) Radio() Radio {
 		return r
 	}
 	t := hastate.Get()
-	if r.Source == config.RadioFavourites {
+	if r.Source == config.RadioFavorites {
 		seen := map[string]bool{}
 		for _, entity := range h.Stations {
 			v, ok := t.Value(entity, "options")
@@ -395,11 +395,11 @@ func (f *Feature) Radio() Radio {
 	return r
 }
 
-// Play plays a station of the list shown on this device: a favourite through Home Assistant's
+// Play plays a station of the list shown on this device: a favorite through Home Assistant's
 // script, a Radio Browser station through the device's own player entity.
 func (f *Feature) Play(station string) {
 	source := radioSource()
-	if source != config.RadioFavourites {
+	if source != config.RadioFavorites {
 		if f.playListed(source, station) {
 			f.Changed.Emit(struct{}{})
 			f.pokeMeta()
@@ -413,7 +413,7 @@ func (f *Feature) Play(station string) {
 	f.mu.Lock()
 	f.chosen = station
 	f.mu.Unlock()
-	callFavourite(h, station)
+	callFavorite(h, station)
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()
 }

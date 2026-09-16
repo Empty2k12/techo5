@@ -26,7 +26,7 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   `home_weather` action, and stays chosen. The forecast page (after a weather question, or Show on
   the Device tab) has a Radar button: RainViewer's radar over an OpenStreetMap map centred on
   Home Assistant's home zone, the last hour as a loop. "Show the radar" asks for it directly.
-- **Radio**: the Radio tab steps through its lists with Next. Favourites are the stations wired with
+- **Radio**: the Radio tab steps through its lists with Next. Favorites are the stations wired with
   `home_radio` (Home Assistant `input_select` lists played through a script). With a Home Assistant
   token, Local stations (within 100 km of home) and Popular worldwide come from Home Assistant's
   Radio Browser integration and play through `media_player.play_media` on the device's own player,

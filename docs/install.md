@@ -162,7 +162,7 @@ Then:
   Device tab (Weather, Next), the "Weather source" select, or `esphome.<device>_home_weather`.
 - **Radio**: with the token, the Radio tab lists stations near home and popular ones, from the Radio
   Browser integration Home Assistant sets up on its own (add it under Devices & services if it is
-  missing). Your own favourites can be wired with `esphome.<device>_home_radio`.
+  missing). Your own favorites can be wired with `esphome.<device>_home_radio`.
 - **Security**: SSH, and the camera and screen pages on port 8181, have switches on the Security tab
   and in Home Assistant. SSH keys only come from Home Assistant (`esphome.<device>_ssh_keys`).
 - **Updates**: the firmware update entity installs new releases into the other slot, reboots, and

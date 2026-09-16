@@ -16,7 +16,7 @@ import (
 // adds on its own, lists the stations within 100 km of home and the most popular ones. The lists come
 // over Home Assistant's websocket API with the device's token, and a station plays through
 // media_player.play_media on this device's own player, which Home Assistant resolves and converts.
-// The stations wired with home_radio stay the Favourites list and play exactly as before.
+// The stations wired with home_radio stay the Favorites list and play exactly as before.
 
 const (
 	// listsEvery is how long a fetched list is kept.
@@ -48,7 +48,7 @@ type radioLists struct {
 func RadioSources() []string {
 	var out []string
 	if config.Get().Home.Radio.Configured() {
-		out = append(out, config.RadioFavourites)
+		out = append(out, config.RadioFavorites)
 	}
 	if hass.Get().Ready() {
 		out = append(out, config.RadioLocal, config.RadioPopular)
@@ -94,8 +94,8 @@ func (f *Feature) NextRadioSource() {
 // SourceLabel is how the sheet names a list.
 func SourceLabel(source string) string {
 	switch source {
-	case config.RadioFavourites:
-		return "Favourites"
+	case config.RadioFavorites:
+		return "Favorites"
 	case config.RadioLocal:
 		return "Local stations"
 	case config.RadioPopular:
@@ -216,8 +216,8 @@ func (f *Feature) playListed(source, name string) bool {
 // stream comes through Home Assistant's proxy, so its URL does not say.
 const listedFor = time.Minute
 
-// callFavourite plays a station through the script wired with home_radio.
-func callFavourite(h config.Radio, station string) {
+// callFavorite plays a station through the script wired with home_radio.
+func callFavorite(h config.Radio, station string) {
 	component.CallService.Emit(component.Call{
 		Service: h.Service,
 		Data:    map[string]string{h.Field: askFor(station), h.SpeakerField: speakerEntity()},
