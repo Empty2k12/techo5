@@ -445,7 +445,8 @@ session.
    entity list). Cost measured: the daemon sits at ~37 % of the two cores
    with the wake word running and ~58 % while the MJPEG stream is served
    (14 fps conversion plus ~4.5 fps JPEG); 40 % of the machine stays idle.
-   Still to do: 10-bit output and a proper demosaic.
+   Both done later that day: CAM_OUT_FMT 1 gives 10-bit packed frames, and
+   stills are demosaiced at 1600x1200 (the stream stays 800x600).
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

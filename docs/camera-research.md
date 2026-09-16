@@ -263,3 +263,16 @@ entity=local → "Showing it").
 
 Cost on the device: daemon at ~37 % of two cores idle (wake word), ~58 % while the MJPEG stream
 runs (14 fps conversion plus ~4.5 fps JPEG encode), 40 % idle left.
+
+## 10-bit and full resolution (2026-09-16, evening)
+
+The packer's output width is `CAM_CTL_FMT_SEL.CAM_OUT_FMT` (bits 15:12): 0 leaves one byte a pixel,
+**1 writes 10-bit packed** (2000 bytes a line, 2,400,000 a frame, four pixels in five bytes with the
+low bits first: p0 = b0 | (b1&3)<<8, p1 = b1>>2 | (b2&15)<<6, p2 = b2>>4 | (b3&63)<<4, p3 = b3>>6 |
+b4<<2), 2 looks like 12-bit packed. `IMGO_STRIDE.FORMAT` had nothing to do with it. The daemon now
+runs 10-bit: `hardware/camera` unpacks to 11-bit levels (a summed green pair), keeps the packed
+frame on every Frame, and `Full()` demosaics it bilinearly at 1600x1200 with the same white balance
+and gamma the 800x600 picture settled on. Stills (`/camera.jpg`, the ESPHome camera's single image)
+are full size, about a second each including sensor start; the MJPEG stream and the live view stay
+at 800x600 (114 frames in 14 s while a full still was taken). Auto-exposure samples the first pixel
+of every 13th five-byte group and aims for a mean of 290 on the 10-bit scale.

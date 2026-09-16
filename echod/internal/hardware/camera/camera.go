@@ -8,10 +8,11 @@
 // driver's mmap, the way MediaTek's libcamdrv does on MT8163. docs/camera-research.md has the
 // map and the dead ends; cmd/camframe is the standalone version of this file.
 //
-// Frames arrive as 1600x1200 8-bit Bayer at about 14 frames a second and are handed out as
-// 800x600 RGBA (one pixel per Bayer cell, grey-world white balance, a gamma curve). The sensor
-// runs only while something holds it (Acquire), and a little longer, so a run of snapshots does
-// not restart it each time.
+// Frames arrive as 1600x1200 packed 10-bit Bayer at about 14 frames a second and are handed out
+// two ways: an 800x600 RGBA made on every frame (one pixel per Bayer cell, grey-world white
+// balance, a gamma curve) for the live view and the stream, and the packed frame itself, which
+// Full() demosaics to 1600x1200 on demand for stills. The sensor runs only while something holds
+// it (Acquire), and a little longer, so a run of snapshots does not restart it each time.
 package camera
 
 import (
@@ -34,11 +35,14 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
 
-// Frame is one converted picture.
+// Frame is one picture.
 type Frame struct {
 	Seq  uint64
 	At   time.Time
-	RGBA *image.RGBA // 800x600
+	RGBA *image.RGBA // 800x600, one pixel per Bayer cell
+
+	raw  []byte // the packed 10-bit frame, for Full
+	tone tone   // white balance and level, as the half-size picture used them
 }
 
 // Camera is the device. Get returns the one instance.
@@ -209,7 +213,9 @@ func (c *Camera) run(stop, stopped chan struct{}) {
 	slog.Info("camera running")
 	d.stream(stop, func(bayer []byte) {
 		d.autoExpose(bayer)
-		f := &Frame{At: time.Now(), RGBA: convert(bayer)}
+		f := &Frame{At: time.Now(), raw: make([]byte, len(bayer))}
+		copy(f.raw, bayer)
+		f.RGBA, f.tone = convert(f.raw)
 		c.mu.Lock()
 		c.seq++
 		f.Seq = c.seq
@@ -224,8 +230,9 @@ func (c *Camera) run(stop, stopped chan struct{}) {
 
 const (
 	sensorW, sensorH = 1600, 1200
-	frameBytes       = sensorW * sensorH // 8-bit Bayer, one byte a pixel
-	slots            = 3                 // DMA targets in rotation: a finished frame rests two periods
+	bytesPerLine     = sensorW * 10 / 8 // packed 10-bit Bayer: four pixels in five bytes
+	frameBytes       = bytesPerLine * sensorH
+	slots            = 3 // DMA targets in rotation: a finished frame rests two periods
 
 	sensMagic   = 'i'
 	nrOpen      = 0
@@ -468,8 +475,8 @@ func (d *device) setFeature(id uint32, v uint64) {
 // first — up to a frame at the sensor's rate — then gain, then longer shutters at the cost of
 // frame rate, then the rest of the gain.
 const (
-	aeTarget   = 72 // mean of the 8-bit frame to aim for: a lit room, no clipping to speak of
-	aeDelay    = 3  // frames between changes: a new exposure takes two frames to show
+	aeTarget   = 290 // mean of the 10-bit frame to aim for: a lit room, no clipping to speak of
+	aeDelay    = 3   // frames between changes: a new exposure takes two frames to show
 	aeMinShut  = 4
 	aeFrame    = 1200 // shutter lines that fit a frame at the sensor's own rate
 	aeMaxShut  = 4000 // beyond this the frame rate drops under 5 a second
@@ -484,9 +491,10 @@ func (d *device) autoExpose(bayer []byte) {
 		d.settle--
 		return
 	}
+	// The first pixel of every 13th five-byte group: a prime stride in groups walks the frame.
 	var sum, n uint64
-	for i := 0; i < len(bayer); i += 61 { // a prime stride walks every column and row over time
-		sum += uint64(bayer[i])
+	for i := 0; i+1 < len(bayer); i += 65 {
+		sum += uint64(bayer[i]) | uint64(bayer[i+1]&3)<<8
 		n++
 	}
 	mean := int(sum / n)
@@ -635,19 +643,19 @@ func (d *device) setupISP() {
 	cam.wr(regCtlIntEn, 0)
 	cam.wr(regTgVfCon, 0)
 	cam.wr(regCtlClkEn, 0x1FFFF)
-	cam.wr(regCtlEn1, 1<<0|1<<12) // TG1_EN | PAK_EN — the DMA is fed by the packer
+	cam.wr(regCtlEn1, 1<<0|1<<12) // TG1_EN | PAK_EN: the DMA is fed by the packer
 	cam.wr(regCtlEn2, 0)
-	cam.wr(regCtlDmaEn, 1<<0)   // IMGO_EN
-	cam.wr(regCtlFmtSel, 1<<16) // TG1_FMT = RAW10
+	cam.wr(regCtlDmaEn, 1<<0)         // IMGO_EN
+	cam.wr(regCtlFmtSel, 1<<16|1<<12) // TG1_FMT = RAW10; CAM_OUT_FMT 1 = the packer writes 10-bit packed
 	cam.wr(regCtlSel, 0)
 	cam.wr(regCtlPixID, 0)               // Bayer, R first
 	cam.mask(regCtlMuxSel2, 1<<4, 1<<18) // IMGO_MUX 0 (packer), IMGO_MUX_EN
 	cam.wr(regImgoFbc, 0)
 	cam.wr(regImgoBase, d.mva)
 	cam.wr(regImgoOfst, 0)
-	cam.wr(regImgoXsize, sensorW-1)
+	cam.wr(regImgoXsize, bytesPerLine-1)
 	cam.wr(regImgoYsize, sensorH-1)
-	cam.wr(regImgoStride, sensorW)
+	cam.wr(regImgoStride, bytesPerLine)
 	cam.wr(regCtlImgoSize, uint32(sensorW)<<16|uint32(sensorH))
 	if cam.rd(regImgoCon) == 0 {
 		cam.wr(regImgoCon, 0x80000040)
@@ -764,20 +772,41 @@ func (d *device) stream(stop chan struct{}, frame func(bayer []byte)) {
 
 // ---- conversion ----
 
-// convert turns one 1600x1200 8-bit RGGB frame into an 800x600 RGBA picture: one pixel per
-// Bayer cell, grey-world white balance, the top percentile at white, gamma 1/1.8.
-func convert(bayer []byte) *image.RGBA {
+// tone is how a frame was levelled: white balance gains and the value that maps to white.
+type tone struct {
+	gainR, gainB float64
+	white        int // on the 11-bit scale of a summed green pair
+}
+
+// unpackLine expands one packed line into 10-bit samples, four pixels from every five bytes,
+// least significant bits first (the packer's order).
+func unpackLine(line []byte, dst []uint16) {
+	for i, j := 0, 0; i+5 <= len(line) && j+4 <= len(dst); i, j = i+5, j+4 {
+		b0, b1, b2, b3, b4 := uint16(line[i]), uint16(line[i+1]), uint16(line[i+2]), uint16(line[i+3]), uint16(line[i+4])
+		dst[j] = b0 | (b1&3)<<8
+		dst[j+1] = b1>>2 | (b2&0xF)<<6
+		dst[j+2] = b2>>4 | (b3&0x3F)<<4
+		dst[j+3] = b3>>6 | b4<<2
+	}
+}
+
+// convert turns one packed frame into an 800x600 RGBA picture: one pixel per RGGB cell (the
+// two greens summed), grey-world white balance, the top percentile at white, gamma 1/1.8. The
+// tone it settled on comes back for Full.
+func convert(raw []byte) (*image.RGBA, tone) {
 	img := image.NewRGBA(image.Rect(0, 0, Width, Height))
 	cells := make([]uint16, Width*Height*3)
+	row0 := make([]uint16, sensorW)
+	row1 := make([]uint16, sensorW)
 	var sumR, sumG, sumB uint64
-	var hist [512]int
+	var hist [2048]int
 	for y := 0; y < Height; y++ {
-		r0 := bayer[(2*y)*sensorW:]
-		r1 := bayer[(2*y+1)*sensorW:]
+		unpackLine(raw[(2*y)*bytesPerLine:(2*y+1)*bytesPerLine], row0)
+		unpackLine(raw[(2*y+1)*bytesPerLine:(2*y+2)*bytesPerLine], row1)
 		for x := 0; x < Width; x++ {
-			r := uint16(r0[2*x])
-			g := uint16(r0[2*x+1]) + uint16(r1[2*x])
-			b := uint16(r1[2*x+1])
+			r := row0[2*x]
+			g := row0[2*x+1] + row1[2*x]
+			b := row1[2*x+1]
 			i := (y*Width + x) * 3
 			cells[i], cells[i+1], cells[i+2] = r<<1, g, b<<1
 			sumR += uint64(r)
@@ -787,39 +816,104 @@ func convert(bayer []byte) *image.RGBA {
 		}
 	}
 	n := float64(Width * Height)
+	t := tone{gainR: 1, gainB: 1, white: 1}
 	avgR, avgG, avgB := float64(sumR)*2/n, float64(sumG)/n, float64(sumB)*2/n
-	gainR, gainB := 1.0, 1.0
 	if avgR > 1 && avgB > 1 {
-		gainR, gainB = avgG/avgR, avgG/avgB
+		t.gainR, t.gainB = avgG/avgR, avgG/avgB
 	}
-	// White is the 99th percentile of green (on the 9-bit scale).
-	white, seen := 1, 0
+	seen := 0
 	for v := 0; v < len(hist); v++ {
 		seen += hist[v]
 		if seen >= int(n)*99/100 {
-			white = v
+			t.white = v
 			break
 		}
 	}
-	if white < 8 {
-		white = 8
+	if t.white < 32 {
+		t.white = 32
 	}
-	// Per-channel lookup tables: gain, scale to white, gamma.
-	var lut [3][512]uint8
-	for ch, gain := range []float64{gainR, 1, gainB} {
-		for v := 0; v < 512; v++ {
-			f := float64(v) * gain / float64(white)
+	luts := t.tables()
+	for i, j := 0, 0; i < len(cells); i, j = i+3, j+4 {
+		img.Pix[j] = luts[0][cells[i]]
+		img.Pix[j+1] = luts[1][cells[i+1]]
+		img.Pix[j+2] = luts[2][cells[i+2]]
+		img.Pix[j+3] = 255
+	}
+	return img, t
+}
+
+// tables are per-channel lookups from an 11-bit level to an 8-bit output: gain, scale to white,
+// gamma.
+func (t tone) tables() *[3][2048]uint8 {
+	var lut [3][2048]uint8
+	for ch, gain := range []float64{t.gainR, 1, t.gainB} {
+		for v := 0; v < 2048; v++ {
+			f := float64(v) * gain / float64(t.white)
 			if f > 1 {
 				f = 1
 			}
 			lut[ch][v] = uint8(math.Pow(f, 1/1.8)*255 + 0.5)
 		}
 	}
-	for i, j := 0, 0; i < len(cells); i, j = i+3, j+4 {
-		img.Pix[j] = lut[0][cells[i]]
-		img.Pix[j+1] = lut[1][cells[i+1]]
-		img.Pix[j+2] = lut[2][cells[i+2]]
-		img.Pix[j+3] = 255
+	return &lut
+}
+
+// Full demosaics the frame at the sensor's own 1600x1200: bilinear, each pixel's missing two
+// colours averaged from its neighbours, levelled the way the half-size picture was. It costs a
+// few hundred milliseconds on this SoC, so it is for stills, not the stream.
+func (f *Frame) Full() *image.RGBA {
+	if f.raw == nil {
+		return f.RGBA
+	}
+	w, h := sensorW, sensorH
+	px := make([]uint16, w*h)
+	for y := 0; y < h; y++ {
+		unpackLine(f.raw[y*bytesPerLine:(y+1)*bytesPerLine], px[y*w:(y+1)*w])
+	}
+	at := func(x, y int) uint32 {
+		if x < 0 {
+			x = 1
+		} else if x >= w {
+			x = w - 2
+		}
+		if y < 0 {
+			y = 1
+		} else if y >= h {
+			y = h - 2
+		}
+		return uint32(px[y*w+x])
+	}
+	luts := f.tone.tables()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var r, g, b uint32
+			c := at(x, y)
+			switch (y&1)<<1 | x&1 {
+			case 0: // red site
+				r = c
+				g = (at(x-1, y) + at(x+1, y) + at(x, y-1) + at(x, y+1)) / 4
+				b = (at(x-1, y-1) + at(x+1, y-1) + at(x-1, y+1) + at(x+1, y+1)) / 4
+			case 1: // green on a red row
+				g = c
+				r = (at(x-1, y) + at(x+1, y)) / 2
+				b = (at(x, y-1) + at(x, y+1)) / 2
+			case 2: // green on a blue row
+				g = c
+				b = (at(x-1, y) + at(x+1, y)) / 2
+				r = (at(x, y-1) + at(x, y+1)) / 2
+			default: // blue site
+				b = c
+				g = (at(x-1, y) + at(x+1, y) + at(x, y-1) + at(x, y+1)) / 4
+				r = (at(x-1, y-1) + at(x+1, y-1) + at(x-1, y+1) + at(x+1, y+1)) / 4
+			}
+			// The tables run on the 11-bit scale of a summed green pair; single samples double up.
+			j := (y*w + x) * 4
+			img.Pix[j] = luts[0][r<<1]
+			img.Pix[j+1] = luts[1][g<<1]
+			img.Pix[j+2] = luts[2][b<<1]
+			img.Pix[j+3] = 255
+		}
 	}
 	return img
 }

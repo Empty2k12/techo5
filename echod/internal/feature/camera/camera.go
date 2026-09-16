@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"log/slog"
 	"net"
@@ -74,8 +75,17 @@ func (f *Feature) Run(ctx context.Context) error {
 }
 
 func encode(f *camera.Frame) ([]byte, error) {
+	return encodeImage(f.RGBA)
+}
+
+// encodeFull is a still at the sensor's own size.
+func encodeFull(f *camera.Frame) ([]byte, error) {
+	return encodeImage(f.Full())
+}
+
+func encodeImage(img image.Image) ([]byte, error) {
 	var b bytes.Buffer
-	if err := jpeg.Encode(&b, f.RGBA, &jpeg.Options{Quality: quality}); err != nil {
+	if err := jpeg.Encode(&b, img, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, err
 	}
 	return b.Bytes(), nil
@@ -91,7 +101,7 @@ func (f *Feature) snapshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	b, err := encode(fr)
+	b, err := encodeFull(fr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

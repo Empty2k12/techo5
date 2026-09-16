@@ -236,6 +236,8 @@ type imgoFormat int
 var (
 	formatEnable bool
 	nFrames      = 1
+	outFmt       int
+	inFmt        int
 )
 
 func (f imgoFormat) bytesPerLine() int {
@@ -255,9 +257,14 @@ func main() {
 	bits := flag.Int("bits", 8, "IMGO output: 8, 10 (packed) or 16 bits per pixel")
 	fmtEn := flag.Bool("fmten", false, "also set IMGO_STRIDE.FORMAT/FORMAT_EN for the chosen width")
 	frames := flag.Int("frames", 1, "how many frame starts to run through before stopping")
+	flag.IntVar(&outFmt, "outfmt", 0, "CAM_CTL_FMT_SEL.CAM_OUT_FMT (bits 15:12)")
+	flag.IntVar(&inFmt, "infmt", 0, "CAM_CTL_FMT_SEL.CAM_IN_FMT (bits 11:8)")
 	flag.Parse()
 	formatEnable = *fmtEn
 	nFrames = *frames
+	if *bits == 10 && outFmt == 0 {
+		outFmt = 1 // CAM_OUT_FMT 1: the packer writes 10-bit packed (found 2026-09-16)
+	}
 
 	var f imgoFormat
 	switch *bits {
@@ -358,8 +365,8 @@ func run(out string, timeout time.Duration, csi bool, format imgoFormat) error {
 	// over here is one byte per pixel, 1600 bytes a line.
 	cam.wr(regCtlEn1, 1<<0|1<<12)
 	cam.wr(regCtlEn2, 0)
-	cam.wr(regCtlDmaEn, 1<<0)   // IMGO_EN
-	cam.wr(regCtlFmtSel, 1<<16) // TG1_FMT = RAW10
+	cam.wr(regCtlDmaEn, 1<<0)                                       // IMGO_EN
+	cam.wr(regCtlFmtSel, 1<<16|uint32(outFmt)<<12|uint32(inFmt)<<8) // TG1_FMT = RAW10, plus the experiment's in/out formats
 	cam.wr(regCtlSel, 0)
 	cam.wr(regCtlPixID, 0)               // Bayer R first
 	cam.mask(regCtlMuxSel2, 1<<4, 1<<18) // IMGO_MUX = 0 (from PAK), IMGO_MUX_EN

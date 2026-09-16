@@ -44,3 +44,4 @@ var errNone = errors.New("no camera on this device")
 func (c *Camera) Acquire() (func(), error)                     { return nil, errNone }
 func (c *Camera) Snapshot(ctx context.Context) (*Frame, error) { return nil, errNone }
 func (c *Camera) Last() *Frame                                 { return nil }
+func (f *Frame) Full() *image.RGBA                             { return f.RGBA }

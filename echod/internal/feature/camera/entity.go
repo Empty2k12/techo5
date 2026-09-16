@@ -97,7 +97,7 @@ func (f *Feature) single(c *esphome.Conn) {
 		slog.Warn("camera entity: still", "err", err)
 		return
 	}
-	jpg, err := encode(fr)
+	jpg, err := encodeFull(fr)
 	if err != nil {
 		return
 	}
