@@ -53,8 +53,16 @@ type roundScene struct {
 	showVolume   bool
 	timers       []timer.Countdown
 	menuOpen     bool
+	menuMode     menuMode
 	menuSel      int     // the chosen item, at or turning to the top
 	menuRot      float64 // the dial's rotation, radians clockwise
+
+	timerRinging                       bool
+	brightness                         int // percent
+	autoOn                             bool
+	nightFrom, nightTo                 int // hours
+	restartArmed                       bool
+	infoName, infoAddress, infoVersion string
 }
 
 type roundRenderer struct {
@@ -101,7 +109,7 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.clockFace(s)
 	}
 	if s.menuOpen {
-		r.dial(s)
+		r.menu(s)
 	}
 }
 
@@ -285,6 +293,11 @@ func (r *roundRenderer) triangle(ax, ay, bx, by, cx, cy float64, c color.RGBA) {
 			r.blend(x, y, c, math.Min(d+0.5, 1))
 		}
 	}
+}
+
+// clear paints the canvas the icon ground.
+func (r *roundRenderer) clear() {
+	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colIconGround), image.Point{}, draw.Src)
 }
 
 // dim darkens the whole canvas by alpha.

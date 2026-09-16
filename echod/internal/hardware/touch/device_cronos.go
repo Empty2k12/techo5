@@ -18,6 +18,10 @@ const (
 
 	// tapMove is how far a finger may wander and still be a tap.
 	tapMove = 24
+
+	// notch is the vertical travel per volume step; verticalOnly would ignore a slanted drag.
+	notch        = 40
+	verticalOnly = false
 )
 
 func toFrame(rawW, rawH, rx, ry int) (x, y int) {

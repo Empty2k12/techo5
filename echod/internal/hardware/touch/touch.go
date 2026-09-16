@@ -38,15 +38,17 @@ const (
 	// tapHold is how long a tap may stay down; how far it may wander is the device's tapMove.
 	tapHold = 500 * time.Millisecond
 
-	// notch is how far a vertical swipe travels per step it reports, so a slow drag turns the volume
+	// notch (the device's) is how far a vertical swipe travels per step it reports, so a slow drag turns the volume
 	// a step at a time and a flick several.
-	notch = 40
 
 	// swipeMin is how far a horizontal movement has to go to be a swipe at release.
 	swipeMin = 120
 
 	// holdAfter is how long a finger stays put before it is a hold, where holds are reported.
 	holdAfter = 450 * time.Millisecond
+
+	// followMove is how far a finger moves before it is followed, in follow mode (SetFollow).
+	followMove = 12
 )
 
 // Kind is what the finger did.
@@ -84,8 +86,18 @@ type Screen struct {
 	rawW int // panel x range, exclusive
 	rawH int // panel y range, exclusive
 
-	mu   sync.Mutex
-	down bool // a finger is on the panel
+	mu     sync.Mutex
+	down   bool // a finger is on the panel
+	follow bool // every moving finger is followed (Hold, Drag, Release) rather than swiped
+}
+
+// SetFollow turns follow mode on or off: while on, a finger that moves is reported as Hold where it
+// started, Drag as it goes and Release where it lifts, at once and without waiting to be held. A dial
+// on the screen wants that; a finger that does not move is still a tap.
+func (s *Screen) SetFollow(on bool) {
+	s.mu.Lock()
+	s.follow = on
+	s.mu.Unlock()
 }
 
 var (
@@ -300,16 +312,26 @@ func (s *Screen) moved(f *finger) {
 		s.Gestures.Emit(Gesture{Kind: Drag, X: x, Y: y})
 		return
 	}
-	if f.holdTimer != nil {
-		x0, y0 := s.landscape(f.sx, f.sy)
-		x1, y1 := s.landscape(f.x, f.y)
-		if abs(x1-x0) > tapMove || abs(y1-y0) > tapMove {
+	x0, y0 := s.landscape(f.sx, f.sy)
+	x1, y1 := s.landscape(f.x, f.y)
+	if s.follow && !f.swiped && (abs(x1-x0) > followMove || abs(y1-y0) > followMove) {
+		f.held = true
+		if f.holdTimer != nil {
 			f.holdTimer.Stop()
 		}
+		s.mu.Unlock()
+		s.Gestures.Emit(Gesture{Kind: Hold, X: x0, Y: y0})
+		s.Gestures.Emit(Gesture{Kind: Drag, X: x1, Y: y1})
+		return
+	}
+	if f.holdTimer != nil && (abs(x1-x0) > tapMove || abs(y1-y0) > tapMove) {
+		f.holdTimer.Stop()
 	}
 	s.mu.Unlock()
-	_, y0 := s.landscape(f.sx, f.sy)
-	_, y1 := s.landscape(f.x, f.y)
+	if verticalOnly && abs(x1-x0) > abs(y1-y0) {
+		// Sideways as much as up or down: not a volume swipe, and it may yet be a sideways one.
+		return
+	}
 	steps := (y0 - y1) / notch // positive: finger moved up
 	for f.notched < steps {
 		f.notched++

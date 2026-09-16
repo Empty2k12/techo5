@@ -7,10 +7,10 @@
 // the Show; the layouts are the Spot's own (render_spot.go), because nothing of a 960×480 page fits a
 // circle.
 //
-// Touch: a tap starts or ends a turn (on a dark screen it only lights it); a held finger opens the
-// ring menu (menu_spot.go), a dial: keep holding and slide round to spin it, let go and it snaps to the
-// nearest item, tap the middle to do the item at the top. The volume is in the dial and on the buttons;
-// a swipe for it was too easy to set off on this panel.
+// Touch: a tap starts or ends a turn (on a dark screen it only lights it); a swipe up or down is the
+// volume, a step per 60 pixels; a held finger opens the ring menu (menu_spot.go). While the menu is open
+// the touch screen follows every moving finger, so dragging round the ring turns the dial (or, for a
+// value, is a jog wheel), and a tap in the middle does the item at the top.
 //
 // The backlight: the panel shows almost nothing below about 120 of 255 and glares at 255, so a
 // brightness in percent spans backlightMin to the top. From 22:00 to 07:00 (config Screen.Night) it is
@@ -26,7 +26,11 @@ import (
 	"image"
 	"log/slog"
 	"math"
+	"net"
+	"os"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -41,6 +45,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
 
@@ -56,8 +61,11 @@ const (
 	// volumeShow is how long the level stays up after it last moved.
 	volumeShow = 2 * time.Second
 
-	// menuIdle closes a ring menu nobody is touching.
-	menuIdle = 6 * time.Second
+	// menuIdle closes a ring menu nobody is touching; jogIdle ends a jog wheel's value the same way;
+	// restartWindow is how long the first tap on Restart waits for the second.
+	menuIdle      = 6 * time.Second
+	jogIdle       = 3 * time.Second
+	restartWindow = 4 * time.Second
 
 	// dialFrame is the redraw while the dial turns; dialEase how much of the way to its rest it moves
 	// each frame.
@@ -97,16 +105,23 @@ type Display struct {
 	volume  int
 	volAt   time.Time
 
-	// menuOpen is the ring menu on the screen; menuSel the item at (or turning to) the top; menuRot
-	// the dial's rotation now and menuRest where it is heading; menuAt the last touch; spinning a held
-	// finger turning it, last its direction from the centre.
-	menuOpen  bool
-	menuSel   int
-	menuRot   float64
-	menuRest  float64
-	menuAt    time.Time
-	spinning  bool
-	spinAngle float64
+	// menuOpen is the ring menu on the screen, menuMode what it shows; menuSel the item at (or turning
+	// to) the top; menuRot the dial's rotation now and menuRest where it is heading; menuAt the last
+	// touch; spinning a finger turning it, spinAngle its last direction from the centre; jogTurn how
+	// far a jog wheel has turned towards its next step; nightFrom and nightTo the hours being set;
+	// restartArm the first tap on Restart.
+	menuOpen   bool
+	menuMode   menuMode
+	menuSel    int
+	menuRot    float64
+	menuRest   float64
+	menuAt     time.Time
+	spinning   bool
+	spinAngle  float64
+	jogTurn    float64
+	nightFrom  int
+	nightTo    int
+	restartArm time.Time
 
 	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
 	wasNight bool
@@ -313,86 +328,280 @@ func (d *Display) gesture(g touch.Gesture) {
 	switch g.Kind {
 	case touch.Tap:
 		voice.Get().Action()
+	case touch.SwipeUp:
+		media.Get().Adjust(+1)
+	case touch.SwipeDown:
+		media.Get().Adjust(-1)
 	case touch.Hold:
 		d.mu.Lock()
-		d.menuOpen, d.menuAt = true, time.Now()
-		d.menuRot = restFor(d.menuSel)
-		d.menuRest = d.menuRot
+		d.openMenu(modeMain, itemTalk)
 		d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
 		d.mu.Unlock()
 		d.wake()
 	}
 }
 
+// openMenu shows a dial with item id at the top, or a value's jog wheel. Called with d.mu held.
+func (d *Display) openMenu(mode menuMode, id itemID) {
+	d.menuOpen, d.menuMode, d.menuAt, d.jogTurn = true, mode, time.Now(), 0
+	if items := itemsFor(mode); items != nil {
+		d.menuSel = indexOf(items, id)
+		d.menuRot = restFor(d.menuSel, len(items))
+		d.menuRest = d.menuRot
+	}
+	touch.Get().SetFollow(true)
+}
+
+// closeMenu takes the menu off the screen. Called with d.mu held.
+func (d *Display) closeMenu() {
+	d.menuOpen, d.spinning = false, false
+	touch.Get().SetFollow(false)
+}
+
 func (d *Display) menuGesture(g touch.Gesture) {
 	d.mu.Lock()
 	d.menuAt = time.Now()
-	n := len(menuItems)
-	switch g.Kind {
-	case touch.Hold:
-		// Another held finger: it spins the dial from where it is.
-		d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
-	case touch.Drag:
-		if d.spinning {
+	mode := d.menuMode
+
+	switch {
+	case mode.jogging():
+		switch g.Kind {
+		case touch.Hold:
+			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
+		case touch.Drag:
+			if !d.spinning {
+				break
+			}
 			a := fingerAngle(g.X, g.Y)
-			d.menuRot += wrapAngle(a - d.spinAngle)
+			d.jogTurn += wrapAngle(a - d.spinAngle)
 			d.spinAngle = a
-			d.menuRest = d.menuRot
-			d.menuSel = topItem(d.menuRot)
+			steps := 0
+			for d.jogTurn >= jogStep {
+				d.jogTurn -= jogStep
+				steps++
+			}
+			for d.jogTurn <= -jogStep {
+				d.jogTurn += jogStep
+				steps--
+			}
+			if steps != 0 {
+				d.mu.Unlock()
+				d.jogBy(mode, steps)
+				d.wake()
+				return
+			}
+		case touch.Release:
+			d.spinning, d.jogTurn = false, 0
+		case touch.Tap:
+			d.finishJog(mode)
 		}
-	case touch.Release:
-		d.spinning = false
-		d.menuRest = nearestRest(d.menuRot, d.menuSel)
-	case touch.Tap:
-		item, middle := dialHitAt(g.X, g.Y, d.menuRot)
-		switch {
-		case middle || item == d.menuSel:
-			chosen := d.menuSel
-			d.menuOpen = false
-			d.mu.Unlock()
-			d.act(chosen)
-			d.wake()
-			return
-		case item >= 0:
-			d.menuSel = item
-			d.menuRest = nearestRest(d.menuRot, item)
+
+	case mode == modeInfo:
+		if g.Kind == touch.Tap || g.Kind == touch.Release {
+			d.openMenu(modeSettings, itemInfo)
 		}
-	case touch.SwipeLeft:
-		d.menuSel = (d.menuSel + 1) % n
-		d.menuRest = nearestRest(d.menuRot, d.menuSel)
-	case touch.SwipeRight:
-		d.menuSel = (d.menuSel + n - 1) % n
-		d.menuRest = nearestRest(d.menuRot, d.menuSel)
+
+	default:
+		items := itemsFor(mode)
+		n := len(items)
+		switch g.Kind {
+		case touch.Hold:
+			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
+		case touch.Drag:
+			if d.spinning {
+				a := fingerAngle(g.X, g.Y)
+				d.menuRot += wrapAngle(a - d.spinAngle)
+				d.spinAngle = a
+				d.menuRest = d.menuRot
+				d.menuSel = topItem(d.menuRot, n)
+			}
+		case touch.Release:
+			d.spinning = false
+			d.menuRest = nearestRest(d.menuRot, d.menuSel, n)
+		case touch.Tap:
+			item, middle := dialHitAt(g.X, g.Y, d.menuRot, n)
+			switch {
+			case middle || item == d.menuSel:
+				id := items[d.menuSel].id
+				d.mu.Unlock()
+				d.act(id)
+				d.wake()
+				return
+			case item >= 0:
+				d.menuSel = item
+				d.menuRest = nearestRest(d.menuRot, item, n)
+			}
+		case touch.SwipeLeft:
+			d.menuSel = (d.menuSel + 1) % n
+			d.menuRest = nearestRest(d.menuRot, d.menuSel, n)
+		case touch.SwipeRight:
+			d.menuSel = (d.menuSel + n - 1) % n
+			d.menuRest = nearestRest(d.menuRot, d.menuSel, n)
+		}
 	}
 	d.mu.Unlock()
 	d.wake()
 }
 
-// act does what a ring menu item says.
-func (d *Display) act(item int) {
-	switch menuItems[item].id {
+// jogBy turns a value by steps (clockwise positive).
+func (d *Display) jogBy(mode menuMode, steps int) {
+	switch mode {
+	case modeVolume:
+		media.Get().Adjust(steps)
+	case modeBrightness:
+		pct := min(max(d.ceilingOrDefault()+5*steps, 0), 100)
+		d.apply(true, pct, true)
+	case modeNightFrom:
+		d.mu.Lock()
+		d.nightFrom = ((d.nightFrom+steps)%24 + 24) % 24
+		d.mu.Unlock()
+	case modeNightTo:
+		d.mu.Lock()
+		d.nightTo = ((d.nightTo+steps)%24 + 24) % 24
+		d.mu.Unlock()
+	}
+}
+
+// finishJog is a tap on a jog wheel: back to the dial it came from, or on to the night's end, or saved.
+// Called with d.mu held.
+func (d *Display) finishJog(mode menuMode) {
+	d.spinning, d.jogTurn = false, 0
+	switch mode {
+	case modeVolume:
+		d.openMenu(modeMain, itemVolume)
+	case modeBrightness:
+		d.openMenu(modeSettings, itemBrightness)
+	case modeNightFrom:
+		d.menuMode, d.menuAt = modeNightTo, time.Now()
+	case modeNightTo:
+		v := fmt.Sprintf("%d-%d", d.nightFrom, d.nightTo)
+		d.openMenu(modeSettings, itemNight)
+		go func() {
+			if err := config.Set().Screen().Night(v); err != nil {
+				slog.Error("saving the night hours failed", "err", err)
+				return
+			}
+			slog.Info("night hours", "set", v)
+			d.relight(true)
+		}()
+	}
+}
+
+// act does what a dial item says.
+func (d *Display) act(id itemID) {
+	slog.Info("ring menu", "item", id)
+	switch id {
 	case itemTalk:
+		d.locked(d.closeMenu)
 		voice.Get().Action()
-	case itemVolumeUp:
-		media.Get().Adjust(+1)
-	case itemVolumeDown:
-		media.Get().Adjust(-1)
 	case itemMute:
 		mute.Get().Toggle()
-	case itemPlayPause:
+	case itemMedia:
 		switch playing, paused := media.Get().Playing(); {
 		case playing:
 			media.Get().Pause()
 		case paused:
 			media.Get().Resume()
 		}
-	case itemScreenOff:
+	case itemVolume:
+		d.locked(func() { d.openMenu(modeVolume, "") })
+	case itemTimers:
+		if timer.Get().Ringing() {
+			timer.Get().Stop()
+			d.locked(d.closeMenu)
+		}
+	case itemSettings:
+		d.locked(func() { d.openMenu(modeSettings, itemBrightness) })
+	case itemSleep:
+		d.locked(d.closeMenu)
 		d.mu.Lock()
 		ceiling := d.ceiling
 		d.mu.Unlock()
 		d.apply(false, ceiling, true)
+	case itemBrightness:
+		d.locked(func() { d.openMenu(modeBrightness, "") })
+	case itemNight:
+		from, to := nightHours()
+		d.locked(func() {
+			d.nightFrom, d.nightTo = from, to
+			d.openMenu(modeNightFrom, "")
+		})
+	case itemAuto:
+		d.mu.Lock()
+		on := d.autoOn
+		d.mu.Unlock()
+		d.setAuto(!on, true)
+	case itemInfo:
+		d.locked(func() { d.openMenu(modeInfo, "") })
+	case itemRestart:
+		d.mu.Lock()
+		armed := !d.restartArm.IsZero() && time.Since(d.restartArm) < restartWindow
+		if !armed {
+			d.restartArm = time.Now()
+		}
+		d.mu.Unlock()
+		if armed {
+			slog.Warn("restart asked for from the screen")
+			restartDevice()
+		}
+	case itemBack:
+		d.locked(func() { d.openMenu(modeMain, itemSettings) })
 	}
-	slog.Info("ring menu", "item", menuItems[item].id)
+}
+
+func (d *Display) locked(f func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	f()
+}
+
+// nightHours is the night as configured, or the default.
+func nightHours() (from, to int) {
+	v := config.Get().Screen.Night
+	if v == "" {
+		v = defaultNight
+	}
+	if _, err := fmt.Sscanf(v, "%d-%d", &from, &to); err != nil {
+		fmt.Sscanf(defaultNight, "%d-%d", &from, &to)
+	}
+	return from, to
+}
+
+// restartDevice reboots; the slot store and the daemon's state are on disk already.
+func restartDevice() {
+	syscall.Sync()
+	if err := syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART); err != nil {
+		slog.Error("restart failed", "err", err)
+	}
+}
+
+// deviceAddress is the first IPv4 address that is up and not the loopback.
+func deviceAddress() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "no address"
+	}
+	for _, i := range ifaces {
+		if i.Flags&net.FlagLoopback != 0 || i.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := i.Addrs()
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil {
+				return ipn.IP.String()
+			}
+		}
+	}
+	return "no address"
+}
+
+// bootedSlot is the rootfs slot the initramfs booted, if any.
+func bootedSlot() string {
+	b, err := os.ReadFile("/run/techo5/slot")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func (d *Display) isSpinning() bool {
@@ -460,8 +669,13 @@ func (d *Display) frame() time.Duration {
 		d.relight(true)
 	}
 	d.mu.Lock()
-	if d.menuOpen && !d.spinning && now.Sub(d.menuAt) > menuIdle {
-		d.menuOpen = false
+	if d.menuOpen && !d.spinning {
+		switch {
+		case d.menuMode.jogging() && now.Sub(d.menuAt) > jogIdle:
+			d.finishJog(d.menuMode)
+		case !d.menuMode.jogging() && now.Sub(d.menuAt) > menuIdle:
+			d.closeMenu()
+		}
 	}
 	turning := false
 	if d.menuOpen && !d.spinning {
@@ -474,13 +688,19 @@ func (d *Display) frame() time.Duration {
 	}
 	on, view, at := d.on, d.view, d.viewAt
 	s := roundScene{
-		now:      now,
-		phase:    view.Phase,
-		heard:    view.Heard,
-		reply:    view.Reply,
-		menuOpen: d.menuOpen,
-		menuSel:  d.menuSel,
-		menuRot:  d.menuRot,
+		now:          now,
+		phase:        view.Phase,
+		heard:        view.Heard,
+		reply:        view.Reply,
+		menuOpen:     d.menuOpen,
+		menuMode:     d.menuMode,
+		menuSel:      d.menuSel,
+		menuRot:      d.menuRot,
+		brightness:   d.ceiling,
+		autoOn:       d.autoOn,
+		nightFrom:    d.nightFrom,
+		nightTo:      d.nightTo,
+		restartArmed: !d.restartArm.IsZero() && now.Sub(d.restartArm) < restartWindow,
 	}
 	if !d.volAt.IsZero() && now.Sub(d.volAt) < volumeShow {
 		s.volume, s.showVolume = d.volume, true
@@ -502,6 +722,23 @@ func (d *Display) frame() time.Duration {
 	for _, t := range timer.Get().List(now) {
 		if t.Active {
 			s.timers = append(s.timers, t)
+		}
+	}
+	s.timerRinging = timer.Get().Ringing()
+	if s.menuOpen {
+		if s.menuMode != modeNightFrom && s.menuMode != modeNightTo {
+			s.nightFrom, s.nightTo = nightHours()
+		}
+		if s.menuMode == modeInfo {
+			s.infoName = config.Get().Device.Name
+			if s.infoName == "" {
+				s.infoName = layout.DefaultName
+			}
+			s.infoAddress = deviceAddress()
+			s.infoVersion = layout.Version
+			if slot := bootedSlot(); slot != "" {
+				s.infoVersion += " · slot " + slot
+			}
 		}
 	}
 
