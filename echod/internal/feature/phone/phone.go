@@ -265,9 +265,21 @@ func (p *Phone) Run(ctx context.Context) error {
 			<-errc
 		case err := <-errc:
 			cancel()
+			if refused(err) {
+				// A login the provider refuses is not tried again until it changes: a wrong password
+				// tried over and over gets the whole home's address blocked.
+				slog.Error("phone: the provider refused the login; waiting for a new one", "err", err)
+				p.set(func(s *State) { s.Registered, s.Problem = false, "Login refused" })
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-p.reload:
+					continue
+				}
+			}
 			p.set(func(s *State) { s.Registered, s.Problem = false, "Cannot sign in" })
-			// Returned to the supervisor, which waits longer each time: a wrong password tried over
-			// and over gets the whole home's address blocked by the provider.
+			// Anything else (the network, the provider down) goes back to the supervisor, which waits
+			// longer each time.
 			return fmt.Errorf("phone: %w", err)
 		}
 	}
@@ -303,6 +315,12 @@ func (p *Phone) serve(ctx context.Context, acct Account) error {
 		return nil
 	}
 	return err
+}
+
+// refused reports whether the provider turned the login down, as opposed to not being reached.
+func refused(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, " 401 ") || strings.Contains(msg, " 403 ") || strings.Contains(msg, " 407 ")
 }
 
 // Call places a call to a number or an extension. It returns once the call is under way; what happens

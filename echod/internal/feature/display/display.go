@@ -34,6 +34,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
@@ -212,6 +213,7 @@ func build() *Display {
 		d.wake()
 	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	phone.Get().Changed.Listen(func(phone.State) { d.wake() })
 	security.Get().Changed.Listen(func(struct{}) { d.wake() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -402,6 +404,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		return
 	}
+	// A call: its page takes every tap.
+	if st := phone.Get().State(); st.Phase != phone.Idle {
+		if g.Kind == touch.Tap {
+			d.callTap(g.X, g.Y, st)
+		}
+		d.wake()
+		return
+	}
+
 	// A timer or an alarm ringing: its page takes every tap.
 	if st := d.ringing(time.Now()); st.any() {
 		if g.Kind == touch.Tap {
@@ -824,7 +835,7 @@ func (d *Display) night(now time.Time, on bool, view voice.State) bool {
 	d.mu.Unlock()
 	switch {
 	case in && on:
-		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle || d.ringing(now).any()
+		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle || d.ringing(now).any() || phone.Get().Busy()
 		if playing, _ := media.Get().Playing(); playing || busy {
 			return false
 		}
@@ -1181,8 +1192,9 @@ func (d *Display) frame() time.Duration {
 
 	now := time.Now()
 	ring := d.ringing(now)
-	if ring.any() && !on {
-		// A ring lights a dark panel, night or not: its page is how it is stopped.
+	call := phone.Get().State()
+	if (ring.any() || call.Phase != phone.Idle) && !on {
+		// A ring or a call lights a dark panel, night or not: its page is how it is answered or stopped.
 		d.apply(true, d.ceilingOrDefault(), false)
 		on = true
 	}
@@ -1222,7 +1234,7 @@ func (d *Display) frame() time.Duration {
 		return 80 * time.Millisecond
 	}
 
-	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at, ring: ring}
+	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at, ring: ring, call: call}
 	s.snooze = config.Get().Alarms.Snooze()
 	s.alarms = alarm.Get().View(now)
 	s.timers = timer.Get().List(now)
@@ -1304,7 +1316,7 @@ func (d *Display) frame() time.Duration {
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
 	}
-	if ring.any() {
+	if ring.any() || call.Phase != phone.Idle {
 		return 500 * time.Millisecond
 	}
 	if s.bt.Pairing || s.showSheet || s.showWifi {
