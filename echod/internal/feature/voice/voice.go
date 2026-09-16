@@ -92,6 +92,12 @@ func build() *Voice {
 			v.Action()
 		case buttons.Hold:
 			v.ActionHold()
+		case buttons.LongHold:
+			// Held on past the second assistant, to something else (Bluetooth pairing on the Dot): the
+			// turn the hold started on the way is not what was wanted.
+			if v.turn.Busy() {
+				v.turn.Cancel()
+			}
 		}
 	})
 	return v
@@ -190,7 +196,17 @@ func (v *Voice) Stop() bool {
 // ActionHold is holding the action button, which reaches the second assistant. Holding does not
 // cancel: a press is the way out of a turn, so holding while one is running interrupts it with the
 // other assistant instead, which is the same thing saying the other wake word would do.
-func (v *Voice) ActionHold() { v.turn.Start(1) }
+func (v *Voice) ActionHold() {
+	// Where holding on reaches something else (buttons.LongHold), a hold with no second assistant set
+	// up is on its way there, not a request to report as failed.
+	if buttons.LongHolds() {
+		if _, ok := v.turn.phraseFor(1); !ok {
+			slog.Debug("action held, no second assistant set up")
+			return
+		}
+	}
+	v.turn.Start(1)
+}
 
 // OnWakeWord is called when Home Assistant changes the selection, so the engine can follow. It is
 // given every slot: load reports which of them it accepted, and only those are echoed back as

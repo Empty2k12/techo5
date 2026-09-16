@@ -474,8 +474,10 @@ func (a *Adapter) Remove(address string) error {
 // the passkey a phone shows is accepted as shown. At any other time pairing is refused, so nothing
 // nearby can bond with the device unasked. A connection bluetoothd asks about is allowed only for the
 // audio profiles, whatever the device.
-func (a *Adapter) RegisterAgent(pairing func() bool) error {
-	ag := &agent{pairing: pairing}
+//
+// paired, when set, hears the device path of each pairing the agent said yes to.
+func (a *Adapter) RegisterAgent(pairing func() bool, paired func(path string)) error {
+	ag := &agent{pairing: pairing, paired: paired}
 	if err := a.conn.Export(ag, agentPath, agentIfc); err != nil {
 		return fmt.Errorf("bluez: export agent: %w", err)
 	}
@@ -495,6 +497,7 @@ func (a *Adapter) RegisterAgent(pairing func() bool) error {
 // agent is org.bluez.Agent1. Methods return *dbus.Error; nil is yes.
 type agent struct {
 	pairing func() bool
+	paired  func(path string)
 }
 
 // audioProfiles are the service classes a connection may be authorized for: A2DP source and sink,
@@ -517,6 +520,9 @@ func rejected(what string) *dbus.Error {
 // open is whether a pairing may go ahead now.
 func (g agent) open(path dbus.ObjectPath, what string) *dbus.Error {
 	if g.pairing != nil && g.pairing() {
+		if g.paired != nil {
+			g.paired(string(path))
+		}
 		return nil
 	}
 	slog.Warn("bluetooth: refused a pairing outside pairing mode", "device", string(path), "request", what)

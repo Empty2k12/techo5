@@ -25,6 +25,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/bluealsa"
@@ -52,6 +53,10 @@ const (
 	notConnected = "Not connected"
 )
 
+// onPaired is told when pairing mode has done its job: a phone paired with the device and connected,
+// or a device it paired out to connected. A screen shows that; the Echo Dot sounds it (button_dot.go).
+var onPaired = func() {}
+
 // Device is one entry on the screen's list.
 type Device struct {
 	Address   string
@@ -64,12 +69,12 @@ type Device struct {
 
 // State is what the screen shows.
 type State struct {
-	Available bool // bluetoothd is there
-	Pairing   bool
-	Devices   []Device // while pairing: what the scan found that could play audio
-	Connected string   // the connected audio device's name, empty for none
-	Remembered string  // the last device's name, for "waiting for …"
-	Status    string   // one line: what just happened
+	Available  bool // bluetoothd is there
+	Pairing    bool
+	Devices    []Device // while pairing: what the scan found that could play audio
+	Connected  string   // the connected audio device's name, empty for none
+	Remembered string   // the last device's name, for "waiting for …"
+	Status     string   // one line: what just happened
 }
 
 type Feature struct {
@@ -93,7 +98,14 @@ type Feature struct {
 	pairingSince time.Time
 	tried        map[string]bool
 	picking      bool
-	poke    chan struct{}
+	// incoming is a remote (a phone) that paired with the device during this pairing mode, by D-Bus
+	// path. It answers the guess pairing mode makes: something wants to play here, so no speaker is
+	// picked, and pairing mode ends once it has connected.
+	incoming string
+	// received is whether each receivable stream was running at the last look, so a remote that starts
+	// playing takes the speaker once, and whatever is started after it is not taken back.
+	received map[string]bool
+	poke     chan struct{}
 
 	// refusals counts stream opens bluetoothd refused for the current connection; see attach.
 	refusals int
@@ -126,9 +138,10 @@ func build() *Feature {
 			ObjectID: "bluetooth_disconnect", Name: "Bluetooth disconnect", Icon: "mdi:bluetooth-off",
 			Category: esphome.CategoryConfig,
 		}},
-		busy:  map[string]bool{},
-		poke:  make(chan struct{}, 1),
-		state: State{Status: notConnected},
+		busy:     map[string]bool{},
+		received: map[string]bool{},
+		poke:     make(chan struct{}, 1),
+		state:    State{Status: notConnected},
 	}
 	f.pairing.OnCommand = func(on bool) { f.SetPairing(on) }
 	f.reconnect.OnPress = func() { safe.Go("bluetooth reconnect", f.Reconnect) }
@@ -176,7 +189,7 @@ func (f *Feature) open(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := a.RegisterAgent(f.Pairing); err != nil {
+	if err := a.RegisterAgent(f.Pairing, f.pairedIncoming); err != nil {
 		a.Close()
 		return err
 	}
@@ -353,6 +366,28 @@ func (f *Feature) refresh() {
 		f.attach(al, *want, wantDev)
 	}
 
+	// A remote playing to the device (a phone using it as a speaker): the moment its stream starts, it
+	// takes the speaker. Only on that edge, so Home Assistant media started afterwards is not taken
+	// back while the phone keeps its transport open.
+	for _, p := range al.PCMs() {
+		if !p.Receivable() {
+			continue
+		}
+		d, ok := byPath[string(p.Device)]
+		running := p.Running && ok && d.Connected
+		f.mu.Lock()
+		was := f.received[string(p.Path)]
+		f.received[string(p.Path)] = running
+		f.mu.Unlock()
+		if running && !was && !f.receive(al, p, d) {
+			// Tried again at the next look rather than never: the stream a remote paused and resumed
+			// quickly can still be held by the track that was playing it until that track lets go.
+			f.mu.Lock()
+			f.received[string(p.Path)] = false
+			f.mu.Unlock()
+		}
+	}
+
 	// The screen and Home Assistant.
 	f.mu.Lock()
 	st := &f.state
@@ -378,8 +413,17 @@ func (f *Feature) refresh() {
 		}
 		sort.SliceStable(st.Devices, func(i, j int) bool { return st.Devices[i].RSSI > st.Devices[j].RSSI })
 	}
+	// The guess answered: a remote paired with the device and has connected, so pairing mode has done
+	// its job. It is trusted so it can come back on its own.
+	joined := ""
+	if st.Pairing && f.incoming != "" {
+		if d, ok := byPath[f.incoming]; ok && d.Paired && d.Connected {
+			joined = d.Address
+			f.incoming = ""
+		}
+	}
 	pick := ""
-	if autoPick && st.Pairing && st.Connected == "" && !f.picking && time.Since(f.pairingSince) >= pickAfter {
+	if autoPick && st.Pairing && f.incoming == "" && joined == "" && st.Connected == "" && !f.picking && time.Since(f.pairingSince) >= pickAfter {
 		for _, d := range st.Devices {
 			if !f.tried[strings.ToLower(d.Address)] && !d.Busy {
 				pick = d.Address
@@ -402,6 +446,16 @@ func (f *Feature) refresh() {
 	}
 	f.Changed.Emit(snapshot)
 
+	if joined != "" {
+		slog.Info("bluetooth pairing: a device paired with this one and connected; pairing mode ends", "address", joined)
+		if err := a.Trust(joined, true); err != nil {
+			slog.Warn("bluetooth trust", "address", joined, "err", err)
+		}
+		safe.Go("bluetooth pairing done", func() {
+			f.SetPairing(false)
+			onPaired()
+		})
+	}
 	if pick != "" {
 		slog.Info("bluetooth pairing: connecting the strongest audio device heard", "address", pick)
 		safe.Go("bluetooth auto pick", func() {
@@ -414,6 +468,36 @@ func (f *Feature) refresh() {
 			f.wake()
 		})
 	}
+}
+
+// receive plays what a remote is sending through the speaker, as a media track, and reports whether it
+// is: a remote that paused and resumed before its track went quiet is still playing on that track.
+func (f *Feature) receive(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) bool {
+	item := "Bluetooth: " + displayName(d)
+	if media.Get().Receiving() == item {
+		return true
+	}
+	s, err := al.OpenRead(p)
+	if err != nil {
+		slog.Warn("bluetooth: opening a received stream", "device", displayName(d), "err", err)
+		return false
+	}
+	slog.Info("bluetooth: playing what a device sends", "device", displayName(d), "codec", p.Codec, "rate", p.Rate, "channels", p.Channels)
+	media.Get().PlayReceived(item, s, p.Rate, p.Channels)
+	return true
+}
+
+// pairedIncoming is the agent telling us a remote paired with the device (rather than the device
+// pairing out to a speaker it picked).
+func (f *Feature) pairedIncoming(path string) {
+	f.mu.Lock()
+	// The agent is asked the same questions when this device pairs out to a speaker it picked or was
+	// told to; only a pairing nobody here started is a remote joining.
+	if f.state.Pairing && !f.picking && len(f.busy) == 0 {
+		f.incoming = path
+	}
+	f.mu.Unlock()
+	f.wake()
 }
 
 func displayName(d bluez.Device) string {
@@ -503,7 +587,7 @@ func (f *Feature) SetPairing(on bool) {
 		f.pairOff = nil
 	}
 	f.state.Pairing = on && a != nil
-	f.pairingSince, f.tried = time.Now(), map[string]bool{}
+	f.pairingSince, f.tried, f.incoming = time.Now(), map[string]bool{}, ""
 	if on && a != nil {
 		f.pairOff = time.AfterFunc(pairingFor, func() { f.SetPairing(false) })
 		f.state.Status = "Put your earbuds in pairing mode"
@@ -601,6 +685,7 @@ func (f *Feature) connect(ctx context.Context, address string, pair bool) {
 	slog.Info("bluetooth connected", "device", name)
 	if pair {
 		f.SetPairing(false)
+		onPaired()
 	}
 	f.wake()
 }

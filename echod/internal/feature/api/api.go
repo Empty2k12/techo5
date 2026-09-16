@@ -104,12 +104,15 @@ func (a *API) Start(context.Context) error {
 		Addr:         device.Addr,
 		WriteTimeout: writeTimeout,
 		Info: esphome.Info{
-			Name:              a.name,
-			FriendlyName:      device.Name,
-			MACAddress:        mac,
-			Manufacturer:      layout.Manufacturer,
-			Model:             layout.Model,
-			Version:           layout.Version,
+			Name:         a.name,
+			FriendlyName: device.Name,
+			MACAddress:   mac,
+			Manufacturer: layout.Manufacturer,
+			// The model carries the daemon's own release, since the version field is Home Assistant's
+			// ESPHome version: given this daemon's release number there, it reads an ancient ESPHome and
+			// raises a repair to update firmware the device does not run (compat.go).
+			Model:             layout.Model + " · TECHO5 " + layout.Version,
+			Version:           ESPHomeCompat,
 			VoiceFeatures:     voice.Features,
 			BluetoothFeatures: bluetooth.Get().Features(),
 

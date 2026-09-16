@@ -28,6 +28,14 @@ var (
 	// an answer.
 	ToneCancel = []Note{{Freq: 698, Ms: 60}, {Freq: 466, Ms: 90}}
 
+	// TonePairing and TonePairingOff are Bluetooth pairing mode asked for from a button: three notes,
+	// so they are not mistaken for mute's two, rising for on and falling for off.
+	TonePairing    = []Note{{Freq: 523, Ms: 70}, {Freq: 659, Ms: 70}, {Freq: 988, Ms: 140}}
+	TonePairingOff = []Note{{Freq: 988, Ms: 70}, {Freq: 659, Ms: 70}, {Freq: 523, Ms: 140}}
+
+	// TonePaired is pairing mode having worked: the pairing chime's top note twice, ending higher.
+	TonePaired = []Note{{Freq: 988, Ms: 90}, {Ms: 60}, {Freq: 1319, Ms: 200}}
+
 	// ToneTimer is a timer that has finished. Three of the same note, because it repeats until
 	// somebody stops it and a melody wears out faster than a beep does.
 	ToneTimer = []Note{

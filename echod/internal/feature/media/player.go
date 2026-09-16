@@ -18,10 +18,10 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
-	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/noise"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
@@ -410,6 +410,15 @@ func (p *Player) Pause() { p.stream.Pause() }
 
 // Resume picks a paused track up again.
 func (p *Player) Resume() { p.stream.Resume() }
+
+// PlayReceived plays audio a remote is sending (a phone using the device as a Bluetooth speaker) as a
+// track: it replaces what was playing, and a turn ducks or pauses it like anything else.
+func (p *Player) PlayReceived(name string, src PCMSource, rate, channels int) {
+	p.stream.PlayPCM(name, src, rate, channels)
+}
+
+// Receiving names what is being played from a remote, empty when nothing is.
+func (p *Player) Receiving() string { return p.stream.Receiving() }
 
 // refresh tells Home Assistant what the player is doing. Anything that displaces the noise — a track,
 // a stop, the action button — clears both entities, rather than leaving them naming a sound nobody can
