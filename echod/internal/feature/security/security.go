@@ -71,10 +71,14 @@ func build() *Feature {
 func (f *Feature) Name() string { return "security" }
 
 func (f *Feature) Entities() []esphome.Entity {
-	if !sshAvailable() {
-		return []esphome.Entity{f.camera, f.screen}
+	var out []esphome.Entity
+	if sshAvailable() {
+		out = append(out, f.ssh)
 	}
-	return []esphome.Entity{f.ssh, f.camera, f.screen}
+	if webPages {
+		out = append(out, f.camera, f.screen)
+	}
+	return out
 }
 
 func (f *Feature) Restore(c config.Config) {
@@ -109,6 +113,10 @@ func (f *Feature) settleSSH() {
 		if len(readKeys()) == 0 {
 			return // nobody could log in; opening the port would only be a port
 		}
+		if !encrypted() {
+			slog.Warn("ssh: not starting while Home Assistant's link has no device key")
+			return
+		}
 		if err := startSSH(); err != nil {
 			slog.Error("ssh: start failed", "err", err)
 			return
@@ -127,6 +135,14 @@ func (f *Feature) settleSSH() {
 
 // SetSSH, SetCamera and SetScreen are the switches, from Home Assistant or the screen.
 func (f *Feature) SetSSH(on bool) {
+	// Without a device key the link is plain text, and anyone on the network who connected first
+	// could turn root's SSH on (and send the key, below). Off is always allowed.
+	if on && !encrypted() {
+		slog.Warn("ssh: refused to switch on while Home Assistant's link has no device key")
+		f.ssh.Set(false)
+		f.Changed.Emit(struct{}{})
+		return
+	}
 	f.set(f.ssh, on, config.Set().Security().SSH)
 	select {
 	case f.wake <- struct{}{}:
@@ -168,6 +184,10 @@ func (f *Feature) Actions() []*esphome.Action {
 		Name: "ssh_keys",
 		Args: []esphome.Arg{{Name: "keys", Type: esphome.ArgString}},
 		Run: func(c esphome.Call) (any, error) {
+			if !encrypted() {
+				slog.Warn("ssh: keys refused while Home Assistant's link has no device key")
+				return nil, errors.New("ssh_keys: the device has no API encryption key; set one first")
+			}
 			keys, err := parseKeys(c.String("keys"))
 			if err != nil {
 				slog.Warn("ssh: keys refused, the old ones stay", "err", err)

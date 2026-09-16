@@ -30,7 +30,10 @@ func main() {
 		// apart ("arm-dot", see internal/update/arch_dot.go) and a device only ever sees its own.
 		armDot    = flag.String("arm-dot", "", "the Echo Dot build (-tags dot), hashed and measured")
 		rootfsDot = flag.String("rootfs-arm-dot", "", "the Echo Dot rootfs tarball, hashed and measured")
-		out    = flag.String("out", "", "where to write the manifest, or stdout")
+		out       = flag.String("out", "", "where to write the manifest, or stdout")
+		// Devices believe a manifest only with the release key's signature beside it
+		// (internal/update/trust.go), so a release without one offers nothing.
+		signKey = flag.String("sign-key", "", "the release signing key file; writes <out>.sig next to the manifest")
 	)
 	flag.StringVar(&m.Version, "version", "", "version as Home Assistant will compare it")
 	flag.StringVar(&m.Title, "title", "", "title for Home Assistant's update card")
@@ -44,6 +47,32 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if *signKey != "" {
+		if err := sign(*out, *signKey); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+}
+
+// sign writes the detached signature over the manifest exactly as written.
+func sign(out, keyFile string) error {
+	if out == "" {
+		return fmt.Errorf("mkmanifest: -sign-key needs -out")
+	}
+	manifest, err := os.ReadFile(out)
+	if err != nil {
+		return err
+	}
+	seed, err := os.ReadFile(keyFile)
+	if err != nil {
+		return err
+	}
+	sig, err := update.Sign(manifest, string(seed))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(out+".sig", []byte(sig), 0o644)
 }
 
 func run(m update.Manifest, from string, builds map[string]string, rootfses map[string]string, out string) error {

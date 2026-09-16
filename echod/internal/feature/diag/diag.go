@@ -109,13 +109,19 @@ func Get() *Diag {
 func (d *Diag) Name() string { return "diagnostics" }
 
 func (d *Diag) Entities() []esphome.Entity {
-	return []esphome.Entity{
+	out := []esphome.Entity{
 		d.cached, d.free, d.purge,
 		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.lux,
 		d.roomLevel, d.roomFloor,
-		d.adb, d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
+		d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval, d.minCores,
 	}
+	// adbd is Android's. On the Linux image there is none to reach, and the saved setting is read by
+	// the Android daemon the unit falls back to, where it would open root adb to the network.
+	if layout.OnAndroid() {
+		out = append(out, d.adb)
+	}
+	return out
 }
 
 // collector builds the one setting these readings have: how often to take them.
@@ -505,7 +511,17 @@ func (d *Diag) Restore(c config.Config) {
 
 	// The chain is empty after a reboot but not after an echod restart, so the rule is put back or
 	// taken away rather than either being assumed.
-	if err := d.reachable(c.Diag.RemoteADB); err == nil {
+	if !layout.OnAndroid() {
+		// Off the Linux image the switch is not offered; one saved on before is cleared, so the Fire OS
+		// fallback does not open adb to the network from this file.
+		if c.Diag.RemoteADB {
+			if err := config.Set().Diag().RemoteADB(false); err != nil {
+				slog.Error("clearing remote adb failed", "err", err)
+			} else {
+				slog.Warn("remote adb was saved on; cleared, since this is not Android")
+			}
+		}
+	} else if err := d.reachable(c.Diag.RemoteADB); err == nil {
 		slog.Info("restored", "what", d.adb.ObjectID, "using", c.Diag.RemoteADB)
 	}
 

@@ -21,9 +21,13 @@ param(
     [string]$Rootfs = '',
     # The Echo Dot 2's rootfs tarball (techo5-dot: tools/linux/build-dot-rootfs.ps1). A Dot booting from
     # slots is offered a release only when it carries this; the Dot binary is built every time.
-    [string]$DotRootfs = ''
+    [string]$DotRootfs = '',
+    # The release signing key (ed25519 seed, base64). Devices take a manifest only with its signature, so
+    # a release cannot be published without it. Keep it off every repository and backed up.
+    [string]$SignKey = 'D:\platform-tools\keys\techo5-release.key'
 )
 $ErrorActionPreference = 'Stop'
+if (-not (Test-Path $SignKey)) { throw "no release signing key at $SignKey" }
 $repo = 'HuskerMinion/techo5'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $bin = Join-Path $root 'bin'
@@ -50,7 +54,7 @@ try {
     $mk = @('run', './cmd/mkmanifest', '-version', $Version, '-title', "TECHO5 $Version", '-notes', $Notes,
         '-release-url', "https://github.com/$repo/releases/tag/$Version",
         '-from', $from, '-arm', (Join-Path $bin 'echod-arm'), '-arm-dot', (Join-Path $bin 'echod-arm-dot'),
-        '-out', (Join-Path $bin 'manifest.json'))
+        '-out', (Join-Path $bin 'manifest.json'), '-sign-key', $SignKey)
     if ($Rootfs) { $mk += @('-rootfs-arm', $Rootfs) }
     if ($DotRootfs) { $mk += @('-rootfs-arm-dot', $DotRootfs) }
     & $Go @mk
@@ -60,7 +64,7 @@ try {
 
 Write-Host "== release $Version"
 $args = @('release', 'create', $Version, (Join-Path $bin 'echod-arm'), (Join-Path $bin 'echod-arm-dot'), (Join-Path $bin 'manifest.json'),
-    '--repo', $repo, '--title', $Version, '--notes', $Notes)
+    (Join-Path $bin 'manifest.json.sig'), '--repo', $repo, '--title', $Version, '--notes', $Notes)
 if ($Rootfs) { $args += $Rootfs }
 if ($DotRootfs) { $args += $DotRootfs }
 if ($Prerelease) { $args += '--prerelease' }

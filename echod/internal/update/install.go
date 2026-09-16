@@ -72,7 +72,7 @@ func download(ctx context.Context, b Binary, to string, progress func(float32)) 
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("update: fetching %s: %w", b.URL, err)
 	}

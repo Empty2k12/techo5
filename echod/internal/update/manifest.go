@@ -68,32 +68,62 @@ const maxManifest = 64 << 10
 // Fetch reads the channel's manifest and checks that it describes something installable. A manifest
 // that arrives without a version or without somewhere to fetch a binary from is a broken release, and
 // saying so here is better than failing half way through an install.
+//
+// The manifest is believed only with its signature (trust.go): the file beside it, manifest.json.sig,
+// must be the release key's signature over exactly the bytes served. And nothing is fetched on a clock
+// that has not been set, which is how a device that just booted would otherwise meet certificates.
 func Fetch(ctx context.Context, c Channel) (Manifest, error) {
 	var m Manifest
+	if !clockSet() {
+		return m, errClock
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 
-	url := c.URL()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	url := channelURL(c)
+	body, err := get(ctx, url, maxManifest)
 	if err != nil {
 		return m, err
 	}
-
-	resp, err := http.DefaultClient.Do(req)
+	sig, err := get(ctx, url+".sig", 1<<10)
 	if err != nil {
-		return m, fmt.Errorf("update: fetching %s: %w", url, err)
+		return m, fmt.Errorf("update: the manifest has no signature: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return m, fmt.Errorf("update: fetching %s: %s", url, resp.Status)
+	if err := verify(body, sig, releaseKey); err != nil {
+		return m, err
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxManifest)).Decode(&m); err != nil {
+	if err := json.Unmarshal(body, &m); err != nil {
 		return m, fmt.Errorf("update: reading the manifest at %s: %w", url, err)
 	}
 	return m, m.Valid()
+}
+
+// channelURL is Channel.URL, a variable so a test can serve the channel itself.
+var channelURL = Channel.URL
+
+// get fetches a small file through the updater's own client, refusing anything over max bytes.
+func get(ctx context.Context, url string, max int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("update: fetching %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("update: fetching %s: %s", url, resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("update: reading %s: %w", url, err)
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("update: %s is larger than %d bytes", url, max)
+	}
+	return b, nil
 }
 
 func (m Manifest) flat() Binary {

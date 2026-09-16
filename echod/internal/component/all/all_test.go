@@ -74,7 +74,6 @@ var registered = []string{
 	"noise_layer_2",
 	"purge_cache",
 	"radio_temperature",
-	"remote_adb",
 	"reply_buffer_1",
 	"reply_buffer_2",
 	"reply_delivery_1",
@@ -134,9 +133,10 @@ func TestEveryComponentStillRegisters(t *testing.T) {
 	}
 	slices.Sort(got)
 
-	if !slices.Equal(got, registered) {
+	want := slices.DeleteFunc(slices.Clone(registered), func(id string) bool { return slices.Contains(notOnThisDevice, id) })
+	if !slices.Equal(got, want) {
 		t.Errorf("registered entities changed\n got: %s\nwant: %s",
-			strings.Join(got, " "), strings.Join(registered, " "))
+			strings.Join(got, " "), strings.Join(want, " "))
 	}
 }
 
