@@ -1,4 +1,4 @@
-//go:build !dot
+//go:build !dot && !spot
 
 // Package touch owns the Echo Show's touchscreen and says what a finger did: a tap, or a swipe as
 // it travels. It does not know what either means; the display decides.

@@ -1,4 +1,4 @@
-//go:build !dot
+//go:build !dot && !spot
 
 // Package ambient is the Echo Show's light sensor: how bright the room is, for a screen that
 // should not glare at night.

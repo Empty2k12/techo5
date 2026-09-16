@@ -1,4 +1,4 @@
-//go:build dot
+//go:build dot || spot
 
 // Package camera is the front camera; the Dot has none.
 package camera

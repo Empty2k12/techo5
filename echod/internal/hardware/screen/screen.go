@@ -1,4 +1,4 @@
-//go:build !dot
+//go:build !dot && !spot
 
 // Package screen owns the Echo Show's panel: the kernel framebuffer it is painted through and the
 // backlight that lights it.

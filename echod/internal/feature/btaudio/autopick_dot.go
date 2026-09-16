@@ -1,4 +1,4 @@
-//go:build linux && dot
+//go:build linux && (dot || spot)
 
 package btaudio
 

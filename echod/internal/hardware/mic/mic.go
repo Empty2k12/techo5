@@ -14,6 +14,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/android/prop"
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/privacy"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/audio"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/denoise"
@@ -357,6 +358,12 @@ func (s *Source) reportDrops() {
 func (s *Source) broadcast(raw []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// A software-only mute cuts here, before anything reads the frame: what is not handed on cannot
+	// be heard, kept or streamed.
+	if privacy.SoftwareCut() {
+		clear(raw)
+	}
 
 	// Everything downstream reads the same single channel, whichever way it was made: wake detection
 	// and what Home Assistant transcribes should never disagree about what was heard.

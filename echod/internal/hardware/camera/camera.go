@@ -1,4 +1,4 @@
-//go:build !dot
+//go:build !dot && !spot
 
 // Package camera is the Echo Show's front camera, driven without Android.
 //

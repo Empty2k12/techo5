@@ -1,4 +1,4 @@
-//go:build !dot
+//go:build !dot && !spot
 
 // Package display is the Echo Show's screen: what the device shows on it, what a finger on it does,
 // and what Home Assistant gets for it.
