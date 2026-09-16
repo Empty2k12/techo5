@@ -69,7 +69,7 @@ if [ -n "$IP" ]; then
 fi
 
 # --- Bluetooth (only on a kernel that has it; see t5_bt_up).
-t5_bt_up $BT_MODULE /var/log
+t5_bt_up "$BT_MODULE" /var/log
 
 # --- Network keeper: bring Wi-Fi back if it is gone, and reboot after 15 minutes
 # without an address — an unattended unit must never sit unreachable.
