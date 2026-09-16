@@ -470,8 +470,8 @@ func (d *device) setFeature(id uint32, v uint64) {
 	}
 }
 
-// Exposure: the sensor has no automatic mode, so this is it. The frame's mean is measured on a
-// sparse grid and the exposure (shutter lines times gain) is moved towards a target, shutter
+// Exposure: the sensor has no automatic mode, so this is it. The frame is metered in zones (meter, in
+// exposure.go) and the exposure (shutter lines times gain) is moved towards a target, shutter
 // first — up to a frame at the sensor's rate — then gain, then longer shutters at the cost of
 // frame rate, then the rest of the gain.
 const (
@@ -491,13 +491,7 @@ func (d *device) autoExpose(bayer []byte) {
 		d.settle--
 		return
 	}
-	// The first pixel of every 13th five-byte group: a prime stride in groups walks the frame.
-	var sum, n uint64
-	for i := 0; i+1 < len(bayer); i += 65 {
-		sum += uint64(bayer[i]) | uint64(bayer[i+1]&3)<<8
-		n++
-	}
-	mean := int(sum / n)
+	mean := int(meter(bayer))
 	if mean >= aeTarget-aeDeadband && mean <= aeTarget+aeDeadband {
 		return
 	}
@@ -506,6 +500,7 @@ func (d *device) autoExpose(bayer []byte) {
 	if ratio > 2 {
 		ratio = 2
 	}
+
 	if ratio < 0.5 {
 		ratio = 0.5
 	}
@@ -775,7 +770,9 @@ func (d *device) stream(stop chan struct{}, frame func(bayer []byte)) {
 // tone is how a frame was levelled: white balance gains and the value that maps to white.
 type tone struct {
 	gainR, gainB float64
-	white        int // on the 11-bit scale of a summed green pair
+	white        int     // on the 11-bit scale of a summed green pair
+	black        int     // on the same scale: what maps to black (blackFor)
+	gamma        float64 // output gamma: steeper for a backlit frame (gammaFor)
 }
 
 // unpackLine expands one packed line into 10-bit samples, four pixels from every five bytes,
@@ -791,15 +788,15 @@ func unpackLine(line []byte, dst []uint16) {
 }
 
 // convert turns one packed frame into an 800x600 RGBA picture: one pixel per RGGB cell (the
-// two greens summed), grey-world white balance, the top percentile at white, gamma 1/1.8. The
-// tone it settled on comes back for Full.
+// two greens summed), grey-world white balance, the darkest 0.1% at black (within reason), the top
+// percentile at white, gamma 1/1.8 or steeper for a backlit frame. The tone it settled on comes back for Full.
 func convert(raw []byte) (*image.RGBA, tone) {
 	img := image.NewRGBA(image.Rect(0, 0, Width, Height))
 	cells := make([]uint16, Width*Height*3)
 	row0 := make([]uint16, sensorW)
 	row1 := make([]uint16, sensorW)
 	var sumR, sumG, sumB uint64
-	var hist [2048]int
+	var hist, centre [2048]int
 	for y := 0; y < Height; y++ {
 		unpackLine(raw[(2*y)*bytesPerLine:(2*y+1)*bytesPerLine], row0)
 		unpackLine(raw[(2*y+1)*bytesPerLine:(2*y+2)*bytesPerLine], row1)
@@ -813,25 +810,40 @@ func convert(raw []byte) (*image.RGBA, tone) {
 			sumG += uint64(g)
 			sumB += uint64(b)
 			hist[g]++
+			if x >= Width/4 && x < Width*3/4 && y >= Height/4 && y < Height*3/4 {
+				centre[g]++
+			}
 		}
 	}
 	n := float64(Width * Height)
-	t := tone{gainR: 1, gainB: 1, white: 1}
+	t := tone{gainR: 1, gainB: 1, white: 1, gamma: gammaNormal}
 	avgR, avgG, avgB := float64(sumR)*2/n, float64(sumG)/n, float64(sumB)*2/n
 	if avgR > 1 && avgB > 1 {
 		t.gainR, t.gainB = avgG/avgR, avgG/avgB
 	}
-	seen := 0
+	seen, low := 0, -1
 	for v := 0; v < len(hist); v++ {
 		seen += hist[v]
+		if low < 0 && seen >= int(n)/1000 {
+			low = v
+		}
 		if seen >= int(n)*99/100 {
 			t.white = v
+			break
+		}
+	}
+	median, half := 0, (Width/2)*(Height/2)/2
+	for v, seen := 0, 0; v < len(centre); v++ {
+		if seen += centre[v]; seen >= half {
+			median = v
 			break
 		}
 	}
 	if t.white < 32 {
 		t.white = 32
 	}
+	t.gamma = gammaFor(median, t.white)
+	t.black = blackFor(low, t.white)
 	luts := t.tables()
 	for i, j := 0, 0; i < len(cells); i, j = i+3, j+4 {
 		img.Pix[j] = luts[0][cells[i]]
@@ -848,11 +860,14 @@ func (t tone) tables() *[3][2048]uint8 {
 	var lut [3][2048]uint8
 	for ch, gain := range []float64{t.gainR, 1, t.gainB} {
 		for v := 0; v < 2048; v++ {
-			f := float64(v) * gain / float64(t.white)
+			f := float64(v-t.black) * gain / float64(t.white-t.black)
+			if f < 0 {
+				f = 0
+			}
 			if f > 1 {
 				f = 1
 			}
-			lut[ch][v] = uint8(math.Pow(f, 1/1.8)*255 + 0.5)
+			lut[ch][v] = uint8(math.Pow(f, t.gamma)*255 + 0.5)
 		}
 	}
 	return &lut
