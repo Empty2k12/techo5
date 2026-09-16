@@ -7,6 +7,7 @@ package home
 
 import (
 	"context"
+	"image"
 	"log/slog"
 	"strings"
 	"sync"
@@ -40,6 +41,13 @@ type Radio struct {
 	Now        string // the station Home Assistant says is playing, empty for none
 	Playing    bool   // the device's own player is running
 	Chosen     string // the station tapped last, until Now catches up
+
+	// What the station is playing, when its service says: the song, and a picture for the
+	// background — the cover when there is one, else the station's logo (Logo true).
+	Title, Artist, Album string
+	Art                  *image.RGBA
+	Logo                 bool
+	Music                bool // a music station, for the default picture when there is none
 }
 
 type Feature struct {
@@ -54,6 +62,11 @@ type Feature struct {
 	fetched  time.Time
 	poke     chan struct{}
 
+	// meta is what the playing station is playing, for the now-playing screen; metaPoke asks for
+	// a refresh when the station changes.
+	meta     meta
+	metaPoke chan struct{}
+
 	// cam is the camera view in progress; see camera.go.
 	cam CameraView
 }
@@ -63,6 +76,7 @@ const forecastEvery = 30 * time.Minute
 
 // Run keeps the forecast current. Nothing to do without a token or a weather entity.
 func (f *Feature) Run(ctx context.Context) error {
+	go f.metaLoop(ctx)
 	for {
 		f.refreshForecast()
 		select {
@@ -104,7 +118,7 @@ var (
 
 func Get() *Feature {
 	once.Do(func() {
-		shared = &Feature{poke: make(chan struct{}, 1)}
+		shared = &Feature{poke: make(chan struct{}, 1), metaPoke: make(chan struct{}, 1)}
 		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
 		media.Get().OnPlay.Listen(shared.played)
 	})
@@ -118,7 +132,10 @@ func (f *Feature) played(url string) {
 	f.url, f.urlName, f.chosen = url, "", ""
 	f.mu.Unlock()
 	f.Changed.Emit(struct{}{})
-	go f.nameStream(url)
+	go func() {
+		f.nameStream(url)
+		f.pokeMeta()
+	}()
 }
 
 // nameStream finds a station name for a stream URL in the lists Home Assistant keeps —
@@ -314,6 +331,8 @@ func (f *Feature) Radio() Radio {
 	f.mu.Lock()
 	r.Chosen = f.chosen
 	r.Now = f.urlName
+	r.Title, r.Artist, r.Album = f.meta.now.Title, f.meta.now.Artist, f.meta.now.Album
+	r.Art, r.Logo, r.Music = f.meta.art, f.meta.artLogo, f.meta.st.Music
 	f.mu.Unlock()
 	// The stream's own name wins; Home Assistant's "last station" text is the fallback.
 	if r.Now == "" && h.Now != "" {
@@ -343,6 +362,7 @@ func (f *Feature) Play(station string) {
 		Data:    map[string]string{h.Field: askFor(station), h.SpeakerField: speaker},
 	})
 	f.Changed.Emit(struct{}{})
+	f.pokeMeta()
 }
 
 // askFor is the station name to hand the finder: a list label like "101.1 WXYZ on iHeartRadio"
@@ -364,4 +384,5 @@ func (f *Feature) Stop() {
 	f.chosen = ""
 	f.mu.Unlock()
 	f.Changed.Emit(struct{}{})
+	f.pokeMeta()
 }

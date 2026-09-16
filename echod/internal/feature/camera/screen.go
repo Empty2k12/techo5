@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/display"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 )
 
 // registerScreen adds /screen.png: what the panel shows. ?sheet= opens the settings sheet on a
@@ -18,6 +19,14 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 	mux.HandleFunc("/screen.png", func(w http.ResponseWriter, r *http.Request) {
 		if theme := r.URL.Query().Get("theme"); theme != "" {
 			display.Get().SetTheme(theme)
+		}
+		if station := r.URL.Query().Get("radio"); station != "" {
+			// A station to start (or "stop"), so the now-playing screen can be looked at.
+			if station == "stop" {
+				home.Get().Stop()
+			} else {
+				home.Get().Play(station)
+			}
 		}
 		if tab := r.URL.Query().Get("sheet"); tab != "" {
 			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "theme": 4, "off": -1}

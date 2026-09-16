@@ -1,0 +1,204 @@
+package home
+
+import (
+	"bytes"
+	"context"
+	"image"
+	"image/draw"
+	_ "image/jpeg" // album art
+	_ "image/png"  // station logos
+	"log/slog"
+	"net/http"
+	"time"
+
+	xdraw "golang.org/x/image/draw"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/radiometa"
+)
+
+// What the station is playing, for the now-playing screen: the song, and a picture for the
+// background — the album art when there is a song with one, the station's logo otherwise.
+// Polled from the station's service while the radio runs; the screen draws whatever is here.
+
+const (
+	metaEvery = 15 * time.Second
+
+	// artW and artH are the panel; pictures are made to fit it once, when they arrive.
+	artW, artH = 960, 480
+)
+
+// meta is the state the poller keeps.
+type meta struct {
+	station string // the list name being followed
+	st      radiometa.Station
+	now     radiometa.Now
+	art     *image.RGBA
+	artURL  string
+	artLogo bool // the picture is the station's logo, not a cover
+}
+
+var artClient = &http.Client{Timeout: 10 * time.Second}
+
+// playingStation is the station name to follow, or empty when the radio is not running.
+func (f *Feature) playingStation() string {
+	if playing, paused := media.Get().Playing(); !playing && !paused {
+		return ""
+	}
+	f.mu.Lock()
+	urlName, chosen := f.urlName, f.chosen
+	f.mu.Unlock()
+	if urlName != "" {
+		return urlName
+	}
+	// Home Assistant's "last station" text: the stream is its proxy, so the name is not in the
+	// URL, and the tapped name is cleared once the stream starts.
+	if entity := config.Get().Home.Radio.Now; entity != "" {
+		if v := hastate.Get().State(entity); v != "" && v != "unknown" && v != "unavailable" {
+			return v
+		}
+	}
+	return chosen
+}
+
+// metaLoop follows the playing station.
+func (f *Feature) metaLoop(ctx context.Context) {
+	slog.Info("radio: following what plays")
+	tick := time.NewTicker(metaEvery)
+	defer tick.Stop()
+	for {
+		f.refreshMeta(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-f.metaPoke:
+		case <-tick.C:
+		}
+	}
+}
+
+// pokeMeta asks for a refresh now: the station changed.
+func (f *Feature) pokeMeta() {
+	select {
+	case f.metaPoke <- struct{}{}:
+	default:
+	}
+}
+
+func (f *Feature) refreshMeta(ctx context.Context) {
+	station := f.playingStation()
+	f.mu.Lock()
+	cur := f.meta
+	f.mu.Unlock()
+	slog.Debug("radio: refresh", "station", station, "following", cur.station)
+	if station == "" {
+		if cur.station != "" {
+			f.mu.Lock()
+			f.meta = meta{}
+			f.mu.Unlock()
+			f.Changed.Emit(struct{}{})
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	next := cur
+	if cur.station != station {
+		next = meta{station: station}
+		st, err := radiometa.Resolve(ctx, station)
+		if err != nil {
+			slog.Info("radio: station not found on its service", "station", station, "err", err)
+			f.mu.Lock()
+			f.meta = next
+			f.mu.Unlock()
+			f.Changed.Emit(struct{}{})
+			return
+		}
+		next.st = st
+	}
+	if next.st.ID == "" {
+		return
+	}
+	now, err := radiometa.Playing(ctx, next.st)
+	if err != nil {
+		slog.Debug("radio: now playing", "station", station, "err", err)
+	} else {
+		next.now = now
+	}
+	// The picture: cover if the song has one, else the logo; fetched only when the URL changes.
+	want, logo := next.now.Art, false
+	if want == "" {
+		want, logo = next.st.Logo, true
+	}
+	if want != next.artURL {
+		img, err := fetchArt(ctx, want, logo)
+		if err != nil {
+			slog.Debug("radio: art", "url", want, "err", err)
+			img = nil
+		}
+		next.art, next.artURL, next.artLogo = img, want, logo
+	}
+	f.mu.Lock()
+	changed := next.now != cur.now || next.artURL != cur.artURL || next.station != cur.station
+	f.meta = next
+	f.mu.Unlock()
+	if changed {
+		slog.Info("radio: now", "station", station, "title", next.now.Title, "artist", next.now.Artist, "art", next.artURL != "")
+		f.Changed.Emit(struct{}{})
+	}
+}
+
+// fetchArt downloads a picture and lays it out for the panel: a cover is scaled to fill the
+// panel and cropped; a logo is scaled to fit and centred, since a cropped logo is no logo.
+func fetchArt(ctx context.Context, u string, logo bool) (*image.RGBA, error) {
+	if u == "" {
+		return nil, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := artClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(http.MaxBytesReader(nil, res.Body, 4<<20)); err != nil {
+		return nil, err
+	}
+	src, _, err := image.Decode(&buf)
+	if err != nil {
+		return nil, err
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, artW, artH))
+	sb := src.Bounds()
+	sw, sh := sb.Dx(), sb.Dy()
+	if sw == 0 || sh == 0 {
+		return nil, nil
+	}
+	var target image.Rectangle
+	if logo {
+		// Fit on the right half, clear of the text, with room around it.
+		const left, right = 500, artW - 40
+		h := artH - 140
+		w := sw * h / sh
+		if w > right-left {
+			w = right - left
+			h = sh * w / sw
+		}
+		x := left + (right-left-w)/2
+		target = image.Rect(x, (artH-h)/2, x+w, (artH+h)/2)
+	} else {
+		// Fill, cropping whichever way is longer.
+		w, h := artW, sh*artW/sw
+		if h < artH {
+			w, h = sw*artH/sh, artH
+		}
+		target = image.Rect((artW-w)/2, (artH-h)/2, (artW-w)/2+w, (artH-h)/2+h)
+	}
+	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Src, nil)
+	return dst, nil
+}

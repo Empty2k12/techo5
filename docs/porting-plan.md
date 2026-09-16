@@ -447,6 +447,14 @@ session.
    (14 fps conversion plus ~4.5 fps JPEG); 40 % of the machine stays idle.
    Both done later that day: CAM_OUT_FMT 1 gives 10-bit packed frames, and
    stills are demosaiced at 1600x1200 (the stream stays 800x600).
+   NOW PLAYING 2026-09-16: `lib/radiometa` resolves a station on
+   iHeartRadio (v3 search, live-meta currentTrackMeta with
+   defaultMetadata, trackHistory as the fallback while the live endpoint
+   says 204/410) or TuneIn (Search/Describe) from its list name; `home`
+   polls it every 15 s while the radio runs and the now-playing screen
+   draws the cover, or the station logo on the right, or drawn notes/waves,
+   behind station, song and artist. The bottom bar has drawn play/pause
+   marks. `/screen.png?radio=<station>|stop` starts a station for a look.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,
