@@ -208,6 +208,7 @@ func (c *Camera) run(stop, stopped chan struct{}) {
 	defer d.close()
 	slog.Info("camera running")
 	d.stream(stop, func(bayer []byte) {
+		d.autoExpose(bayer)
 		f := &Frame{At: time.Now(), RGBA: convert(bayer)}
 		c.mu.Lock()
 		c.seq++
@@ -233,7 +234,12 @@ const (
 	nrSetDriver = 35
 	nrSetMCLK   = 60
 	nrSetCur    = 70
+	nrFeature   = 15
 	sensorMain  = 1
+
+	// Sensor features (ACDK_SENSOR_FEATURE_ENUM, from 3000): exposure in lines, gain in 1/64.
+	featShutter = 3004
+	featGain    = 3006
 
 	ispMagic   = 'k'
 	nrIspReset = 0
@@ -364,6 +370,10 @@ type device struct {
 	mva            uint32
 	mclk           [3]uint32
 	sensorOpen     bool
+
+	// Exposure control: what is set on the sensor now, and frames to wait before judging it.
+	shutter, gain int
+	settle        int
 }
 
 func open() (*device, error) {
@@ -431,7 +441,91 @@ func open() (*device, error) {
 		d.close()
 		return nil, fmt.Errorf("sensor control: %w", err)
 	}
+	// A middling exposure to start from; the loop takes it from there.
+	d.shutter, d.gain = 600, 128
+	d.setFeature(featShutter, uint64(d.shutter))
+	d.setFeature(featGain, uint64(d.gain))
+	d.settle = aeDelay
 	return d, nil
+}
+
+// setFeature is KDIMGSENSORIOC_X_FEATURECONCTROL with one integer parameter. The kernel is 64-bit
+// and reads the parameter as an unsigned long, so eight bytes go over.
+func (d *device) setFeature(id uint32, v uint64) {
+	var para [8]byte
+	for i := range para {
+		para[i] = byte(v >> (8 * i))
+	}
+	size := uint32(len(para))
+	ctl := [4]uint32{sensorMain, id, uint32(uintptr(unsafe.Pointer(&para[0]))), uint32(uintptr(unsafe.Pointer(&size)))}
+	if err := ioctl(d.sens, ioc(3, sensMagic, nrFeature, 16), unsafe.Pointer(&ctl[0])); err != nil {
+		slog.Warn("camera: sensor feature", "id", id, "err", err)
+	}
+}
+
+// Exposure: the sensor has no automatic mode, so this is it. The frame's mean is measured on a
+// sparse grid and the exposure (shutter lines times gain) is moved towards a target, shutter
+// first — up to a frame at the sensor's rate — then gain, then longer shutters at the cost of
+// frame rate, then the rest of the gain.
+const (
+	aeTarget   = 72 // mean of the 8-bit frame to aim for: a lit room, no clipping to speak of
+	aeDelay    = 3  // frames between changes: a new exposure takes two frames to show
+	aeMinShut  = 4
+	aeFrame    = 1200 // shutter lines that fit a frame at the sensor's own rate
+	aeMaxShut  = 4000 // beyond this the frame rate drops under 5 a second
+	aeMinGain  = 64   // 1x
+	aeMidGain  = 384  // 6x, before trading frame rate
+	aeMaxGain  = 992  // the driver's ceiling, 15.5x
+	aeDeadband = 6    // no change inside target ± this
+)
+
+func (d *device) autoExpose(bayer []byte) {
+	if d.settle > 0 {
+		d.settle--
+		return
+	}
+	var sum, n uint64
+	for i := 0; i < len(bayer); i += 61 { // a prime stride walks every column and row over time
+		sum += uint64(bayer[i])
+		n++
+	}
+	mean := int(sum / n)
+	if mean >= aeTarget-aeDeadband && mean <= aeTarget+aeDeadband {
+		return
+	}
+	// The change wanted, capped to a factor of two per step so a bright window does not swing it.
+	ratio := float64(aeTarget) / float64(max(mean, 1))
+	if ratio > 2 {
+		ratio = 2
+	}
+	if ratio < 0.5 {
+		ratio = 0.5
+	}
+	want := float64(d.shutter*d.gain) * ratio
+	shutter, gain := d.shutter, d.gain
+	switch {
+	case want <= float64(aeFrame*aeMinGain):
+		shutter, gain = int(want/aeMinGain), aeMinGain
+	case want <= float64(aeFrame*aeMidGain):
+		shutter, gain = aeFrame, int(want/aeFrame)
+	case want <= float64(aeMaxShut*aeMidGain):
+		shutter, gain = int(want/aeMidGain), aeMidGain
+	default:
+		shutter, gain = aeMaxShut, int(want/aeMaxShut)
+	}
+	shutter = min(max(shutter, aeMinShut), aeMaxShut)
+	gain = min(max(gain, aeMinGain), aeMaxGain)
+	if shutter == d.shutter && gain == d.gain {
+		return
+	}
+	if shutter != d.shutter {
+		d.setFeature(featShutter, uint64(shutter))
+	}
+	if gain != d.gain {
+		d.setFeature(featGain, uint64(gain))
+	}
+	slog.Debug("camera exposure", "mean", mean, "shutter", shutter, "gain", gain)
+	d.shutter, d.gain, d.settle = shutter, gain, aeDelay
 }
 
 func (d *device) close() {
