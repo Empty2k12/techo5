@@ -83,7 +83,15 @@ t5_wifi_up() {
 	fi
 	[ -r "$conf" ] || { log "wifi: no configuration"; return 1; }
 	mkdir -p /run/wpa
-	ip link set wlan0 up
+	# The Echo Spot's bcmdhd is a USB device that downloads its firmware at insmod, drops off the bus
+	# and comes back: wlan0 exists before it can be opened, and bringing it up then fails with EBUSY,
+	# which leaves wpa_supplicant unable to start. Wait for the open to succeed. The Show's mt76x8 is
+	# up on the first try.
+	n=0; until ip link set wlan0 up 2>/tmp/ifup.err; do
+		n=$((n+1)); [ $n -ge 30 ] && { log "wifi: wlan0 would not come up: $(cat /tmp/ifup.err)"; return 1; }
+		sleep 1
+	done
+	[ $n -gt 0 ] && log "wifi: wlan0 up after ${n}s"
 	if ! pidof wpa_supplicant >/dev/null; then
 		wpa_supplicant -B -i wlan0 -c "$conf" -P /run/wpa.pid > /tmp/wpa.log 2>&1
 	fi
