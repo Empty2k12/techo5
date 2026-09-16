@@ -59,7 +59,15 @@ func Script(path string) string {
 // Ensure writes the boot hooks when they are not already what this build expects, which is how the
 // rollback improves without anybody reinstalling. Nothing is written when nothing differs, so an
 // ordinary start does not touch /system at all.
+//
+// Only on Android: the hooks are Fire OS's boot-animation scripts. Off Android they never exist, so
+// they always looked stale, and writing them meant remounting the filesystem holding the binary
+// read-write and then read-only — which on the Echo Dot's Linux image is the root filesystem itself.
+// The slot came up read-only a few seconds into every boot, the moment the daemon started.
 func Ensure() {
+	if !layout.OnAndroid() {
+		return
+	}
 	var stale []string
 	for _, path := range layout.AnimationScripts {
 		want := Script(path)
