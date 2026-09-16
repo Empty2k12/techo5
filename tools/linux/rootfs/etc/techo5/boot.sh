@@ -29,6 +29,10 @@ mountpoint -q /store || mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /store
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
 mkdir -p /run/lock /run/techo5 $LOGDIR /data/misc/techo5/models
+# A fresh unit gets the wake word models the image carries.
+if [ -d /usr/share/techo5/models ] && [ -z "$(ls -A /data/misc/techo5/models 2>/dev/null)" ]; then
+	cp /usr/share/techo5/models/* /data/misc/techo5/models/ && log "wake word models installed from the image"
+fi
 : > /run/boot.log
 
 echo /sbin/mdev > /proc/sys/kernel/hotplug

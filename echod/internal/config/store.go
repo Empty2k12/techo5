@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 
@@ -169,6 +170,9 @@ func (st *Store) write() error {
 		return err
 	}
 
+	if runtime.GOOS == "windows" {
+		return nil // directories cannot be synced there, and the rename is already durable enough
+	}
 	d, err := os.Open(dir)
 	if err != nil {
 		return err

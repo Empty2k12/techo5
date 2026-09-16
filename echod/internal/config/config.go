@@ -53,7 +53,7 @@ func Defaults() Config {
 
 		// Only the stop word. The slots are absent until something chooses one, and Slot fills in the
 		// defaults for whichever have not been.
-		Wake: Wake{Stop: defaultStop()},
+		Wake: Wake{Words: defaultWords(), Stop: defaultStop()},
 	}
 }
 

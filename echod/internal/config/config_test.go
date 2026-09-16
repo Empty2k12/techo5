@@ -31,8 +31,8 @@ func TestDefaultsWhenUnset(t *testing.T) {
 	if got.Microphone.Leveling != DefaultLeveling {
 		t.Errorf("leveling = %v", got.Microphone.Leveling)
 	}
-	if id := got.Wake.Slot(0).ID; id != "" {
-		t.Errorf("slot 1 id = %q, want empty so the slot is off", id)
+	if id := got.Wake.Slot(0).ID; id != DefaultWakeID {
+		t.Errorf("slot 1 id = %q, want the default word so a new device answers", id)
 	}
 	if v := got.Wake.Slot(1).Threshold; v != DefaultThreshold {
 		t.Errorf("slot 2 threshold = %v", v)
@@ -137,8 +137,8 @@ func TestSettingALaterSlotFirst(t *testing.T) {
 	if id := got.Slot(1).ID; id != "hey_mycroft" {
 		t.Errorf("slot 2 id = %q", id)
 	}
-	if id := got.Slot(0).ID; id != "" {
-		t.Errorf("slot 1 id = %q, want empty", id)
+	if id := got.Slot(0).ID; id != DefaultWakeID {
+		t.Errorf("slot 1 id = %q, want the default word", id)
 	}
 	if n := len(got.Slots(2)); n != 2 {
 		t.Errorf("Slots(2) returned %d", n)

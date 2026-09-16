@@ -96,6 +96,16 @@ func DefaultWakeWord() WakeWord {
 	}
 }
 
+// DefaultWakeID is the word a new device answers to; the model ships in the image.
+const DefaultWakeID = "alexa"
+
+// defaultWords is the one slot a new device comes with.
+func defaultWords() []WakeWord {
+	w := DefaultWakeWord()
+	w.ID = DefaultWakeID
+	return []WakeWord{w}
+}
+
 // Slot is one wake word slot, or an unset one with the defaults in it.
 func (w Wake) Slot(n int) WakeWord {
 	if n < 0 || n >= len(w.Words) {

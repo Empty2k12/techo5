@@ -14,7 +14,13 @@ type Screen struct {
 	// Theme names the screen's palette; empty is the first one, "Custom" is Palette.
 	Theme   string  `json:"theme,omitempty"`
 	Palette Palette `json:"palette,omitempty"`
+
+	// Welcomed is the first-run card having been seen and put away.
+	Welcomed bool `json:"welcomed,omitempty"`
 }
+
+// DefaultTheme is the palette a new device comes up in.
+const DefaultTheme = "Ember"
 
 // Palette is a custom theme's five colours, as #rrggbb.
 type Palette struct {
@@ -29,7 +35,7 @@ type Palette struct {
 const DefaultScreenBrightness = 60
 
 func defaultScreen() Screen {
-	return Screen{On: true, Brightness: DefaultScreenBrightness, Auto: true}
+	return Screen{On: true, Brightness: DefaultScreenBrightness, Auto: true, Theme: DefaultTheme}
 }
 
 type ScreenWriter struct{ st *Store }
@@ -52,6 +58,10 @@ func (w ScreenWriter) Theme(v string) error {
 
 func (w ScreenWriter) Night(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.Night = v })
+}
+
+func (w ScreenWriter) Welcomed(v bool) error {
+	return w.st.Update(func(c *Config) { c.Screen.Welcomed = v })
 }
 
 // Custom saves a palette and makes it the theme.

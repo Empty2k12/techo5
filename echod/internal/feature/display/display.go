@@ -353,6 +353,17 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		return
 	}
+	// The first-run card: any tap puts it away for good.
+	if !config.Get().Screen.Welcomed {
+		if g.Kind == touch.Tap {
+			if err := config.Set().Screen().Welcomed(true); err != nil {
+				slog.Warn("saving the welcome failed", "err", err)
+			}
+			slog.Info("first-run card put away")
+			d.wake()
+		}
+		return
+	}
 
 	// The pairing page: a tap on a row pairs or connects it, the bar at the bottom ends the page.
 	// A swipe from the right opens it from the clock.
@@ -833,6 +844,14 @@ func (d *Display) frame() time.Duration {
 	now := time.Now()
 	if d.night(now, on, view) {
 		return time.Minute
+	}
+	if !config.Get().Screen.Welcomed {
+		d.r.welcome(scene{now: now})
+		if err := d.dev.Present(); err != nil {
+			slog.Warn("presenting the frame failed", "err", err)
+		}
+		d.answerShots()
+		return time.Second
 	}
 	if !on {
 		// Dark panel: nothing to draw, and nothing to redraw until told, or until the night ends.
