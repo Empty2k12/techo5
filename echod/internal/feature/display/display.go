@@ -33,6 +33,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
@@ -113,6 +114,12 @@ type Display struct {
 	touchedAt time.Time
 	nightDark bool
 
+	// quiet is a turn that was a screen command ("go home", "show the deck"): its words and reply
+	// are not shown, so the screen moves at once. radioCue is when Home Assistant last named a
+	// station as playing, which comes seconds before the stream does.
+	quiet    bool
+	radioCue time.Time
+
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
 	weatherArmed bool
@@ -153,6 +160,18 @@ func build() *Display {
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
+	hastate.Get().Changed.Listen(func(u hastate.Update) {
+		if u.Attribute != "" || u.Entity == "" || u.Entity != config.Get().Home.Radio.Now {
+			return
+		}
+		if u.Value == "" || u.Value == "unknown" || u.Value == "unavailable" {
+			return
+		}
+		d.mu.Lock()
+		d.radioCue = time.Now()
+		d.mu.Unlock()
+		d.wake()
+	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	return d
@@ -265,6 +284,9 @@ func (d *Display) lux(float64) {
 func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
 	newHeard := s.Heard != "" && s.Heard != d.view.Heard
+	if s.Phase == "listening" && d.view.Phase != "listening" {
+		d.quiet = false
+	}
 	d.view = s
 	d.viewAt = time.Now()
 	// A question about the weather brings the forecast page up once the answer is done, for a
@@ -276,12 +298,13 @@ func (d *Display) changed(s voice.State) {
 	// sentence: the state repeats the transcript on every phase change.
 	if newHeard {
 		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
+			d.quiet = true
 			go home.Get().ShowCamera(entity, cameraVoiceShow)
 		}
 		// "Go home": whatever page is up comes down, back to the clock or the radio.
 		if h := strings.ToLower(s.Heard); strings.Contains(h, "go home") || strings.Contains(h, "home screen") || strings.Contains(h, "main screen") {
 			d.weatherArmed, d.weatherUntil = false, time.Time{}
-			d.sheet = false
+			d.sheet, d.quiet = false, true
 			go home.Get().HideCamera()
 			slog.Info("screen: home by voice")
 		}
@@ -425,12 +448,23 @@ func (d *Display) gesture(g touch.Gesture) {
 // nowPlaying is whether the idle screen should be the radio's: something playing or paused, and
 // the radio wired up so the page has a name to show.
 func (d *Display) nowPlaying() bool {
-	playing, paused := media.Get().Playing()
-	if !playing && !paused {
+	if !home.Get().Radio().Configured {
 		return false
 	}
-	return home.Get().Radio().Configured
+	playing, paused := media.Get().Playing()
+	if playing || paused {
+		return true
+	}
+	// Home Assistant named a station a moment ago: the stream is on its way, show the page now.
+	d.mu.Lock()
+	cued := time.Since(d.radioCue) < radioCueFor
+	d.mu.Unlock()
+	return cued
 }
+
+// radioCueFor is how long the now-playing page is shown on Home Assistant's word alone, before
+// the stream itself has to be playing to keep it.
+const radioCueFor = 20 * time.Second
 
 func (d *Display) showSheet(on bool) {
 	d.mu.Lock()
@@ -828,6 +862,13 @@ func (d *Display) frame() time.Duration {
 	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at}
 	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger {
 		s.phase = "lingering"
+	}
+	d.mu.Lock()
+	quiet := d.quiet
+	d.mu.Unlock()
+	if quiet && (s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
+		// A screen command: the screen it asked for is the answer, not the words.
+		s.phase, s.heard, s.reply = "idle", "", ""
 	}
 	s.playing, s.paused = media.Get().Playing()
 	s.muted, _ = mute.Get().Muted()
