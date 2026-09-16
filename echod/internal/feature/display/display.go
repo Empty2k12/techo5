@@ -41,6 +41,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
 
@@ -114,6 +115,11 @@ type Display struct {
 	touchedAt time.Time
 	nightDark bool
 
+	// wifi is the Wi-Fi pages' state; wifiOpen shows them. wifiAt is when the status was last read.
+	wifi     wifiState
+	wifiOpen bool
+	wifiAt   time.Time
+
 	// quiet is a turn that was a screen command ("go home", "show the deck"): its words and reply
 	// are not shown, so the screen moves at once. radioCue is when Home Assistant last named a
 	// station as playing, which comes seconds before the stream does.
@@ -160,6 +166,20 @@ func build() *Display {
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
+	// A device with no address a while after boot gets the Wi-Fi page without being asked: a
+	// fresh unit, or one carried to another house.
+	go func() {
+		time.Sleep(90 * time.Second)
+		if wifi.Available() && wifi.Current(context.Background()).Address == "" {
+			d.mu.Lock()
+			open := d.wifiOpen
+			d.mu.Unlock()
+			if !open {
+				slog.Info("wifi: no address after boot, opening setup")
+				d.openWifi()
+			}
+		}
+	}()
 	hastate.Get().Changed.Listen(func(u hastate.Update) {
 		if u.Attribute != "" || u.Entity == "" || u.Entity != config.Get().Home.Radio.Now {
 			return
@@ -401,6 +421,18 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	// The Wi-Fi pages take every tap while they are up.
+	d.mu.Lock()
+	wifiOpen := d.wifiOpen
+	d.mu.Unlock()
+	if wifiOpen {
+		if g.Kind == touch.Tap && d.r != nil {
+			d.wifiTap(g.X, g.Y)
+		}
+		d.wake()
+		return
+	}
+
 	// The settings sheet: tabs, rows and buttons do things, the bar at the bottom closes it.
 	d.mu.Lock()
 	sheet := d.sheet
@@ -597,6 +629,11 @@ func (d *Display) deviceTap(h hit) {
 		if h.button == 2 {
 			mute.Get().Toggle()
 		}
+	case rowWifi:
+		if h.button == 2 && wifi.Available() {
+			d.showSheet(false)
+			d.openWifi()
+		}
 	case rowNight:
 		if h.button == 2 {
 			if err := config.Set().Screen().Night(nextNight(config.Get().Screen.Night)); err != nil {
@@ -728,6 +765,167 @@ func inNight(v string, now time.Time) bool {
 		return h >= from && h < to
 	}
 	return h >= from || h < to
+}
+
+// ---- Wi-Fi pages ----
+
+// OpenWifi shows the Wi-Fi pages; demo puts the keyboard up for a made-up network, for a look at
+// the layout from afar. CloseWifi takes them down.
+func (d *Display) OpenWifi(demo bool) {
+	d.openWifi()
+	if demo {
+		d.mu.Lock()
+		d.wifi.pick = &wifi.Network{SSID: "Example Network", Secured: true}
+		d.wifi.text = "correct horse"
+		d.mu.Unlock()
+		d.wake()
+	}
+}
+
+func (d *Display) CloseWifi() { d.closeWifi() }
+
+// openWifi shows the network list and starts a scan.
+func (d *Display) openWifi() {
+	d.mu.Lock()
+	d.wifiOpen = true
+	d.wifi = wifiState{scanning: true}
+	d.mu.Unlock()
+	wifi.SettingUp(true)
+	slog.Info("wifi page", "open", true)
+	go d.refreshWifi()
+	go d.wifiScan()
+	d.wake()
+}
+
+func (d *Display) closeWifi() {
+	d.mu.Lock()
+	d.wifiOpen = false
+	d.wifi = wifiState{}
+	d.mu.Unlock()
+	wifi.SettingUp(false)
+	slog.Info("wifi page", "open", false)
+	d.wake()
+}
+
+func (d *Display) refreshWifi() {
+	st := wifi.Current(context.Background())
+	d.mu.Lock()
+	d.wifi.status = st
+	d.mu.Unlock()
+	d.wake()
+}
+
+func (d *Display) wifiScan() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	nets, err := wifi.Scan(ctx)
+	d.mu.Lock()
+	d.wifi.scanning = false
+	if err != nil {
+		d.wifi.err = "scan failed: " + err.Error()
+	} else {
+		d.wifi.nets, d.wifi.err = nets, ""
+	}
+	d.mu.Unlock()
+	d.wake()
+}
+
+// wifiTap is a finger on the Wi-Fi pages.
+func (d *Display) wifiTap(x, y int) {
+	d.mu.Lock()
+	w := d.wifi
+	d.mu.Unlock()
+	if w.pick != nil {
+		d.wifiKey(d.r.keyAt(x, y, w.symbols))
+		return
+	}
+	h := d.r.wifiListHit(x, y)
+	switch {
+	case h.done:
+		d.closeWifi()
+	case h.rescan:
+		d.mu.Lock()
+		d.wifi.scanning, d.wifi.err = true, ""
+		d.mu.Unlock()
+		go d.wifiScan()
+	case h.row >= 0:
+		start, end, more := pageWith(len(w.nets), w.page, wifiRows)
+		if more && h.row == wifiRows-1 {
+			d.mu.Lock()
+			d.wifi.page++
+			d.mu.Unlock()
+			return
+		}
+		if start+h.row >= end {
+			return
+		}
+		n := w.nets[start+h.row]
+		if !n.Secured {
+			d.wifiJoin(n, "")
+			return
+		}
+		d.mu.Lock()
+		d.wifi.pick, d.wifi.text, d.wifi.shift, d.wifi.symbols, d.wifi.err = &n, "", false, false, ""
+		d.mu.Unlock()
+	}
+}
+
+// wifiKey is a key on the passphrase keyboard.
+func (d *Display) wifiKey(k string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.wifi.busy != "" {
+		return
+	}
+	switch k {
+	case "":
+	case "shift":
+		d.wifi.shift = !d.wifi.shift
+	case "symbols":
+		d.wifi.symbols = !d.wifi.symbols
+	case "space":
+		d.wifi.text += " "
+	case "backspace":
+		if n := len(d.wifi.text); n > 0 {
+			d.wifi.text = d.wifi.text[:n-1]
+		}
+	case "cancel":
+		d.wifi.pick, d.wifi.text = nil, ""
+	case "join":
+		n := *d.wifi.pick
+		text := d.wifi.text
+		d.mu.Unlock()
+		d.wifiJoin(n, text)
+		d.mu.Lock()
+	default:
+		if d.wifi.shift && !d.wifi.symbols {
+			k = strings.ToUpper(k)
+			d.wifi.shift = false
+		}
+		d.wifi.text += k
+	}
+}
+
+// wifiJoin joins a network in the background and shows how it went.
+func (d *Display) wifiJoin(n wifi.Network, passphrase string) {
+	d.mu.Lock()
+	d.wifi.busy, d.wifi.err = "Connecting to "+n.SSID+"…", ""
+	d.mu.Unlock()
+	d.wake()
+	go func() {
+		err := wifi.Join(context.Background(), n.SSID, passphrase)
+		d.mu.Lock()
+		d.wifi.busy = ""
+		if err != nil {
+			d.wifi.err = err.Error()
+			slog.Warn("wifi: join failed", "ssid", n.SSID, "err", err)
+		} else {
+			d.wifi.pick, d.wifi.text = nil, ""
+			slog.Info("wifi: joined", "ssid", n.SSID)
+		}
+		d.mu.Unlock()
+		d.refreshWifi()
+	}()
 }
 
 // answerShots hands a copy of the canvas to whoever asked for a screenshot.
@@ -897,8 +1095,16 @@ func (d *Display) frame() time.Duration {
 	s.bt = btaudio.Get().State()
 	d.mu.Lock()
 	s.showSheet = d.sheet
+	s.showWifi, s.wifi = d.wifiOpen, d.wifi
 	restartArm, tab := d.restartArm, d.tab
+	wifiAt := d.wifiAt
 	d.mu.Unlock()
+	if (s.showSheet || s.showWifi) && now.Sub(wifiAt) > 5*time.Second && wifi.Available() {
+		d.mu.Lock()
+		d.wifiAt = now
+		d.mu.Unlock()
+		go d.refreshWifi()
+	}
 	if s.showSheet {
 		s.sheet = d.gather(s, restartArm, tab)
 		if tab == tabCameras {
@@ -927,7 +1133,7 @@ func (d *Display) frame() time.Duration {
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
 	}
-	if s.bt.Pairing || s.showSheet {
+	if s.bt.Pairing || s.showSheet || s.showWifi {
 		return 500 * time.Millisecond
 	}
 	if s.showWeather || s.nowPlaying {

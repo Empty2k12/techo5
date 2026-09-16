@@ -455,6 +455,16 @@ session.
    draws the cover, or the station logo on the right, or drawn notes/waves,
    behind station, song and artist. The bottom bar has drawn play/pause
    marks. `/screen.png?radio=<station>|stop` starts a station for a look.
+   FIRST-RUN AND SETUP 2026-09-16 (night): a first-run card until tapped;
+   new devices come up in Ember answering to "alexa" with the wake models
+   shipped in the image; Wi-Fi setup on the screen (`lib/wifi` over
+   wpa_cli, network list and keyboard pages from the Device tab, opened on
+   its own when a device has no address 90 s after boot; the boot keeper
+   holds off while `/run/techo5/wifi-setup` exists); the Bluetooth proxy
+   scans through BlueZ on the Show (`hardware/ble/bluez.go`) but LE
+   discovery reports nothing through the bridged controller yet, so it
+   stays off by default; camprobe and camframe removed; docs/overview.md
+   is the one-page state of the device.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

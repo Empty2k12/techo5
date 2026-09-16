@@ -215,9 +215,11 @@ else are the volume; a tap is the action button.
 
 ## Camera
 
-`cmd/camframe` grabs one frame from the OV02B10 the way the daemon does (register windows
-through the ISP driver's mmap; docs/camera-research.md has the map). In the daemon,
-`hardware/camera` streams on demand with auto-exposure and `feature/camera` serves
+The camera is driven from userspace through the ISP driver's register windows; the code is
+`echod/internal/hardware/camera` and the map, with the dead ends, is docs/camera-research.md.
+(The probe tools that got there, camprobe and camframe, were removed once the package worked;
+they are in the history before 2026-09-16 evening.) `hardware/camera` streams on demand with
+auto-exposure and `feature/camera` serves
 `http://<device>:8181/camera.jpg`, `/camera.mjpeg` and the ESPHome camera entity Home Assistant
 creates on its own. `/screen.png[?sheet=<tab>&theme=<name>]` on the same port is a screenshot of
 the panel, for checking layouts from a PC.

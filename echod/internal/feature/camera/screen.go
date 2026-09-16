@@ -20,6 +20,16 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 		if theme := r.URL.Query().Get("theme"); theme != "" {
 			display.Get().SetTheme(theme)
 		}
+		switch r.URL.Query().Get("wifi") {
+		case "list":
+			display.Get().OpenWifi(false)
+			time.Sleep(6 * time.Second) // a scan takes a few seconds
+		case "keyboard":
+			display.Get().OpenWifi(true)
+			time.Sleep(700 * time.Millisecond)
+		case "off":
+			display.Get().CloseWifi()
+		}
 		if station := r.URL.Query().Get("radio"); station != "" {
 			// A station to start (or "stop"), so the now-playing screen can be looked at.
 			if station == "stop" {

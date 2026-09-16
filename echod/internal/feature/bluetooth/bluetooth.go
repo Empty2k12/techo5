@@ -56,7 +56,7 @@ type beaconState struct {
 // the connection answering anything at all.
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
-	radio  *ble.Radio
+	radio  ble.Scanner
 	enable *esphome.Switch
 	beacon beaconState
 
@@ -83,7 +83,7 @@ func build() *Proxy {
 	minor := beaconMinor(mac)
 	b := &Proxy{
 		proxy:   &esphome.BluetoothProxy{},
-		radio:   ble.Get(),
+		radio:   ble.Default(),
 		beacon:  beaconState{advertisement: beaconAdvertisement(minor), minor: minor},
 		wanted:  make(chan struct{}, 1),
 		reports: make(chan ble.Advertisement, queued),

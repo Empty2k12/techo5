@@ -14,6 +14,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 )
 
 // gather collects what the settings sheet shows. Cheap enough per frame: a few reads and one
@@ -39,6 +40,12 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 	}
 	st.version = layout.Version
 	st.night = config.Get().Screen.Night
+	d.mu.Lock()
+	st.wifi = wifiSummary(d.wifi.status)
+	d.mu.Unlock()
+	if !wifi.Available() {
+		st.wifi = st.address
+	}
 	st.slot = slotName()
 	st.address = address()
 

@@ -20,12 +20,12 @@ const (
 	// sheetRowTop end at 408, above the bar at 416.
 	tabBarBottom   = 70
 	sheetRowTop    = 86
-	sheetRowHeight = 40
-	sheetRows      = 8
+	sheetRowHeight = 36
+	sheetRows      = 9
 	sheetDoneBar   = 64
 
 	// Buttons sit at the right of a row: a wide one, or a narrow (−) beside it.
-	buttonH     = 30
+	buttonH     = 28
 	buttonWide  = 130
 	buttonSmall = 70
 	buttonGap   = 10
@@ -57,6 +57,7 @@ const (
 	rowBrightness
 	rowAuto
 	rowMic
+	rowWifi
 	rowNight
 	rowWake
 	rowAbout
@@ -114,6 +115,7 @@ type settings struct {
 	wakeWord   string
 	volume     int // step out of media.VolumeSteps
 	night      string
+	wifi       string
 	name       string
 	version    string
 	slot       string
@@ -183,7 +185,7 @@ func (r *renderer) settingsPage(s scene) {
 func (r *renderer) row(i int, label string, c color.Color) int {
 	top := sheetRowTop + i*sheetRowHeight
 	draw.Draw(r.dst, image.Rect(r.margin, top+sheetRowHeight-1, r.w-r.margin, top+sheetRowHeight), image.NewUniform(ember), image.Point{}, draw.Src)
-	r.text(r.small, label, r.margin, top+29, c)
+	r.text(r.small, label, r.margin, top+27, c)
 	return top
 }
 
@@ -200,7 +202,7 @@ func (r *renderer) value(top int, text string, buttons int) {
 	for r.width(r.tiny, text) > right-r.margin-230 && len(text) > 4 {
 		text = "…" + text[4:]
 	}
-	r.text(r.tiny, text, right-r.width(r.tiny, text), top+28, dim)
+	r.text(r.tiny, text, right-r.width(r.tiny, text), top+26, dim)
 }
 
 // button draws a box with a label: slot 1 is the narrow left one, 2 the wide right one.
@@ -216,7 +218,7 @@ func (r *renderer) button(top int, slot int, label string, lit bool) {
 		fill, ink = amber, walnut
 	}
 	r.bevel(image.Rect(x0, y0, x1, y0+buttonH), fill, true)
-	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+23, ink)
+	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+21, ink)
 }
 
 func (r *renderer) deviceTab(s scene) {
@@ -243,6 +245,10 @@ func (r *renderer) deviceTab(s scene) {
 	r.value(top, "the mute button does this too", 1)
 	r.button(top, 2, mic, lit)
 
+	top = r.row(rowWifi, "Wi-Fi", cream)
+	r.value(top, st.wifi, 1)
+	r.button(top, 2, "Change", false)
+
 	top = r.row(rowNight, "Screen off at night", cream)
 	r.value(top, nightLabel(st.night), 1)
 	r.button(top, 2, "Next", false)
@@ -251,7 +257,7 @@ func (r *renderer) deviceTab(s scene) {
 	r.value(top, st.wakeWord, 0)
 
 	top = r.row(rowAbout, "About", cream)
-	r.value(top, fmt.Sprintf("%s  ·  %s  ·  slot %s  ·  %s", st.name, st.version, st.slot, st.address), 0)
+	r.value(top, fmt.Sprintf("%s  ·  %s  ·  slot %s", st.name, st.version, st.slot), 0)
 
 	armed := !st.restartArm.IsZero() && st.now.Sub(st.restartArm) < restartWindow
 	top = r.row(rowRestart, "Restart", cream)

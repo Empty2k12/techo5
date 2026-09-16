@@ -52,15 +52,21 @@ func SystemBus() (*dbus.Conn, error) {
 
 // Device is one remote the adapter knows about.
 type Device struct {
-	Path      dbus.ObjectPath
-	Address   string
-	Name      string
-	Icon      string
-	RSSI      int16
-	Paired    bool
-	Trusted   bool
-	Connected bool
-	AudioSink bool // offers A2DP sink: earbuds, a speaker
+	Path        dbus.ObjectPath
+	Address     string
+	AddressType string // "public" or "random"
+	Name        string
+	Icon        string
+	RSSI        int16
+	Paired      bool
+	Trusted     bool
+	Connected   bool
+	AudioSink   bool // offers A2DP sink: earbuds, a speaker
+
+	// What the last advertisement carried, for the proxy.
+	UUIDs            []string
+	ManufacturerData map[uint16][]byte
+	ServiceData      map[string][]byte
 }
 
 // Adapter is hci0 as bluetoothd presents it.
@@ -71,6 +77,10 @@ type Adapter struct {
 
 	// Changed fires when a device appears, goes, or changes; listeners must not block.
 	Changed hook.Hook[struct{}]
+
+	// Advertised fires with a device every time one is heard from: it appeared, or its signal or
+	// advertising data changed. Listeners must not block.
+	Advertised hook.Hook[Device]
 
 	mu      sync.Mutex
 	devices map[dbus.ObjectPath]*Device
@@ -144,6 +154,26 @@ func (d *Device) update(props map[string]dbus.Variant) {
 		switch k {
 		case "Address":
 			d.Address, _ = v.Value().(string)
+		case "AddressType":
+			d.AddressType, _ = v.Value().(string)
+		case "ManufacturerData":
+			if m, ok := v.Value().(map[uint16]dbus.Variant); ok {
+				d.ManufacturerData = map[uint16][]byte{}
+				for k, vv := range m {
+					if b, ok := vv.Value().([]byte); ok {
+						d.ManufacturerData[k] = b
+					}
+				}
+			}
+		case "ServiceData":
+			if m, ok := v.Value().(map[string]dbus.Variant); ok {
+				d.ServiceData = map[string][]byte{}
+				for k, vv := range m {
+					if b, ok := vv.Value().([]byte); ok {
+						d.ServiceData[k] = b
+					}
+				}
+			}
 		case "Name":
 			d.Name, _ = v.Value().(string)
 		case "Alias":
@@ -162,6 +192,7 @@ func (d *Device) update(props map[string]dbus.Variant) {
 			d.Connected, _ = v.Value().(bool)
 		case "UUIDs":
 			if uuids, ok := v.Value().([]string); ok {
+				d.UUIDs = uuids
 				d.AudioSink = false
 				for _, u := range uuids {
 					if strings.EqualFold(u, AudioSink) {
@@ -208,6 +239,7 @@ func (a *Adapter) watch() error {
 
 func (a *Adapter) signal(s *dbus.Signal) {
 	changed := false
+	var heard *Device
 	a.mu.Lock()
 	switch s.Name {
 	case objMgrIfc + ".InterfacesAdded":
@@ -217,6 +249,8 @@ func (a *Adapter) signal(s *dbus.Signal) {
 			if props, ok := ifcs[deviceIfc]; ok {
 				a.devices[path] = deviceFrom(path, props)
 				changed = true
+				cp := *a.devices[path]
+				heard = &cp
 			}
 		}
 	case objMgrIfc + ".InterfacesRemoved":
@@ -237,6 +271,13 @@ func (a *Adapter) signal(s *dbus.Signal) {
 					props, _ := s.Body[1].(map[string]dbus.Variant)
 					d.update(props)
 					changed = true
+					for _, k := range []string{"RSSI", "ManufacturerData", "ServiceData"} {
+						if _, ok := props[k]; ok {
+							cp := *d
+							heard = &cp
+							break
+						}
+					}
 				}
 			}
 		}
@@ -245,6 +286,29 @@ func (a *Adapter) signal(s *dbus.Signal) {
 	if changed {
 		a.Changed.Emit(struct{}{})
 	}
+	if heard != nil {
+		a.Advertised.Emit(*heard)
+	}
+}
+
+// DiscoverLE starts (or stops) discovery of Low Energy devices with every advertisement
+// reported, duplicates included, which is what a proxy scanning for Home Assistant wants.
+func (a *Adapter) DiscoverLE(on bool) error {
+	if !on {
+		return a.Discover(false)
+	}
+	filter := map[string]dbus.Variant{
+		"Transport":     dbus.MakeVariant("le"),
+		"DuplicateData": dbus.MakeVariant(true),
+	}
+	if err := a.obj.Call(adapterIfc+".SetDiscoveryFilter", 0, filter).Err; err != nil {
+		slog.Debug("le discovery filter", "err", err)
+	}
+	err := a.obj.Call(adapterIfc+".StartDiscovery", 0).Err
+	if err != nil && strings.Contains(err.Error(), "InProgress") {
+		return nil
+	}
+	return err
 }
 
 // Devices is what the adapter knows, strongest signal first.

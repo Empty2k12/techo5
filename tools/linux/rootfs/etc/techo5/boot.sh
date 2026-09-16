@@ -68,6 +68,8 @@ t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
 	down=0
 	while true; do
 		sleep 60
+		# Someone is choosing a network on the screen: not a fault, no reboot.
+		[ -e /run/techo5/wifi-setup ] && { down=0; continue; }
 		if [ -n "$(t5_ip)" ]; then
 			down=0
 			# An address without a default route is the aftermath of the link bouncing:

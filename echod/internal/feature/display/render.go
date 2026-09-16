@@ -57,6 +57,10 @@ type scene struct {
 	showSheet bool
 	sheet     settings
 
+	// showWifi is the Wi-Fi pages, over everything but pairing.
+	showWifi bool
+	wifi     wifiState
+
 	// radio feeds the sheet's Radio tab and the now-playing screen; weather is on the clock when known.
 	radio   home.Radio
 	weather home.Weather
@@ -128,6 +132,13 @@ func (r *renderer) draw(s scene) {
 
 	if s.bt.Pairing {
 		r.pairingPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showWifi {
+		r.wifiPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

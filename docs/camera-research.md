@@ -276,3 +276,9 @@ and gamma the 800x600 picture settled on. Stills (`/camera.jpg`, the ESPHome cam
 are full size, about a second each including sensor start; the MJPEG stream and the live view stay
 at 800x600 (114 frames in 14 s while a full still was taken). Auto-exposure samples the first pixel
 of every 13th five-byte group and aims for a mean of 290 on the 10-bit scale.
+
+## Where the code lives now (2026-09-16, night)
+
+`cmd/camprobe` and `cmd/camframe` were removed; `echod/internal/hardware/camera` is the working
+version of everything above and the place to read. The probes are in git history if a register
+experiment is ever needed again.
