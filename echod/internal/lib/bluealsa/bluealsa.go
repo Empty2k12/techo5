@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -43,6 +44,12 @@ type PCM struct {
 // Playable reports whether this is an A2DP stream the daemon can write into.
 func (p PCM) Playable() bool {
 	return strings.HasPrefix(p.Transport, "A2DP") && p.Mode == "sink" && p.Channels > 0 && p.Rate > 0
+}
+
+// Receivable reports whether this is an A2DP stream the daemon can read from: a phone or a computer
+// playing to the device. bluez-alsa names it "source", since it is where the audio comes from.
+func (p PCM) Receivable() bool {
+	return strings.HasPrefix(p.Transport, "A2DP") && p.Mode == "source" && p.Channels > 0 && p.Rate > 0
 }
 
 // Client watches bluez-alsa.
@@ -216,7 +223,8 @@ func (c *Client) PCMs() []PCM {
 // Stream is an open PCM: write interleaved S16_LE frames at the PCM's rate and channel count.
 type Stream struct {
 	PCM
-	fd   int
+	fd   int      // write side (Open)
+	in   *os.File // read side (OpenRead)
 	ctrl *os.File
 }
 
@@ -234,6 +242,40 @@ func (c *Client) Open(p PCM) (*Stream, error) {
 		fd:   int(pcmFD),
 		ctrl: os.NewFile(uintptr(ctrlFD), "bluealsa-ctrl"),
 	}, nil
+}
+
+// OpenRead takes a Receivable PCM for reading: interleaved S16_LE at the PCM's rate and channel
+// count, as the remote sends it. Reads wait while the remote is quiet, go through Go's poller so a
+// deadline or Close ends a waiting read (closing a pipe does not wake a plain blocked read(2)).
+func (c *Client) OpenRead(p PCM) (*Stream, error) {
+	var pcmFD, ctrlFD dbus.UnixFD
+	if err := c.conn.Object(service, p.Path).Call(pcmIfc+".Open", 0).Store(&pcmFD, &ctrlFD); err != nil {
+		return nil, fmt.Errorf("bluealsa: open: %w", err)
+	}
+	// Non-blocking first: os.NewFile hands only a non-blocking descriptor to the poller.
+	_ = syscall.SetNonblock(int(pcmFD), true)
+	return &Stream{
+		PCM:  p,
+		fd:   -1,
+		in:   os.NewFile(uintptr(pcmFD), "bluealsa-pcm"),
+		ctrl: os.NewFile(uintptr(ctrlFD), "bluealsa-ctrl"),
+	}, nil
+}
+
+// Read takes frames from a stream opened with OpenRead.
+func (s *Stream) Read(b []byte) (int, error) {
+	if s.in == nil {
+		return 0, errors.New("bluealsa: stream is not open for reading")
+	}
+	return s.in.Read(b)
+}
+
+// SetReadDeadline bounds the next reads, for noticing a remote that stopped sending.
+func (s *Stream) SetReadDeadline(t time.Time) error {
+	if s.in == nil {
+		return errors.New("bluealsa: stream is not open for reading")
+	}
+	return s.in.SetReadDeadline(t)
 }
 
 // Write hands over frames. It returns syscall.EAGAIN when bluez-alsa's buffer is full; what was
@@ -282,7 +324,12 @@ func (s *Stream) Resume() error { return s.Command("Resume") }
 
 // Close ends the stream; bluez-alsa stops the transport once nothing is open.
 func (s *Stream) Close() error {
-	err := syscall.Close(s.fd)
+	var err error
+	if s.in != nil {
+		err = s.in.Close()
+	} else {
+		err = syscall.Close(s.fd)
+	}
 	if e := s.ctrl.Close(); err == nil {
 		err = e
 	}

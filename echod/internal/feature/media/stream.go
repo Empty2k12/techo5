@@ -92,6 +92,8 @@ type track struct {
 	item   string
 	sounds []string
 	cancel context.CancelFunc
+	// received is audio a remote is sending (PlayPCM), not a url or a generator.
+	received bool
 }
 
 // NewStream builds the stream and joins the speaker's backgrounds. changed is called whenever what it

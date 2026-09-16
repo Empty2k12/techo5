@@ -7,7 +7,8 @@ import "testing"
 // Pairing is answered only in pairing mode; connections only for the audio profiles.
 func TestAgentRules(t *testing.T) {
 	on := false
-	g := agent{pairing: func() bool { return on }}
+	var heard []string
+	g := agent{pairing: func() bool { return on }, paired: func(p string) { heard = append(heard, p) }}
 
 	if g.RequestConfirmation("/x", 123456) == nil || g.RequestAuthorization("/x") == nil {
 		t.Error("a pairing was accepted outside pairing mode")
@@ -15,9 +16,15 @@ func TestAgentRules(t *testing.T) {
 	if _, err := g.RequestPinCode("/x"); err == nil {
 		t.Error("a PIN was given outside pairing mode")
 	}
+	if len(heard) != 0 {
+		t.Errorf("refused pairings were reported as paired: %v", heard)
+	}
 	on = true
-	if g.RequestConfirmation("/x", 123456) != nil || g.RequestAuthorization("/x") != nil {
+	if g.RequestConfirmation("/dev_a", 123456) != nil || g.RequestAuthorization("/dev_b") != nil {
 		t.Error("a pairing was refused in pairing mode")
+	}
+	if len(heard) != 2 || heard[0] != "/dev_a" || heard[1] != "/dev_b" {
+		t.Errorf("accepted pairings reported as %v", heard)
 	}
 
 	for uuid, want := range map[string]bool{
