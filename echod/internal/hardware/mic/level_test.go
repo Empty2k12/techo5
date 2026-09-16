@@ -204,8 +204,8 @@ func TestLevelIsRelativeToTheRoom(t *testing.T) {
 	settle(quiet, -60, 200)
 	settle(loud, -35, 200)
 
-	quietVoice := level(quiet, -42, 40)
-	loudVoice := level(loud, -17, 40)
+	quietVoice := levelAfter(quiet, -42, 40)
+	loudVoice := levelAfter(loud, -17, 40)
 
 	if math.Abs(quietVoice-loudVoice) > 0.1 {
 		t.Errorf("the same voice reads %.2f over a quiet room and %.2f over a loud one", quietVoice, loudVoice)
@@ -219,7 +219,7 @@ func TestLevelIsRelativeToTheRoom(t *testing.T) {
 	}
 
 	// And ordinary speech reaches most of the way up, or nothing ever fills the ring.
-	if talking := level(newRoom(t), -32, 40); talking < 0.6 {
+	if talking := levelAfter(newRoom(t), -32, 40); talking < 0.6 {
 		t.Errorf("speech 25 dB over the room reads %.2f, want most of the way up", talking)
 	}
 }
@@ -240,23 +240,23 @@ func TestLevelRestsAtZeroAndFallsBack(t *testing.T) {
 	l := newLeveler()
 	settle(l, -55, 200)
 
-	if quiet := level(l, -55, 40); quiet > 0.05 {
+	if quiet := levelAfter(l, -55, 40); quiet > 0.05 {
 		t.Errorf("a quiet room reads %.2f, want nothing", quiet)
 	}
 
-	spoke := level(l, -30, 20)
+	spoke := levelAfter(l, -30, 20)
 	if spoke < 0.5 {
 		t.Fatalf("speech reads %.2f, want most of the way up", spoke)
 	}
 
 	// Half a second of quiet has it most of the way down but not out — the release is deliberately
 	// slow enough to see, or the ring would snap dark between words.
-	if after := level(l, -55, 25); after > 0.3 {
+	if after := levelAfter(l, -55, 25); after > 0.3 {
 		t.Errorf("half a second after speech the level is %.2f, want it mostly fallen", after)
 	}
 
 	// A second and a half is silence as far as anything watching is concerned.
-	if after := level(l, -55, 50); after > 0.05 {
+	if after := levelAfter(l, -55, 50); after > 0.05 {
 		t.Errorf("a second and a half after speech the level is %.2f, want nothing", after)
 	}
 }
@@ -267,9 +267,9 @@ func TestLevelRisesFasterThanItFalls(t *testing.T) {
 	l := newLeveler()
 	settle(l, -55, 200)
 
-	up := level(l, -30, 3)
+	up := levelAfter(l, -30, 3)
 	settle(l, -30, 40)
-	down := level(l, -55, 3)
+	down := levelAfter(l, -55, 3)
 
 	if up < 0.2 {
 		t.Errorf("three frames of speech reached %.2f, want it well up already", up)
@@ -309,7 +309,7 @@ func TestLevelIgnoresTheBandTheRingWhinesIn(t *testing.T) {
 	for range 200 {
 		l.observe(quiet)
 	}
-	if got := level(l, -30, 60); got < 0.5 {
+	if got := levelAfter(l, -30, 60); got < 0.5 {
 		t.Errorf("speech at -30 dBFS reads %.2f, want most of the way up", got)
 	}
 }
@@ -355,8 +355,8 @@ func settle(l *leveler, dbfs float64, frames int) {
 	}
 }
 
-// level feeds a steady level and reports what was published at the end of it.
-func level(l *leveler, dbfs float64, frames int) float64 {
+// levelAfter feeds a steady level and reports what was published at the end of it.
+func levelAfter(l *leveler, dbfs float64, frames int) float64 {
 	settle(l, dbfs, frames)
 	return float64(math.Float32frombits(l.level.Load()))
 }

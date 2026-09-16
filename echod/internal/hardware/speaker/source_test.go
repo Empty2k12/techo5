@@ -74,8 +74,11 @@ func TestSummingTwoLoudThingsClampsInsteadOfWrapping(t *testing.T) {
 	p.pending = []int16{math.MaxInt16 - 10}
 	p.Attach(&recorder{fill: 1000})
 
-	if got := played(t, p)[0]; got != math.MaxInt16 {
-		t.Errorf("mixed = %d, want %d", got, math.MaxInt16)
+	// The sum is pinned at full scale and then goes through the output's soft limiter, which bends it
+	// down toward three quarters of full scale; what must never happen is the overflow wrapping it to
+	// a large negative sample, which is a loud crack.
+	if got := played(t, p)[0]; got < limit(math.MaxInt16*0.75) {
+		t.Errorf("mixed = %d, want a loud positive sample, not a wrapped one", got)
 	}
 }
 

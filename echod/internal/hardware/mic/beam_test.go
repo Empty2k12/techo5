@@ -107,6 +107,11 @@ func TestBeamformerImprovesSignalToNoise(t *testing.T) {
 
 // The beam has to end up pointing at the source, or the sum smears the speech instead of adding it.
 func TestBeamformerSteersTowardTheSource(t *testing.T) {
+	if Mics < 3 {
+		// Two microphones cannot tell a source in front from its mirror image behind, and the mixer
+		// does not use the beamformer below three (mixer.go).
+		t.Skip("steering needs a ring of at least three microphones")
+	}
 	for want := range Beams {
 		bearing := float64(want) * 2 * math.Pi / Beams
 

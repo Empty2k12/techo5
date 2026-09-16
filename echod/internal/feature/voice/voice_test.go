@@ -3,21 +3,25 @@ package voice
 import (
 	"testing"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
 
-// What a device advertises as active when nothing has been chosen decides whether a fresh install can
-// be spoken to at all, and it must not come down to which model sorts first.
+// What a device advertises as active when nobody has touched the wake word decides whether a fresh
+// install can be spoken to at all, and it must not come down to which model sorts first. A new device
+// is configured for config.DefaultWakeID; without that model it falls back to the shipped model, and
+// without either to whatever is installed.
 func TestWakeWordsPreselectsTheDefault(t *testing.T) {
 	for name, tc := range map[string]struct {
 		installed []string
 		want      string
 	}{
-		"the default is installed":     {[]string{"hey_jarvis", wake.DefaultModel, "hey_mycroft"}, wake.DefaultModel},
-		"the default sorts last":       {[]string{"alexa", wake.DefaultModel}, wake.DefaultModel},
-		"the default is not installed": {[]string{"hey_jarvis"}, "hey_jarvis"},
-		"nothing installed":            {nil, ""},
+		"the configured word is installed": {[]string{"hey_jarvis", config.DefaultWakeID, wake.DefaultModel}, config.DefaultWakeID},
+		"the configured word sorts last":   {[]string{wake.DefaultModel, "hey_jarvis", config.DefaultWakeID}, config.DefaultWakeID},
+		"only the shipped model":           {[]string{"hey_jarvis", wake.DefaultModel}, wake.DefaultModel},
+		"neither is installed":             {[]string{"hey_jarvis"}, "hey_jarvis"},
+		"nothing installed":                {nil, ""},
 	} {
 		models := make([]wake.Model, 0, len(tc.installed))
 		for _, id := range tc.installed {
