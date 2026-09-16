@@ -1,0 +1,148 @@
+// Package camera serves the Show's own camera over HTTP, for Home Assistant and anything else
+// on the network: a JPEG snapshot and an MJPEG stream. Home Assistant's "Generic Camera" takes the
+// snapshot URL, "MJPEG IP Camera" the stream; either makes the Show a camera entity there.
+//
+// The sensor runs only while a request holds it, and stops a few seconds after the last one, so
+// a device nobody is watching has its camera off — and the mute button keeps it off entirely.
+package camera
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"image/jpeg"
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
+)
+
+func init() {
+	component.Register(component.Network, Get(), component.Order(70))
+}
+
+const (
+	// Port is where the pictures are served: http://<device>:8181/camera.jpg and /camera.mjpeg.
+	Port = 8181
+
+	// quality is the JPEG quality for both.
+	quality = 85
+
+	// snapshotWait bounds a snapshot request: sensor start plus a frame or two.
+	snapshotWait = 8 * time.Second
+)
+
+type Feature struct{}
+
+var shared = &Feature{}
+
+func Get() *Feature { return shared }
+
+func (f *Feature) Name() string { return "camera" }
+
+func (f *Feature) Run(ctx context.Context) error {
+	if !camera.Available() {
+		<-ctx.Done()
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/camera.jpg", f.snapshot)
+	mux.HandleFunc("/camera.mjpeg", f.stream)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "TECHO5 camera: /camera.jpg (snapshot), /camera.mjpeg (stream)")
+	})
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(Port))
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Close()
+	}()
+	slog.Info("camera served", "port", Port)
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func encode(f *camera.Frame) ([]byte, error) {
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, f.RGBA, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// snapshot answers with the next frame.
+func (f *Feature) snapshot(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), snapshotWait)
+	defer cancel()
+	fr, err := camera.Get().Snapshot(ctx)
+	if err != nil {
+		slog.Warn("camera snapshot", "err", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	b, err := encode(fr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.Write(b)
+}
+
+// stream sends frames as they come until the client hangs up.
+func (f *Feature) stream(w http.ResponseWriter, r *http.Request) {
+	release, err := camera.Get().Acquire()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+	const boundary = "techo5frame"
+	frames := make(chan *camera.Frame, 1)
+	cancel := camera.Get().Frames.Listen(func(fr *camera.Frame) {
+		select {
+		case frames <- fr:
+		default: // the client is slower than the sensor: skip, never queue
+		}
+	})
+	defer cancel()
+	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary="+boundary)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case fr := <-frames:
+			b, err := encode(fr)
+			if err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", boundary, len(b)); err != nil {
+				return
+			}
+			if _, err := w.Write(b); err != nil {
+				return
+			}
+			if _, err := fmt.Fprint(w, "\r\n"); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}
+}

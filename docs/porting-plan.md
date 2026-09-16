@@ -433,9 +433,14 @@ session.
    CMMCLK divider (Android does it from userspace); the receiver, TG and IMGO
    DMA are programmed through the ISP driver's register mmap from the genuine
    MT8163 libcamdrv sources (saved outside the repo, see camera-research.md).
-   Next: proper frame sync (the status bits stay 0 with interrupts masked; use
-   the TG frame counter or the driver's ring), 10-bit output, white balance,
-   then a live view on the panel and a snapshot action for Home Assistant.
+   IN THE DAEMON 2026-09-16: `hardware/camera` streams on demand (TG frame
+   counter for sync, three DMA slots, 800x600 RGBA with grey-world white
+   balance, sensor stops 5 s after the last user, refused while muted);
+   `feature/camera` serves http://<device>:8181/camera.jpg and /camera.mjpeg
+   for Home Assistant's Generic Camera / MJPEG IP Camera integrations; the
+   cameras page lists "This Show" first, and "show this show" puts the live
+   view up. Still to do: 10-bit output, a proper demosaic, an ESPHome camera
+   entity so no URL setup is needed, and the CPU cost of JPEG at full rate.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
    shows the weather on the clock and a radio page whose stations come from

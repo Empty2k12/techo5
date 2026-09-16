@@ -233,7 +233,10 @@ const (
 // 0 = 8 bits per pixel, 1 = 10-bit packed (4 pixels in 5 bytes, PAK on), 2 = 16-bit words.
 type imgoFormat int
 
-var formatEnable bool
+var (
+	formatEnable bool
+	nFrames      = 1
+)
 
 func (f imgoFormat) bytesPerLine() int {
 	switch f {
@@ -251,8 +254,10 @@ func main() {
 	noCSI := flag.Bool("no-csi", false, "skip the CSI-2 receiver setup (for register experiments)")
 	bits := flag.Int("bits", 8, "IMGO output: 8, 10 (packed) or 16 bits per pixel")
 	fmtEn := flag.Bool("fmten", false, "also set IMGO_STRIDE.FORMAT/FORMAT_EN for the chosen width")
+	frames := flag.Int("frames", 1, "how many frame starts to run through before stopping")
 	flag.Parse()
 	formatEnable = *fmtEn
+	nFrames = *frames
 
 	var f imgoFormat
 	switch *bits {
@@ -314,7 +319,7 @@ func run(out string, timeout time.Duration, csi bool, format imgoFormat) error {
 
 	// 3. The frame buffer: ION multimedia heap, mapped for the IMGO M4U port, and the port itself
 	// switched to translated mode so the DMA address we hand the ISP is the one we own.
-	buf, mva, err := allocFrame(maxFrameBytes)
+	buf, mva, err := allocFrame(2 * maxFrameBytes)
 	if err != nil {
 		return err
 	}
@@ -399,43 +404,67 @@ func run(out string, timeout time.Duration, csi bool, format imgoFormat) error {
 	fmt.Println("sensor streaming")
 	time.Sleep(50 * time.Millisecond)
 
+	// Frame sync comes from the TG's frame counter (TG_INTER_ST bits 23:16): the CAM interrupt
+	// status registers stay 0 while INT_EN is 0. The buffer is two halves; whenever the counter
+	// moves we point the DMA at the other half, so the half it just left holds a whole frame.
+	halves := [2]uint32{mva, mva + uint32(maxFrameBytes)}
+	cur = 0
+	cam.wr(regImgoBase, halves[cur])
 	cam.mask(regTgVfCon, 0, 1) // VFDATA_EN
 	deadline := time.Now().Add(timeout)
-	var done bool
-	var st, dma uint32
-	for time.Now().Before(deadline) {
-		st |= cam.rd(regCtlIntSt)
-		dma |= cam.rd(regCtlDmaInt)
-		if dma&dmaIntImgoDone != 0 || st&intPass1Done != 0 {
-			done = true
-			break
+	start := time.Now()
+	lastCnt := cam.rd(regTgInterSt) >> 16 & 0xFF
+	frames := 0
+	var lastTick time.Time
+	var periods []time.Duration
+	for time.Now().Before(deadline) && frames < nFrames {
+		cnt := cam.rd(regTgInterSt) >> 16 & 0xFF
+		if cnt != lastCnt {
+			now := time.Now()
+			if !lastTick.IsZero() {
+				periods = append(periods, now.Sub(lastTick))
+			}
+			lastTick = now
+			lastCnt = cnt
+			frames++
+			cur ^= 1
+			cam.wr(regImgoBase, halves[cur]) // next frame goes to the other half
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(500 * time.Microsecond)
 	}
 	cam.mask(regTgVfCon, 1, 0)
-	fmt.Printf("int status %08x, dma int %08x, sof %d sot %d eot %d, tg err %08x dat %08x\n",
-		st, dma, cam.rd(regTgSofCnt), cam.rd(regTgSotCnt), cam.rd(regTgEotCnt), cam.rd(regTgErrCtl), cam.rd(regTgDatNo))
+	elapsed := time.Since(start)
+	fmt.Printf("%d frame starts in %v (%.1f fps), periods %v\n", frames, elapsed.Round(time.Millisecond), float64(frames)/elapsed.Seconds(), periods)
+	fmt.Printf("int status %08x, dma int %08x, tg inter %08x, tg err %08x dat %08x\n",
+		cam.rd(regCtlIntSt), cam.rd(regCtlDmaInt), cam.rd(regTgInterSt), cam.rd(regTgErrCtl), cam.rd(regTgDatNo))
 	showCSI2(sen, mipi)
 	time.Sleep(60 * time.Millisecond) // let a frame in flight finish before we read
 
-	written, last := 0, -1
-	for i, b := range buf {
-		if b != 0xA5 {
-			written++
-			last = i
+	for h := 0; h < 2; h++ {
+		part := buf[h*maxFrameBytes : h*maxFrameBytes+frameBytes]
+		written := 0
+		for _, b := range part {
+			if b != 0xA5 {
+				written++
+			}
 		}
+		fmt.Printf("half %d: %d of %d bytes written by the DMA\n", h, written, frameBytes)
 	}
-	fmt.Printf("buffer bytes changed by the DMA: %d of %d, last at %d (frame needs %d)\n", written, len(buf), last+1, frameBytes)
-	frame := buf[:frameBytes]
+	// The half the DMA is aimed at now may be mid-frame; the other one is complete.
+	frame := buf[int(cur^1)*maxFrameBytes : int(cur^1)*maxFrameBytes+frameBytes]
 	if err := os.WriteFile(out+".raw", frame, 0o644); err != nil {
 		return err
 	}
 	if err := savePreview(out+".png", frame, format); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s.raw (%d bytes, %d bits/pixel) and %s.png\n", out, frameBytes, []int{8, 10, 16}[format], out)
-	if !done {
-		return errors.New("no frame: the IMGO done bit never rose")
+	other := buf[int(cur)*maxFrameBytes : int(cur)*maxFrameBytes+frameBytes]
+	if err := savePreview(out+"-other.png", other, format); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s.raw (%d bytes, %d bits/pixel), %s.png and %s-other.png\n", out, frameBytes, []int{8, 10, 16}[format], out, out)
+	if frames == 0 {
+		return errors.New("no frame: the TG frame counter never moved")
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
@@ -40,8 +41,18 @@ type CameraView struct {
 	span time.Duration // how long it was asked for; Until is restarted from the first frame
 }
 
-// Cameras is the configured list.
-func (f *Feature) Cameras() []config.Camera { return config.Get().Home.Cameras }
+// LocalCamera is the entity name of the device's own camera on the list; it is not a Home
+// Assistant entity, its frames come from the sensor behind the screen.
+const LocalCamera = "local"
+
+// Cameras is the configured list, with the device's own camera first where it has one.
+func (f *Feature) Cameras() []config.Camera {
+	cams := config.Get().Home.Cameras
+	if camera.Available() {
+		return append([]config.Camera{{Entity: LocalCamera, Name: "This Show"}}, cams...)
+	}
+	return cams
+}
 
 // Camera is the view in progress, if any.
 func (f *Feature) Camera() (CameraView, bool) {
@@ -70,7 +81,11 @@ func (f *Feature) ShowCamera(entity string, d time.Duration) {
 	f.mu.Unlock()
 	slog.Info("camera up", "entity", entity, "for", d)
 	if fresh {
-		go f.fetchFrames(entity)
+		if entity == LocalCamera {
+			go f.localFrames()
+		} else {
+			go f.fetchFrames(entity)
+		}
 	}
 	f.Changed.Emit(struct{}{})
 }
@@ -112,6 +127,54 @@ func (f *Feature) fetchFrames(entity string) {
 		if err != nil {
 			slog.Warn("camera frame", "entity", entity, "err", err)
 			time.Sleep(2 * time.Second)
+		}
+	}
+}
+
+// localFrames shows the device's own camera while the view is up: every frame the sensor
+// produces, scaled to the panel.
+func (f *Feature) localFrames() {
+	release, err := camera.Get().Acquire()
+	if err != nil {
+		f.mu.Lock()
+		f.cam.Error = err.Error()
+		f.mu.Unlock()
+		f.Changed.Emit(struct{}{})
+		return
+	}
+	defer release()
+	dst := image.NewRGBA(image.Rect(0, 0, cameraFrameH*camera.Width/camera.Height, cameraFrameH))
+	frames := make(chan *camera.Frame, 1)
+	cancel := camera.Get().Frames.Listen(func(fr *camera.Frame) {
+		select {
+		case frames <- fr:
+		default:
+		}
+	})
+	defer cancel()
+	for {
+		f.mu.Lock()
+		up := f.cam.Entity == LocalCamera && time.Now().Before(f.cam.Until)
+		f.mu.Unlock()
+		if !up {
+			return
+		}
+		select {
+		case fr := <-frames:
+			xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), fr.RGBA, fr.RGBA.Bounds(), xdraw.Src, nil)
+			shown := image.NewRGBA(dst.Bounds())
+			copy(shown.Pix, dst.Pix)
+			f.mu.Lock()
+			if f.cam.Entity == LocalCamera {
+				if f.cam.Frame == nil {
+					f.cam.Until = time.Now().Add(f.cam.span)
+				}
+				f.cam.Frame, f.cam.Error = shown, ""
+			}
+			f.mu.Unlock()
+			f.Changed.Emit(struct{}{})
+		case <-time.After(500 * time.Millisecond):
+			// No frame yet (the sensor is starting) — back round to check the view is still up.
 		}
 	}
 }
