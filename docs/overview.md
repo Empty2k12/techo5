@@ -70,8 +70,9 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 - **Logs**: `/data/techo5-linux/techo5.log` on the device; `dmesg` for the kernel.
 - **Slots**: `slotctl status`, `slotctl install <tar.gz>`, `slotctl switch <a|b>`; a trial slot
   commits after five minutes of a healthy daemon.
-- **Release**: `tools/release.ps1 -Version vX.Y.Z -Notes "..." -Rootfs <tarball>` builds the
-  daemon, writes the manifest, and publishes the release Home Assistant will offer.
+- **Release**: `tools/release.ps1 -Version vX.Y.Z -Notes "..." -Rootfs <tarball> [-Boot <image>]` builds the
+  daemon, writes the manifest, and publishes the release Home Assistant will offer. `-Boot` attaches a
+  boot image built with `build-image.sh --no-key` for new units, and refuses one that carries a key.
 
 ## Known gaps
 
