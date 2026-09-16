@@ -6,6 +6,7 @@
 // CONFIG_BT_HCIVHCI). BlueZ then sees hci0 like on any other board.
 //
 //	btbridge [-stp /dev/stpbt] [-vhci /dev/vhci]
+//	btbridge -uart /dev/ttyMT1 -hcd <patch.hcd> [-baud 3000000]   (a Broadcom controller; brcm.go)
 //
 // Each read on either side returns one whole H4 packet (type byte first);
 // each write must be one whole packet. The vendor driver's read returns 0
@@ -30,14 +31,13 @@ func main() {
 	vhciPath := flag.String("vhci", "/dev/vhci", "kernel virtual HCI device")
 	bdaddr := flag.String("bdaddr", "idme", "public address to give the controller first: 12 hex digits, "+
 		"\"idme\" for the factory one from /proc/idme/bt_mac_addr, \"\" to leave the firmware's")
+	uart := flag.String("uart", "", "a Broadcom controller on this tty instead of -stp (brcm.go)")
+	hcd := flag.String("hcd", "", "with -uart: the firmware patch (.hcd) to load")
+	baud := flag.Int("baud", 3000000, "with -uart: the speed to run the UART at once patched")
 	maxPage := flag.Int("max-feature-page", -1, "report at most this extended features page to the kernel "+
 		"(1 on the Echo Dot, whose controller refuses page 2 after claiming it); -1 leaves replies alone")
 	flag.Parse()
 
-	stp, err := syscall.Open(*stpPath, syscall.O_RDWR, 0)
-	if err != nil {
-		die("open %s: %v", *stpPath, err)
-	}
 	if *bdaddr == "idme" {
 		b, err := os.ReadFile("/proc/idme/bt_mac_addr")
 		if err != nil {
@@ -45,7 +45,21 @@ func main() {
 		}
 		*bdaddr = strings.TrimRight(strings.TrimSpace(string(b)), "\x00")
 	}
-	if *bdaddr != "" {
+	var stp int
+	if *uart != "" {
+		fd, err := brcmInit(*uart, *hcd, *baud, *bdaddr)
+		if err != nil {
+			die("%s: %v", *uart, err)
+		}
+		stp = fd
+	} else {
+		fd, err := syscall.Open(*stpPath, syscall.O_RDWR, 0)
+		if err != nil {
+			die("open %s: %v", *stpPath, err)
+		}
+		stp = fd
+	}
+	if *bdaddr != "" && *uart == "" {
 		if err := setBdaddr(stp, *bdaddr); err != nil {
 			fmt.Fprintf(os.Stderr, "btbridge: set address %s: %v (keeping the controller's own)\n", *bdaddr, err)
 		} else {

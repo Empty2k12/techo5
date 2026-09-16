@@ -222,7 +222,11 @@ t5_dropbear() {
 t5_bt_up() {
 	mod=$1; logdir=${2:-/tmp}
 	[ -e /dev/vhci ] || { log "bt: no /dev/vhci (kernel without Bluetooth); skipping"; return 1; }
-	if [ ! -e /dev/stpbt ]; then
+	# BT_UART (device.conf): a Broadcom controller on a tty, which btbridge patches and brings up itself
+	# (the Echo Spot); otherwise the MediaTek driver module and its /dev/stpbt.
+	if [ -n "${BT_UART:-}" ]; then
+		[ -e "$BT_UART" ] || { log "bt: no $BT_UART"; return 1; }
+	elif [ ! -e /dev/stpbt ]; then
 		[ -e "$mod" ] || { log "bt: driver not found at $mod"; return 1; }
 		insmod "$mod" 2>/tmp/insmod-bt.err || { log "bt: insmod failed: $(cat /tmp/insmod-bt.err)"; return 1; }
 		n=0; while [ $n -lt 10 ] && [ ! -e /dev/stpbt ]; do sleep 1; n=$((n+1)); done
@@ -231,8 +235,12 @@ t5_bt_up() {
 	command -v btbridge >/dev/null || { log "bt: no btbridge"; return 1; }
 	# The factory address from IDME; the firmware otherwise comes up with a random one.
 	addr=$(tr -d '\n\0' < /proc/idme/bt_mac_addr 2>/dev/null)
-	(while true; do btbridge ${addr:+-bdaddr "$addr"} >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
-	n=0; while [ $n -lt 10 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
+	if [ -n "${BT_UART:-}" ]; then
+		(while true; do btbridge -uart "$BT_UART" ${BT_HCD:+-hcd "$BT_HCD"} ${BT_BAUD:+-baud "$BT_BAUD"} ${addr:+-bdaddr "$addr"} >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
+	else
+		(while true; do btbridge ${addr:+-bdaddr "$addr"} >> "$logdir/btbridge.log" 2>&1; sleep 2; done) &
+	fi
+	n=0; while [ $n -lt 20 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
 	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: bridge up but no hci0"; return 1; }
 	# Pairings and bluez-alsa's state must survive reboots and slot changes: keep
 	# them on userdata (the root is read-only).
