@@ -8,6 +8,9 @@ type log >/dev/null 2>&1 || log() { echo "techo5: $*" > /dev/kmsg; }
 # t5_usb_acm: one CDC ACM serial function on the USB gadget (a COM port on the
 # host). Idempotent. The 4.9.77 (TWRP) kernel has the legacy android_usb
 # gadget, the 4.9.337 (LineageOS) kernel has configfs; both are handled.
+# T5_PRODUCT names the USB serial gadget; a device sets it (rootfs: /etc/techo5/device.conf).
+T5_PRODUCT=${T5_PRODUCT:-Echo Show 5 Linux}
+
 t5_usb_acm() {
 	A=/sys/class/android_usb/android0
 	G=/sys/kernel/config/usb_gadget/g1
@@ -17,7 +20,7 @@ t5_usb_acm() {
 		echo 1d6b > $A/idVendor
 		echo 0104 > $A/idProduct
 		echo TECHO5 > $A/iManufacturer
-		echo "Echo Show 5 Linux" > $A/iProduct
+		echo "$T5_PRODUCT" > $A/iProduct
 		echo techo5 > $A/iSerial
 		echo acm > $A/functions
 		[ -e $A/f_acm/instances ] && echo 1 > $A/f_acm/instances
@@ -34,7 +37,7 @@ t5_usb_acm() {
 	echo 0x0200 > $G/bcdUSB
 	mkdir -p $G/strings/0x409
 	echo "TECHO5" > $G/strings/0x409/manufacturer
-	echo "Echo Show 5 Linux" > $G/strings/0x409/product
+	echo "$T5_PRODUCT" > $G/strings/0x409/product
 	echo "techo5" > $G/strings/0x409/serialnumber
 	mkdir -p $G/configs/c.1/strings/0x409
 	echo "acm" > $G/configs/c.1/strings/0x409/configuration

@@ -11,6 +11,14 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 LOGDIR=/data/techo5-linux
 log() { echo "techo5-boot: $*" > /dev/kmsg; echo "$(cut -d' ' -f1 /proc/uptime) $*" >> /run/boot.log; }
+
+# What differs between devices; the Echo Show 5's values unless the image carries its own.
+DATA_DEV=/dev/mmcblk0p16
+STORE_DEV=/dev/mmcblk0p12
+WIFI_MODULE=/vendor/lib/modules/mt76x8_wlan.ko
+BT_MODULE=/vendor/lib/modules/mt76x8_bt.ko
+[ -r /etc/techo5/device.conf ] && . /etc/techo5/device.conf
+export T5_PRODUCT
 . /lib/techo5-lib.sh
 
 # --- Mounts the initramfs normally provides, for a boot that did not come through it.
@@ -23,8 +31,8 @@ if ! mountpoint -q /dev; then
 fi
 mountpoint -q /run || mount -t tmpfs tmpfs /run
 mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp
-mountpoint -q /data || mount -t ext4 -o noatime /dev/mmcblk0p16 /data
-mountpoint -q /store || mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /store
+mountpoint -q /data || mount -t ext4 -o noatime $DATA_DEV /data
+mountpoint -q /store || mount -t ext4 -o ro,noatime $STORE_DEV /store
 # The root is read-only; what needs writing lives on tmpfs or userdata.
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
@@ -52,7 +60,7 @@ t5_usb_acm
 # --- Network. Credentials: the file on userdata, first written from Android's saved network.
 t5_wifi_conf $LOGDIR/wpa_supplicant.conf
 export UDHCPC_SCRIPT=/etc/techo5/udhcpc.sh
-t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
+t5_wifi_up $WIFI_MODULE $LOGDIR/wpa_supplicant.conf
 
 # SSH is echod's (feature/security): off unless switched on, and only with a key on userdata.
 if [ -n "$IP" ]; then
@@ -61,7 +69,7 @@ if [ -n "$IP" ]; then
 fi
 
 # --- Bluetooth (only on a kernel that has it; see t5_bt_up).
-t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
+t5_bt_up $BT_MODULE /var/log
 
 # --- Network keeper: bring Wi-Fi back if it is gone, and reboot after 15 minutes
 # without an address — an unattended unit must never sit unreachable.
@@ -91,7 +99,7 @@ t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
 			reboot
 		fi
 		killall udhcpc wpa_supplicant 2>/dev/null
-		t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
+		t5_wifi_up $WIFI_MODULE $LOGDIR/wpa_supplicant.conf
 	done
 ) &
 

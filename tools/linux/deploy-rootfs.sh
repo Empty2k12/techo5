@@ -30,6 +30,11 @@ TZ_NAME=${TZ_NAME:-UTC}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 VERSION=${VERSION:-}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
+# Another device: BUILD_TAGS (the daemon's, e.g. spot), VENDOR_TGZ (its LineageOS vendor/ tarball) and
+# DEVICE_OVERLAY (files laid over tools/linux/rootfs, with etc/techo5/device.conf).
+BUILD_TAGS=${BUILD_TAGS:-}
+VENDOR_TGZ=${VENDOR_TGZ:-}
+DEVICE_OVERLAY=${DEVICE_OVERLAY:-}
 INSTALL=; REBOOT=; ONDEVICE=
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -52,7 +57,7 @@ export GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0
 pkg=github.com/HuskerMinion/techo5/echod/internal/layout
 commit=$(git -C "$ROOT" rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-(cd "$ROOT/echod" && "$GO" build -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
+(cd "$ROOT/echod" && "$GO" build -tags "$BUILD_TAGS" -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
 for c in fbprobe audioprobe rebootto btbridge; do
 	(cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$ROOT/bin/$c-arm" "./cmd/$c")
 done
@@ -67,8 +72,9 @@ for c in fbprobe audioprobe rebootto btbridge; do cp "$ROOT/bin/$c-arm" "$STAGE/
 [ -e "$ROOT/bin/techo5-aec-arm" ] && cp "$ROOT/bin/techo5-aec-arm" "$STAGE/bin/techo5-aec"
 cp "$ROOT/tools/linux/slotctl" "$ROOT/tools/linux/techo5-lib.sh" "$ROOT/tools/linux/mkrootfs.sh" "$ROOT/tools/linux/packages-rootfs.txt" "$STAGE/tools/"
 cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
+[ -n "$DEVICE_OVERLAY" ] && cp -r "$DEVICE_OVERLAY/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
-cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"
+if [ -n "$VENDOR_TGZ" ]; then cp "$VENDOR_TGZ" "$STAGE/inputs/vendor.tar.gz"; else cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"; fi
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
 # Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
 # them into the state directory when it is empty.

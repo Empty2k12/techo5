@@ -62,7 +62,10 @@ $APK --root "$R" $arch info -v | sort > "$R/etc/techo5-packages"
 # the kernel command line), the audio tuning the daemon reads.
 say "vendor tree"
 tar -xzf "$IN/inputs/vendor.tar.gz" -C "$R" vendor
-[ -e "$R/vendor/lib/modules/mt76x8_wlan.ko" ] || { echo "mkrootfs: vendor tree has no mt76x8_wlan.ko" >&2; exit 1; }
+# The Wi-Fi driver the device boots with (etc/techo5/device.conf in the overlay; the Show's by default).
+WIFI_MODULE=/vendor/lib/modules/mt76x8_wlan.ko
+[ -r "$IN/overlay/etc/techo5/device.conf" ] && WIFI_MODULE=$(sed -n 's/^WIFI_MODULE=//p' "$IN/overlay/etc/techo5/device.conf" | tr -d '"')
+[ -e "$R$WIFI_MODULE" ] || { echo "mkrootfs: vendor tree has no $WIFI_MODULE" >&2; exit 1; }
 
 # Our binaries and scripts.
 install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa" "$R/usr/var/lib/bluealsa"
