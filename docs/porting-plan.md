@@ -428,6 +428,14 @@ session.
    exposes raw register access, IRQ waits and the IMGO DMA ring, but its
    register map is not in the tree — finding it is the next step. `build-kernel.sh` keeps
    KPATCHED=1 for a patched branch should that ever be needed.
+   FIRST FRAME 2026-09-16: `cmd/camframe` grabs a full 1600x1200 raw Bayer
+   frame from Linux. The sensor was silent only because nobody programmed the
+   CMMCLK divider (Android does it from userspace); the receiver, TG and IMGO
+   DMA are programmed through the ISP driver's register mmap from the genuine
+   MT8163 libcamdrv sources (saved outside the repo, see camera-research.md).
+   Next: proper frame sync (the status bits stay 0 with interrupts masked; use
+   the TG frame counter or the driver's ring), 10-bit output, white balance,
+   then a live view on the panel and a snapshot action for Home Assistant.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
    shows the weather on the clock and a radio page whose stations come from

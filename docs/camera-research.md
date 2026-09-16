@@ -176,3 +176,73 @@ TG (TG_SEN_MODE/TG_VF_CON at +0x410/+0x414 in isp_reg.h terms), the RAW path ena
 +0x4 etc.), IMGO DMA (base +0x300, xsize/ysize/stride) with an ION buffer, then SensorControl /
 FEATURE_SET_SCENARIO to start streaming and wait for IMGO_DONE. The SENINF/CSI2/MIPI-RX
 offsets are the outstanding research item (seninf_reg.h for the MT6582/MT6592/MT8127 family).
+
+## First frame (2026-09-16, later)
+
+`cmd/camframe` captures a full 1600 x 1200 raw Bayer frame from Linux. Two things unlocked it.
+
+**The register map.** The genuine MT8163 libcamdrv sources exist on GitHub
+(488315-archive/mt8163-vendor, `mediatek/proprietary/hardware/mtkcam/legacy/platform/mt8163/`):
+`seninf_reg.h`, `seninf_drv.cpp`, `HalSensor.control.cpp`, `isp_reg.h`. Copies and a digest live in
+`D:\platform-tools\echoshow\camera\` (`SENINF-notes.md` has every offset and bit used). The MT6582 and
+MT8127 SENINF layouts are different and must not be used; the ISP side (isp_reg.h) is byte-identical
+to the MT6592 header.
+
+**Register windows, not ioctls.** The ISP driver's mmap hands out the physical blocks directly
+(page offset must equal the base): CAMINF 0x15000000 (0x10000, CAM registers at +0x4000), SENINF
+0x15008000 (0x4000), MIPI RX analog 0x10217000 (0x3000). camframe maps all three and programs them
+the way SeninfDrvImp does; the imgsensor ioctls are used only for power, clock mux, init and the
+preview-mode control.
+
+Sequence that produced the frame (see the code for the exact bits):
+
+1. Open camera-isp (clocks on), SET_MCLK_PLL 48 MHz group, SENINF TG1 divider clkcnt 1 (24 MHz),
+   TGCLK_SEL 1, CLKPOL 1 (the HAL's value for a polarity-LOW sensor).
+2. ION multimedia heap buffer, ION_MM_CONFIG_BUFFER with module id 24 (M4U_PORT_IMGO) then
+   ION_SYS_GET_PHYS for the MVA; the IMGO M4U port switched to translated mode through
+   `/proc/m4u` ioctl MTK_M4U_T_CONFIG_PORT (_IOW 'g' 11, M4U_PORT_STRUCT, Virtuality 1, Distance 1).
+   The m4u device is a proc node, not /dev.
+3. SET_DRIVER, SET_CURRENT_SENSOR, T_OPEN.
+4. CAM: ISP_RESET ioctl; INT_EN 0 (poll, so the kernel's ring-buffer code never runs);
+   CTL_CLK_EN 0x1FFFF; EN1 = TG1_EN | PAK_EN; DMA_EN IMGO; FMT_SEL TG1_FMT RAW10 (1<<16);
+   PIX_ID 0; MUX_SEL2 IMGO_MUX 0 with IMGO_MUX_EN; IMGO_FBC 0; IMGO_BASE = MVA; XSIZE 1599,
+   YSIZE 1199, STRIDE 1600; CTL_IMGO_SIZE 1600<<16|1200; TG_SEN_MODE CMOS_EN|SOT_MODE;
+   TG_VF_CON SPDELAY_MODE; GRAB_PXL 0..1600; GRAB_LIN 0..1200; PATH_CFG 0.
+5. SENINF/CSI (setSeninf1NCSI2 verbatim): analog 0x4C/0x50 &= 0xFEFBEFBE, lanes 0x00..0x10 |= 8,
+   0x24 |= 1, 30 us, 0x20 |= 3, 1 us, lanes |= 1; HSRX calibration (0x3D8 = 0x1F, 0x338 |= 1,
+   0x33C = 0x1541, 0x338 |= 4, 500 us, check 0x344 & 0x10001 and 0x348 & 0x101, undo) — it passes;
+   SENINF1_MUX_CTRL = MUX_EN | SRC 8 | FIFO_FULL_WR_EN 1 | FLUSH 0x3B | PUSH 0x3F; SENINF1_CTRL =
+   EN | SRC 8 | PAD2CAM 10-bit; NCSI2_DPCM 0; NCSI2_CTL |= HSRX_DET_EN, REF_SYNC_DET_EN, ED_SEL
+   (ECC order 1), CLOCK_LANE_EN, DATA_LANE0_EN; LNRD_TIMING settle = 85 ns * 364 / 1000 = 30 << 8;
+   NCSI2_INT_EN 0 (no handler in our kernel for that line); mux soft-reset pulse; TOP_MUX_CTRL[3:0] 0.
+6. CONTROL(preview) on the sensor (its mode table ends with stream-on), then TG_VF_CON.VFDATA_EN.
+
+What the DMA delivers with this setup is **one byte per pixel** (the top 8 of the TG's 12 bits;
+values 5..79 for a dim room, 255 at a lamp), Bayer R first. Findings on the way there:
+
+- With `IMGO_MUX` 0 the DMA is fed by the packer: without `PAK_EN` nothing is written at all,
+  whatever XSIZE says. With PAK_EN and XSIZE 1999 the DMA wrote 600 rows of 2000 bytes: each row
+  was a 1600-byte line plus the first 400 bytes of the next one (the DMA fills XSIZE+1 bytes per
+  row and resyncs at the next line start). XSIZE 1599 / stride 1600 gives the whole frame,
+  1,920,000 bytes, every time. `IMGO_STRIDE.FORMAT/FORMAT_EN` made no difference (FORMAT 1) or
+  killed the DMA (FORMAT 0); left clear. The 10-bit packed output the HAL uses needs another knob
+  (probably the PAK format select) — not found yet, and 8 bits are enough for a preview.
+- The CAM interrupt status registers (INT_STATUS, DMA_INT) read 0 throughout with INT_EN 0, so
+  the "IMGO done" poll never fires and camframe reports "no frame" even when the buffer is full.
+  Frame sync must come from elsewhere: TG_INTER_ST (0x444C, CAM_FRM_CNT bits 23:16), the
+  NCSI2 FRAME_LINE_NUM counter, or the driver's own ring buffer with interrupts enabled.
+- TG_SOF_CNT stays 0 and TG_EOT_CNT reads 0x0FFFFFFF; SENINF1_MUX_INTSTA shows CRCERR, VSIZEERR
+  and HSIZEERR set once the stream runs — the frame is still clean, so these are noted, not
+  understood.
+- Register readbacks after the run: SENINF1_CTRL 0x8001, MUX_CTRL 0x9EFF8080, NCSI2_CTL
+  0x058961F1 (bits beyond the ones we set are reset defaults), analog 0x00/0x04 = 0x8009,
+  0x20 = 0xFF000003, 0x24 = 0x24248801.
+
+The first picture (a person in front of it, sharp, green-tinted because it is raw Bayer with no white
+balance) is kept outside the repo at `D:\platform-tools\echoshow\camera\first-frame-2026-09-16.png`.
+
+Next steps, in order: frame sync via the TG frame counter; continuous capture into two buffers
+(or the driver's ring with interrupts enabled — then the kernel handles the base-address flip);
+white balance and a real demosaic in the daemon; a live "camera" page on the panel; a snapshot
+served to Home Assistant (the ESPHome camera image API or a plain HTTP endpoint) so the Show works
+as a camera entity; 10-bit output later.
