@@ -70,12 +70,19 @@ cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
 cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
-# Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
-# them into the state directory when it is empty.
-if [ -d "$INPUTS/models" ]; then mkdir -p "$STAGE/overlay/usr/share/techo5/models"; cp "$INPUTS"/models/*.tflite "$INPUTS"/models/*.json "$STAGE/overlay/usr/share/techo5/models/"; fi
 # scripts must reach the device with LF endings whatever the checkout did
 for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do sed -i 's/\r$//' "$f"; done
 find "$STAGE/overlay" -type f -exec sed -i 's/\r$//' {} +
+# Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
+# them into the state directory when it is empty. They go in after the line endings are fixed:
+# the models are binary, and stripping a CR before every LF byte corrupted three of four (v0.2.5).
+if [ -d "$INPUTS/models" ]; then
+	mkdir -p "$STAGE/overlay/usr/share/techo5/models"
+	cp "$INPUTS"/models/*.tflite "$INPUTS"/models/*.json "$STAGE/overlay/usr/share/techo5/models/"
+	for m in "$INPUTS"/models/*.tflite; do
+		cmp -s "$m" "$STAGE/overlay/usr/share/techo5/models/$(basename "$m")" || { echo "model copy differs: $m" >&2; exit 1; }
+	done
+fi
 
 OUT=/data/techo5-linux/techo5-rootfs-$VERSION.tar.gz
 REMOTE=/data/techo5-linux/build
