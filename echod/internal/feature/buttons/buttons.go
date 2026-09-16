@@ -21,8 +21,9 @@ func init() {
 // Event types, as Home Assistant sees them. Repeats are not reported: a volume ramp would fill the
 // logbook with dozens of entries for one press.
 const (
-	Press = "press"
-	Hold  = "hold"
+	Press    = "press"
+	Hold     = "hold"
+	LongHold = "long_hold"
 )
 
 // order is the buttons as Home Assistant lists them, since a map has none.
@@ -41,13 +42,17 @@ var (
 func Get() *Events {
 	once.Do(func() {
 		shared = &Events{events: map[buttons.Name]*esphome.Event{}}
+		types := []string{Press, Hold}
+		if buttons.LongHolds() {
+			types = append(types, LongHold)
+		}
 		for _, name := range order {
 			shared.events[name] = &esphome.Event{
 				Base: esphome.Base{
 					ObjectID: "button_" + string(name),
 					Name:     label(string(name)) + " button",
 				},
-				Types: []string{Press, Hold},
+				Types: types,
 			}
 		}
 		buttons.Get().Events.Listen(shared.report)
@@ -77,8 +82,12 @@ func (e *Events) report(ev buttons.Event) {
 	if !ok {
 		return
 	}
-	if ev.Kind == buttons.Hold {
+	switch ev.Kind {
+	case buttons.Hold:
 		entity.Trigger(Hold)
+		return
+	case buttons.LongHold:
+		entity.Trigger(LongHold)
 		return
 	}
 	entity.Trigger(Press)

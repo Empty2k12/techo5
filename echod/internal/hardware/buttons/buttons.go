@@ -35,7 +35,6 @@ const (
 	Action     Name = "action"
 )
 
-
 // LongPress is how long a button must be held to count as held rather than pressed, and
 // RepeatInterval how fast a repeating button ramps while it is down.
 const (
@@ -57,7 +56,15 @@ const (
 
 	// Repeat is a repeating button still being down, every RepeatInterval.
 	Repeat Kind = "repeat"
+
+	// LongHold is a button that does not repeat still being down after longHoldAfter, reported once,
+	// as it happens. It comes after that press's Hold, so whatever the hold started is still going
+	// and is the listener's to undo. Devices where longHoldAfter is zero never report one.
+	LongHold Kind = "long_hold"
 )
+
+// LongHolds reports whether this device reports LongHold at all.
+func LongHolds() bool { return longHoldAfter > 0 }
 
 // Event is one thing a button did.
 type Event struct {
@@ -157,6 +164,7 @@ type held struct {
 	mu     sync.Mutex
 	long   bool
 	timer  *time.Timer
+	longer *time.Timer
 	ticker *time.Ticker
 	done   chan struct{}
 }
@@ -167,6 +175,9 @@ func (h *held) stop() {
 
 	if h.timer != nil {
 		h.timer.Stop()
+	}
+	if h.longer != nil {
+		h.longer.Stop()
 	}
 	if h.done != nil {
 		close(h.done)
@@ -246,13 +257,13 @@ func (c *Controller) pressed(name Name) *held {
 		h.long = true
 		h.mu.Unlock()
 
-		// A repeating button keeps ramping until it is let go; stopping here would end the ramp a few
-		// ticks in.
-		if !repeats(name) {
-			h.stop()
-		}
+		// A repeating button keeps ramping until it is let go, and anything else may still reach a
+		// long hold, so nothing is stopped here: the timer has fired, and release stops the rest.
 		c.emit(name, Hold)
 	})
+	if longHoldAfter > 0 && !repeats(name) {
+		h.longer = time.AfterFunc(longHoldAfter, func() { c.emit(name, LongHold) })
+	}
 	return h
 }
 

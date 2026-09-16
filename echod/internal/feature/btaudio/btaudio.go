@@ -53,6 +53,10 @@ const (
 	notConnected = "Not connected"
 )
 
+// onPaired is told when pairing mode has done its job: a phone paired with the device and connected,
+// or a device it paired out to connected. A screen shows that; the Echo Dot sounds it (button_dot.go).
+var onPaired = func() {}
+
 // Device is one entry on the screen's list.
 type Device struct {
 	Address   string
@@ -375,8 +379,12 @@ func (f *Feature) refresh() {
 		was := f.received[string(p.Path)]
 		f.received[string(p.Path)] = running
 		f.mu.Unlock()
-		if running && !was {
-			f.receive(al, p, d)
+		if running && !was && !f.receive(al, p, d) {
+			// Tried again at the next look rather than never: the stream a remote paused and resumed
+			// quickly can still be held by the track that was playing it until that track lets go.
+			f.mu.Lock()
+			f.received[string(p.Path)] = false
+			f.mu.Unlock()
 		}
 	}
 
@@ -443,7 +451,10 @@ func (f *Feature) refresh() {
 		if err := a.Trust(joined, true); err != nil {
 			slog.Warn("bluetooth trust", "address", joined, "err", err)
 		}
-		safe.Go("bluetooth pairing done", func() { f.SetPairing(false) })
+		safe.Go("bluetooth pairing done", func() {
+			f.SetPairing(false)
+			onPaired()
+		})
 	}
 	if pick != "" {
 		slog.Info("bluetooth pairing: connecting the strongest audio device heard", "address", pick)
@@ -459,15 +470,21 @@ func (f *Feature) refresh() {
 	}
 }
 
-// receive plays what a remote is sending through the speaker, as a media track.
-func (f *Feature) receive(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) {
+// receive plays what a remote is sending through the speaker, as a media track, and reports whether it
+// is: a remote that paused and resumed before its track went quiet is still playing on that track.
+func (f *Feature) receive(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) bool {
+	item := "Bluetooth: " + displayName(d)
+	if media.Get().Receiving() == item {
+		return true
+	}
 	s, err := al.OpenRead(p)
 	if err != nil {
 		slog.Warn("bluetooth: opening a received stream", "device", displayName(d), "err", err)
-		return
+		return false
 	}
 	slog.Info("bluetooth: playing what a device sends", "device", displayName(d), "codec", p.Codec, "rate", p.Rate, "channels", p.Channels)
-	media.Get().PlayReceived("Bluetooth: "+displayName(d), s, p.Rate, p.Channels)
+	media.Get().PlayReceived(item, s, p.Rate, p.Channels)
+	return true
 }
 
 // pairedIncoming is the agent telling us a remote paired with the device (rather than the device
@@ -668,6 +685,7 @@ func (f *Feature) connect(ctx context.Context, address string, pair bool) {
 	slog.Info("bluetooth connected", "device", name)
 	if pair {
 		f.SetPairing(false)
+		onPaired()
 	}
 	f.wake()
 }
