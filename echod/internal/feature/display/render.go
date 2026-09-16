@@ -19,10 +19,12 @@ import (
 	"golang.org/x/image/math/fixed"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 )
 
 // The palette is TECHO5's: walnut ground, amber accent, cream text.
@@ -60,6 +62,16 @@ type scene struct {
 	// security feeds the sheet's Security tab.
 	security security.State
 
+	// ring is a timer or an alarm sounding: the ringing page is over everything. snooze is its length.
+	ring   ringState
+	snooze int
+
+	// alarms feeds the Alarms tab and the next alarm on the clock; draft is the editor's alarm, when
+	// one is open. timers are the running timers, soonest first.
+	alarms alarm.View
+	draft  *alarmDraft
+	timers []timer.Countdown
+
 	// showWifi is the Wi-Fi pages, over everything but pairing.
 	showWifi bool
 	wifi     wifiState
@@ -95,6 +107,9 @@ type renderer struct {
 	small  font.Face // date, corner clock, footer
 	tiny   font.Face
 	margin int
+
+	// labelEnd is where the last settings row's label ends, so its value keeps clear of it.
+	labelEnd int
 }
 
 func newRenderer(dst *image.RGBA) *renderer {
@@ -133,6 +148,10 @@ func newRenderer(dst *image.RGBA) *renderer {
 func (r *renderer) draw(s scene) {
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(walnut), image.Point{}, draw.Src)
 
+	if s.ring.any() {
+		r.ringingPage(s)
+		return
+	}
 	if s.bt.Pairing {
 		r.pairingPage(s)
 		if s.showVolume {
@@ -207,7 +226,9 @@ func (r *renderer) volumeBar(s scene) {
 	r.text(r.small, pct, r.w-r.margin-r.width(r.small, pct), top+38, cream)
 }
 
-// bigClock is the idle screen: the time across the middle, the date beneath.
+// bigClock is the idle screen: the time across the middle, the date beneath, and under that the running
+// timers. With timers the clock moves up to make room. The next alarm, when it is within a day, follows
+// the date.
 func (r *renderer) bigClock(s scene) {
 	hour := s.now.Format("3:04")
 	ampm := s.now.Format("PM")
@@ -216,11 +237,28 @@ func (r *renderer) bigClock(s scene) {
 	gap := 18
 	x := (r.w - hw - gap - aw) / 2
 	base := r.h/2 + 60
+	timers := false
+	for _, t := range s.timers {
+		timers = timers || t.Active
+	}
+	if timers {
+		base -= 36
+	}
 	r.text(r.clock, hour, x, base, cream)
 	r.text(r.ampm, ampm, x+hw+gap, base, amber)
 
 	date := s.now.Format("Monday, January 2")
+	if next := s.alarms.Next; next != nil && next.At.Sub(s.now) < 24*time.Hour {
+		what := "Alarm"
+		if next.Snoozed {
+			what = "Snoozed until"
+		}
+		date += "  ·  " + what + " " + next.At.Format("3:04 PM")
+	}
 	r.text(r.small, date, (r.w-r.width(r.small, date))/2, base+70, dim)
+	if timers {
+		r.timersLine(s, base+128)
+	}
 
 	// The weather, top left, when Home Assistant has told us where to look.
 	if w := s.weather; w.Temp != "" || w.Condition != "" {

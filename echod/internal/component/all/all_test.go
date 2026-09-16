@@ -16,6 +16,8 @@ import (
 // deliberately when that happens. What it catches is a component that stopped registering — which
 // costs nothing at build time and shows up as an entity quietly missing from Home Assistant.
 var registered = []string{
+	"alarm_snooze",
+	"alarm_stop",
 	"ble_advertisements",
 	"bluetooth_audio",
 	"bluetooth_disconnect",
@@ -66,6 +68,7 @@ var registered = []string{
 	"microphone_sensitivity",
 	"min_cores",
 	"mute_led_brightness",
+	"next_alarm",
 	"noise_layer_1",
 	"noise_layer_2",
 	"purge_cache",

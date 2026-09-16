@@ -231,14 +231,14 @@ func (r *renderer) bevel(rect image.Rectangle, fill color.RGBA, raised bool) {
 // on a swatch makes the theme Custom with that colour.
 const (
 	themeRowPreset = 0
-	themeRowRole   = 1 // roles rows follow, one each
-	swatchLeft     = 250
+	themeRowRole   = 1   // roles rows follow, one each
+	swatchLeft     = 214 // from the start of the row: past the label and the colour in force
 )
 
 // swatchAt maps an x on a role row to a swatch index, or -1.
 func (r *renderer) swatchAt(x int) int {
-	x0 := r.margin + swatchLeft
-	w := (r.w - r.margin - x0) / swatchCount
+	x0 := r.sheetLeft() + swatchLeft
+	w := (r.w - sheetPad - x0) / swatchCount
 	if x < x0 || x >= x0+w*swatchCount {
 		return -1
 	}
@@ -252,21 +252,21 @@ func (r *renderer) themeTab(s scene) {
 	r.button(top, 1, "‹", false)
 	r.button(top, 2, "›", false)
 
-	x0 := r.margin + swatchLeft
-	w := (r.w - r.margin - x0) / swatchCount
+	x0 := r.sheetLeft() + swatchLeft
+	w := (r.w - sheetPad - x0) / swatchCount
 	for role := 0; role < roles; role++ {
 		top := r.row(themeRowRole+role, roleNames[role], cream)
 		// The colour in force, as a swatch beside the name.
-		cur := image.Rect(r.margin+170, top+6, r.margin+170+60, top+sheetRowHeight-6)
+		cur := image.Rect(r.sheetLeft()+148, top+8, r.sheetLeft()+148+56, top+sheetRowHeight-8)
 		r.bevel(cur, t.colors[role], false)
 		for i := 0; i < swatchCount; i++ {
 			c := swatch(role, i)
-			rect := image.Rect(x0+i*w+2, top+5, x0+(i+1)*w-2, top+sheetRowHeight-5)
+			rect := image.Rect(x0+i*w+2, top+7, x0+(i+1)*w-2, top+sheetRowHeight-7)
 			r.bevel(rect, c, true)
 			if c == t.colors[role] {
 				draw.Draw(r.dst, rect.Inset(6), image.NewUniform(t.colors[roleText]), image.Point{}, draw.Src)
 			}
 		}
 	}
-	r.text(r.tiny, "Tap a swatch to make the theme your own; ‹ › walk the presets", r.margin, sheetRowTop+(themeRowRole+roles)*sheetRowHeight+28, dim)
+	r.note(themeRowRole+roles, "Tap a swatch to make the theme your own; ‹ › walk the presets")
 }

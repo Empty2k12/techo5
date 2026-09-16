@@ -9,6 +9,7 @@ package hastate
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -42,7 +43,7 @@ type Tracker struct {
 	Changed hook.Hook[Update]
 
 	mu     sync.Mutex
-	wanted []Key
+	wanted map[string][]Key // by owner, so one feature rebuilding its list leaves the others alone
 	values map[Key]string
 }
 
@@ -52,34 +53,49 @@ var (
 )
 
 func Get() *Tracker {
-	once.Do(func() { shared = &Tracker{values: map[Key]string{}} })
+	once.Do(func() { shared = &Tracker{wanted: map[string][]Key{}, values: map[Key]string{}} })
 	return shared
 }
 
 func (t *Tracker) Name() string { return "home assistant states" }
 
-// Want asks for an entity's state, or one attribute of it. Duplicates are fine.
-func (t *Tracker) Want(entity, attribute string) {
-	entity = strings.TrimSpace(entity)
-	if entity == "" {
-		return
-	}
-	k := Key{Entity: entity, Attribute: attribute}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, w := range t.wanted {
-		if w == k {
-			return
+// Follow replaces what owner follows: entity states (Attribute empty) and attributes. Home Assistant
+// is told at its next subscription, so a changed list wants a reconnect.
+func (t *Tracker) Follow(owner string, keys ...Key) {
+	var clean []Key
+	for _, k := range keys {
+		k.Entity = strings.TrimSpace(k.Entity)
+		if k.Entity != "" && !slices.Contains(clean, k) {
+			clean = append(clean, k)
 		}
 	}
-	t.wanted = append(t.wanted, k)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(clean) == 0 {
+		delete(t.wanted, owner)
+		return
+	}
+	t.wanted[owner] = clean
 }
 
-// Forget drops everything wanted, for a component rebuilding its list.
-func (t *Tracker) Forget() {
+// all is every key any owner follows, each once, in a stable order.
+func (t *Tracker) all() []Key {
 	t.mu.Lock()
-	t.wanted = nil
-	t.mu.Unlock()
+	defer t.mu.Unlock()
+	owners := make([]string, 0, len(t.wanted))
+	for o := range t.wanted {
+		owners = append(owners, o)
+	}
+	slices.Sort(owners)
+	var out []Key
+	for _, o := range owners {
+		for _, k := range t.wanted[o] {
+			if !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
 }
 
 // Value is the last value seen for a key, if any has arrived.
@@ -101,9 +117,7 @@ func (t *Tracker) State(entity string) string {
 func (t *Tracker) Handle(ctx context.Context, c *esphome.Conn, msg proto.Message) error {
 	switch m := msg.(type) {
 	case *api.SubscribeHomeAssistantStatesRequest:
-		t.mu.Lock()
-		wanted := append([]Key(nil), t.wanted...)
-		t.mu.Unlock()
+		wanted := t.all()
 		for _, k := range wanted {
 			if err := c.Send(&api.SubscribeHomeAssistantStateResponse{EntityId: k.Entity, Attribute: k.Attribute}); err != nil {
 				return err

@@ -11,23 +11,27 @@ import (
 	"time"
 )
 
-// The settings sheet: a swipe down from the top opens it. Tabs across the top — Device, Bluetooth,
-// Cameras, Radio, Theme, Security — rows under them a finger can hit, buttons on the right of the rows
-// that do something, and a bar at the bottom that closes the sheet. Geometry is shared with the
-// gesture handler. The panel is 960 by 480 in landscape.
+// The settings sheet: a swipe down from the top opens it. The tabs run down the left with Done at
+// their foot, and the rest of the panel is rows a finger can hit, with buttons at the right of the rows
+// that do something. Geometry is shared with the gesture handler. The panel is 960 by 480 in landscape,
+// 125 mm across, so a pixel is 0.13 mm: a 52 px row is 6.8 mm, a 40 px button 5.2 mm.
 const (
-	// The tab bar runs from the top to tabBarBottom; sheetRows rows of sheetRowHeight from
-	// sheetRowTop end at 408, above the bar at 416.
-	tabBarBottom   = 70
-	sheetRowTop    = 86
-	sheetRowHeight = 36
+	// The sidebar: tabs of tabItemH from the top, and Done in the bottom sheetDoneBar of it.
+	sidebarW     = 200
+	tabItemH     = 58
+	sheetDoneBar = 64
+
+	// sheetRows rows of sheetRowHeight from sheetRowTop fill the height; sheetPad keeps them off the
+	// sidebar and the right edge.
+	sheetRowTop    = 8
+	sheetRowHeight = 52
 	sheetRows      = 9
-	sheetDoneBar   = 64
+	sheetPad       = 22
 
 	// Buttons sit at the right of a row: a wide one, or a narrow (−) beside it.
-	buttonH     = 28
-	buttonWide  = 130
-	buttonSmall = 70
+	buttonH     = 40
+	buttonWide  = 124
+	buttonSmall = 64
 	buttonGap   = 10
 
 	// topEdge is how far from the top a swipe down has to start to be the sheet rather than the volume.
@@ -39,9 +43,10 @@ const (
 	restartWindow = 4 * time.Second
 )
 
-// Tabs, in order across the top.
+// Tabs, in order down the sidebar.
 const (
 	tabDevice = iota
+	tabAlarms
 	tabBluetooth
 	tabCameras
 	tabRadio
@@ -50,7 +55,17 @@ const (
 	tabs
 )
 
-var tabNames = [tabs]string{"Device", "Bluetooth", "Cameras", "Radio", "Theme", "Security"}
+var tabNames = [tabs]string{"Device", "Alarms", "Bluetooth", "Cameras", "Radio", "Theme", "Security"}
+
+// tabByName is a tab from its name in any case, for /screen.png?sheet=.
+func tabByName(name string) (int, bool) {
+	for i, n := range tabNames {
+		if strings.EqualFold(n, name) {
+			return i, true
+		}
+	}
+	return 0, false
+}
 
 // Device tab rows, in order.
 const (
@@ -127,47 +142,57 @@ type settings struct {
 	now         time.Time
 }
 
-// sheetHit maps a tap to what it landed on.
+// sheetHit maps a tap to what it landed on. Buttons take a little of the gap beside them, since a
+// finger aimed at a button edge lands on either side of it.
 func (r *renderer) sheetHit(x, y int) hit {
 	h := hit{tab: -1, row: -1, x: x}
 	switch {
-	case y >= r.h-sheetDoneBar:
+	case x < sidebarW && y >= r.h-sheetDoneBar:
 		h.done = true
-	case y < tabBarBottom:
-		h.tab = x * tabs / r.w
+	case x < sidebarW:
+		if t := y / tabItemH; t < tabs {
+			h.tab = t
+		}
 	case y >= sheetRowTop && (y-sheetRowTop)/sheetRowHeight < sheetRows:
 		h.row = (y - sheetRowTop) / sheetRowHeight
-		right := r.w - r.margin
+		right := r.w - sheetPad
 		switch {
-		case x >= right-buttonWide:
+		case x >= right-buttonWide-buttonGap/2:
 			h.button = 2
-		case x >= right-buttonWide-buttonGap-buttonSmall:
+		case x >= right-buttonWide-buttonGap-buttonSmall-buttonGap:
 			h.button = 1
 		}
 	}
 	return h
 }
 
+// sheetLeft is where row content starts, right of the sidebar.
+func (r *renderer) sheetLeft() int { return sidebarW + sheetPad }
+
 func (r *renderer) settingsPage(s scene) {
 	st := s.sheet
-	// Tabs as raised blocks: the open one stands proud in the accent, the rest sit back, sunk into
-	// the rules colour. The open tab runs into the content with no rule under it.
-	tabW := r.w / tabs
-	draw.Draw(r.dst, image.Rect(0, tabBarBottom-2, r.w, tabBarBottom), image.NewUniform(ember), image.Point{}, draw.Src)
+	// The sidebar: a column in the rules colour, the open tab raised in the accent and running into the
+	// content, the others as plain names, and Done at the foot.
+	draw.Draw(r.dst, image.Rect(0, 0, sidebarW, r.h), image.NewUniform(ember), image.Point{}, draw.Src)
 	for i, name := range tabNames {
-		rect := image.Rect(i*tabW+3, 14, (i+1)*tabW-3, tabBarBottom-2)
+		top := i * tabItemH
+		baseline := top + tabItemH/2 + 12
 		if i == st.tab {
-			r.bevel(image.Rect(rect.Min.X, rect.Min.Y-4, rect.Max.X, tabBarBottom), amber, true)
-			r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, walnut)
+			r.bevel(image.Rect(8, top+5, sidebarW+4, top+tabItemH-5), amber, true)
+			r.text(r.small, name, 26, baseline, walnut)
 			continue
 		}
-		r.bevel(rect, ember, false)
-		r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, dim)
+		r.text(r.small, name, 26, baseline, dim)
 	}
+	doneTop := r.h - sheetDoneBar
+	draw.Draw(r.dst, image.Rect(0, doneTop, sidebarW, doneTop+2), image.NewUniform(walnut), image.Point{}, draw.Src)
+	r.text(r.body, "Done", (sidebarW-r.width(r.body, "Done"))/2, doneTop+46, cream)
 
 	switch st.tab {
 	case tabDevice:
 		r.deviceTab(s)
+	case tabAlarms:
+		r.alarmsTab(s)
 	case tabBluetooth:
 		r.bluetoothTab(s)
 	case tabCameras:
@@ -179,40 +204,51 @@ func (r *renderer) settingsPage(s scene) {
 	case tabSecurity:
 		r.securityTab(s)
 	}
+}
 
-	top := r.h - sheetDoneBar
-	draw.Draw(r.dst, image.Rect(0, top, r.w, r.h), image.NewUniform(ember), image.Point{}, draw.Src)
-	label := "Done"
-	r.text(r.body, label, (r.w-r.width(r.body, label))/2, top+45, cream)
+// note is a line of explanation under a tab's rows, starting below row.
+func (r *renderer) note(row int, text string) {
+	y := sheetRowTop + row*sheetRowHeight + 34
+	for _, line := range r.wrap(r.tiny, text, r.w-sheetPad-r.sheetLeft()) {
+		r.text(r.tiny, line, r.sheetLeft(), y, dim)
+		y += 32
+	}
 }
 
 // row draws one row's rule and label, and returns its top.
 func (r *renderer) row(i int, label string, c color.Color) int {
 	top := sheetRowTop + i*sheetRowHeight
-	draw.Draw(r.dst, image.Rect(r.margin, top+sheetRowHeight-1, r.w-r.margin, top+sheetRowHeight), image.NewUniform(ember), image.Point{}, draw.Src)
-	r.text(r.small, label, r.margin, top+27, c)
+	left := r.sheetLeft()
+	draw.Draw(r.dst, image.Rect(left, top+sheetRowHeight-1, r.w-sheetPad, top+sheetRowHeight), image.NewUniform(ember), image.Point{}, draw.Src)
+	r.text(r.small, label, left, top+37, c)
+	r.labelEnd = left + r.width(r.small, label)
 	return top
 }
 
-// value writes a row's value, right-aligned before its buttons (or the edge when it has none).
+// value writes a row's value, right-aligned before its buttons (or the edge when it has none), and never
+// over the row's label: a long value loses its beginning, since the end is the part that changes.
 func (r *renderer) value(top int, text string, buttons int) {
-	right := r.w - r.margin
+	right := r.w - sheetPad
 	switch buttons {
 	case 1:
 		right -= buttonWide + buttonGap
 	case 2:
 		right -= buttonWide + buttonGap + buttonSmall + buttonGap
 	}
-	// Long values are trimmed from the left so the end, which changes, stays visible.
-	for r.width(r.tiny, text) > right-r.margin-230 && len(text) > 4 {
-		text = "…" + text[4:]
+	room := right - r.labelEnd - 20
+	for r.width(r.tiny, text) > room {
+		runes := []rune(strings.TrimPrefix(text, "…"))
+		if len(runes) <= 1 {
+			return
+		}
+		text = "…" + string(runes[1:])
 	}
-	r.text(r.tiny, text, right-r.width(r.tiny, text), top+26, dim)
+	r.text(r.tiny, text, right-r.width(r.tiny, text), top+35, dim)
 }
 
 // button draws a box with a label: slot 1 is the narrow left one, 2 the wide right one.
 func (r *renderer) button(top int, slot int, label string, lit bool) {
-	right := r.w - r.margin
+	right := r.w - sheetPad
 	x0, x1 := right-buttonWide, right
 	if slot == 1 {
 		x0, x1 = right-buttonWide-buttonGap-buttonSmall, right-buttonWide-buttonGap
@@ -223,7 +259,7 @@ func (r *renderer) button(top int, slot int, label string, lit bool) {
 		fill, ink = amber, walnut
 	}
 	r.bevel(image.Rect(x0, y0, x1, y0+buttonH), fill, true)
-	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+21, ink)
+	r.text(r.tiny, label, x0+(x1-x0-r.width(r.tiny, label))/2, y0+29, ink)
 }
 
 func (r *renderer) deviceTab(s scene) {
@@ -278,7 +314,7 @@ func (r *renderer) deviceTab(s scene) {
 func (r *renderer) bluetoothTab(s scene) {
 	bt := s.bt
 	if !bt.Available {
-		r.text(r.tiny, "Bluetooth is not available on this build", r.margin, sheetRowTop+31, dim)
+		r.note(0, "Bluetooth is not available on this build")
 		return
 	}
 	switch {
@@ -298,13 +334,13 @@ func (r *renderer) bluetoothTab(s scene) {
 	r.value(top, "put it in pairing mode first", 1)
 	r.button(top, 2, "Pair", false)
 	if bt.Status != "" {
-		r.text(r.tiny, bt.Status, r.margin, sheetRowTop+3*sheetRowHeight+10, dim)
+		r.note(2, bt.Status)
 	}
 }
 
 func (r *renderer) camerasTab(s scene) {
 	if len(s.cameras) == 0 {
-		r.text(r.tiny, "Not set up: call the home_cameras action from Home Assistant", r.margin, sheetRowTop+31, dim)
+		r.note(0, "Not set up: call the home_cameras action from Home Assistant")
 		return
 	}
 	start, end, more := pageOf(len(s.cameras), s.sheet.page)
@@ -321,12 +357,12 @@ func (r *renderer) camerasTab(s scene) {
 func (r *renderer) radioTab(s scene) {
 	rd := s.radio
 	if !rd.Configured {
-		r.text(r.tiny, "Not set up: call the home_radio action from Home Assistant", r.margin, sheetRowTop+31, dim)
+		r.note(0, "Not set up: call the home_radio action from Home Assistant")
 		return
 	}
 	rows := radioList(rd)
 	if len(rows) == 0 {
-		r.text(r.tiny, "No stations yet", r.margin, sheetRowTop+31, dim)
+		r.note(0, "No stations yet")
 		return
 	}
 	start, end, more := pageOf(len(rows), s.sheet.page)
@@ -335,7 +371,7 @@ func (r *renderer) radioTab(s scene) {
 	}
 	for i, name := range rows[start:end] {
 		c := color.Color(cream)
-		label, right := name, "Play"
+		label, right := stationLabel(name), "Play"
 		if name == "■ Stop" {
 			label, right = "Stop", "Stop"
 		}
@@ -420,6 +456,17 @@ func (r *renderer) securityTab(s scene) {
 	} else {
 		r.value(top, "on for updates and downloads", 0)
 	}
+}
+
+// stationLabel drops the service a station list names in each entry ("101.1 WXYZ on iHeartRadio"): on a
+// list of them it is the same words on every row.
+func stationLabel(name string) string {
+	for _, tail := range []string{" on iHeartRadio", " on iHeart", " on TuneIn", " on Tune In"} {
+		if t, ok := strings.CutSuffix(name, tail); ok {
+			return t
+		}
+	}
+	return name
 }
 
 func onOff(v bool) string {

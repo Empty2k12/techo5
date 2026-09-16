@@ -188,19 +188,18 @@ func (f *Feature) Name() string { return "home" }
 func (f *Feature) Restore(c config.Config) { f.want(c.Home) }
 
 func (f *Feature) want(h config.Home) {
-	t := hastate.Get()
-	t.Forget()
+	var keys []hastate.Key
 	if h.Weather != "" {
-		t.Want(h.Weather, "")
-		t.Want(h.Weather, "temperature")
-		t.Want(h.Weather, "temperature_unit")
+		keys = append(keys, hastate.Key{Entity: h.Weather}, hastate.Key{Entity: h.Weather, Attribute: "temperature"},
+			hastate.Key{Entity: h.Weather, Attribute: "temperature_unit"})
 	}
 	for _, s := range h.Radio.Stations {
-		t.Want(s, "options")
+		keys = append(keys, hastate.Key{Entity: s, Attribute: "options"})
 	}
 	if h.Radio.Now != "" {
-		t.Want(h.Radio.Now, "")
+		keys = append(keys, hastate.Key{Entity: h.Radio.Now})
 	}
+	hastate.Get().Follow("home", keys...)
 }
 
 // Actions are how Home Assistant configures this: which weather entity to show, and how the

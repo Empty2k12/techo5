@@ -32,6 +32,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
@@ -39,6 +40,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
@@ -132,6 +134,11 @@ type Display struct {
 	// stays once the turn is over.
 	weatherArmed bool
 	weatherUntil time.Time
+
+	// draft is the alarm open in the Alarms tab's editor; ringPreview shows the ringing page silently
+	// until then.
+	draft       *alarmDraft
+	ringPreview time.Time
 }
 
 var (
@@ -196,6 +203,8 @@ func build() *Display {
 	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	security.Get().Changed.Listen(func(struct{}) { d.wake() })
+	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
+	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	return d
 }
@@ -376,6 +385,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		return
 	}
+	// A timer or an alarm ringing: its page takes every tap.
+	if st := d.ringing(time.Now()); st.any() {
+		if g.Kind == touch.Tap {
+			d.ringTap(g.X, g.Y, st)
+		}
+		d.wake()
+		return
+	}
+
 	// The first-run card: any tap puts it away for good.
 	if !config.Get().Screen.Welcomed {
 		if g.Kind == touch.Tap {
@@ -529,7 +547,7 @@ func (d *Display) sheetTap(h hit) {
 	}
 	if h.tab >= 0 {
 		d.mu.Lock()
-		d.tab, d.page, d.restartArm = h.tab, 0, time.Time{}
+		d.tab, d.page, d.restartArm, d.draft = h.tab, 0, time.Time{}, nil
 		d.mu.Unlock()
 		if h.tab == tabCameras {
 			go home.Get().Prewarm()
@@ -567,6 +585,8 @@ func (d *Display) sheetTap(h hit) {
 		}
 	case tabSecurity:
 		d.securityTap(h)
+	case tabAlarms:
+		d.alarmsTap(h, page)
 	case tabRadio:
 		rows := radioList(home.Get().Radio())
 		i, ok := d.listTap(len(rows), page, h.row)
@@ -723,7 +743,7 @@ func (d *Display) night(now time.Time, on bool, view voice.State) bool {
 	d.mu.Unlock()
 	switch {
 	case in && on:
-		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle
+		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle || d.ringing(now).any()
 		if playing, _ := media.Get().Playing(); playing || busy {
 			return false
 		}
@@ -998,16 +1018,22 @@ func (d *Display) SetTheme(name string) {
 	d.wake()
 }
 
-// OpenSheet puts the settings sheet up on a tab, or takes it down for a tab below zero.
-func (d *Display) OpenSheet(tab int) {
-	if tab < 0 {
+// OpenSheet puts the settings sheet up on the named tab, or takes it down for "off". It reports whether
+// the name meant anything.
+func (d *Display) OpenSheet(name string) bool {
+	if strings.EqualFold(name, "off") {
 		d.showSheet(false)
-		return
+		return true
+	}
+	tab, ok := tabByName(name)
+	if !ok {
+		return false
 	}
 	d.mu.Lock()
-	d.sheet, d.tab, d.restartArm = true, tab%tabs, time.Time{}
+	d.sheet, d.tab, d.page, d.restartArm = true, tab, 0, time.Time{}
 	d.mu.Unlock()
 	d.wake()
+	return true
 }
 
 func (d *Display) wake() {
@@ -1065,6 +1091,12 @@ func (d *Display) frame() time.Duration {
 	d.mu.Unlock()
 
 	now := time.Now()
+	ring := d.ringing(now)
+	if ring.any() && !on {
+		// A ring lights a dark panel, night or not: its page is how it is stopped.
+		d.apply(true, d.ceilingOrDefault(), false)
+		on = true
+	}
 	if d.night(now, on, view) {
 		return time.Minute
 	}
@@ -1101,7 +1133,10 @@ func (d *Display) frame() time.Duration {
 		return 80 * time.Millisecond
 	}
 
-	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at}
+	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at, ring: ring}
+	s.snooze = config.Get().Alarms.Snooze()
+	s.alarms = alarm.Get().View(now)
+	s.timers = timer.Get().List(now)
 	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger {
 		s.phase = "lingering"
 	}
@@ -1138,6 +1173,12 @@ func (d *Display) frame() time.Duration {
 		if tab == tabSecurity {
 			s.security = security.Get().State()
 		}
+		d.mu.Lock()
+		if d.draft != nil && tab == tabAlarms {
+			c := *d.draft
+			s.draft = &c
+		}
+		d.mu.Unlock()
 	}
 	s.camera, s.showCamera = home.Get().Camera()
 	s.nowPlaying = (s.phase == "idle") && d.nowPlaying()
@@ -1160,6 +1201,9 @@ func (d *Display) frame() time.Duration {
 
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
+	}
+	if ring.any() {
+		return 500 * time.Millisecond
 	}
 	if s.bt.Pairing || s.showSheet || s.showWifi {
 		return 500 * time.Millisecond

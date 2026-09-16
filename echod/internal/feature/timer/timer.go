@@ -23,6 +23,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
@@ -64,7 +65,46 @@ type Timers struct {
 	mu    sync.Mutex
 	held  map[string]*timer
 	stop  context.CancelFunc
+	rang  string // the name of what is ringing, for the screen
 	shown []led.Color
+
+	// Changed fires when a timer starts, changes, ends or rings, and when the ringing stops.
+	Changed hook.Hook[struct{}]
+}
+
+// Countdown is a timer as the screen shows it.
+type Countdown struct {
+	Name   string
+	Left   time.Duration
+	Total  time.Duration
+	Active bool
+}
+
+// List is every timer, soonest running first and paused ones after.
+func (t *Timers) List(now time.Time) []Countdown {
+	t.mu.Lock()
+	out := make([]Countdown, 0, len(t.held))
+	for _, c := range t.held {
+		out = append(out, Countdown{Name: c.name, Left: c.remaining(now), Total: c.total, Active: c.active})
+	}
+	t.mu.Unlock()
+	slices.SortFunc(out, func(a, b Countdown) int {
+		if a.Active != b.Active {
+			if a.Active {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Or(cmp.Compare(a.Left, b.Left), cmp.Compare(a.Name, b.Name))
+	})
+	return out
+}
+
+// RingingName is the name of the timer ringing now, if one is.
+func (t *Timers) RingingName() (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rang, t.stop != nil
 }
 
 // timer is one of them. left is what was last known and at is when that was true, so a running timer
@@ -158,6 +198,7 @@ func (t *Timers) Event(e esphome.TimerEvent) {
 	}
 	t.show()
 	t.publish()
+	t.Changed.Emit(struct{}{})
 }
 
 // publish names what is counting down, soonest first. It follows the table rather than the clock, so
@@ -196,6 +237,7 @@ func (t *Timers) Forget() {
 	}
 	t.show()
 	t.publish()
+	t.Changed.Emit(struct{}{})
 }
 
 // Ringing reports whether a finished timer is sounding, which is one of the things that makes the
@@ -253,6 +295,7 @@ func (t *Timers) finished(e esphome.TimerEvent) {
 	if t.stop != nil {
 		return
 	}
+	t.rang = cmp.Or(e.Name, "Timer")
 
 	var ctx context.Context
 	ctx, t.stop = context.WithCancel(context.Background())
@@ -264,9 +307,10 @@ func (t *Timers) finished(e esphome.TimerEvent) {
 func (t *Timers) ring(ctx context.Context) {
 	defer func() {
 		t.mu.Lock()
-		t.stop = nil
+		t.stop, t.rang = nil, ""
 		t.mu.Unlock()
 		t.show()
+		t.Changed.Emit(struct{}{})
 	}()
 
 	t.alarm.Play(led.EffectPulse, alarmColor)

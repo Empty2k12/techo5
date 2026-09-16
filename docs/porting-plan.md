@@ -503,6 +503,24 @@ session.
    init now starts both from its wait loop whenever the address shows up.
    Verified: rescue boot with SSH and daemon up at 38 s, password logins
    refused, normal slot boot afterwards.
+   TIMERS, ALARMS, SETTINGS SIDEBAR 2026-09-16: timers were only drawn on an
+   LED ring the Show does not have; they now count down under the clock
+   (soonest, a bar for what is left, "+n more") and ring on a full-screen
+   page. `feature/alarm` adds alarms: set on the device (Alarms tab editor:
+   hour, minute, day chips, repeat presets) or from Home Assistant
+   (`alarm_set{time,days,label}`, `alarm_delete{time,label}`), and helpers
+   followed with `alarms_follow{entities}` ("input_datetime.x" rings daily,
+   a date+time once; "=input_boolean.y" arms it). They ring from the
+   device's clock, skip anything more than 10 minutes stale (clock set by
+   NTP after boot), turn one-offs off after ringing, and snooze 9 minutes.
+   Entities: sensor next_alarm, buttons stop_alarm (also cancels a snooze)
+   and snooze_alarm. `hastate` now keeps a follow list per owner, so the
+   home feature rebuilding its list no longer drops anyone else's. The
+   settings sheet moved its tabs into a left sidebar with Done at its foot;
+   rows are 52 px with 40 px buttons (were 36/28, under 5 mm on this panel).
+   Verified on the bench: alarm set from Home Assistant rang on the minute,
+   stopped from the screen; snoozed from Home Assistant, shown as snoozed,
+   cancelled with Stop.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

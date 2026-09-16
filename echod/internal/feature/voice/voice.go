@@ -17,6 +17,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
@@ -142,7 +143,7 @@ func (v *Voice) Action() {
 // would be worse than not listening for it at all. Nothing is playing then, so there is nothing the word
 // could sensibly mean.
 func (v *Voice) Interrupt() {
-	if !speaker.Sound().Busy() && !timer.Get().Ringing() {
+	if !speaker.Sound().Busy() && !timer.Get().Ringing() && !alarm.Get().Ringing() {
 		if playing, _ := media.Get().Playing(); !playing {
 			slog.Debug("stop word ignored, nothing to stop")
 			return
@@ -157,8 +158,10 @@ func (v *Voice) Interrupt() {
 // stopped. The action button falls through to starting a turn when it returns false; a stop word has
 // nothing to fall through to and simply does nothing.
 func (v *Voice) Stop() bool {
-	// Before the turn, because a timer ringing over one is what the person is reaching for.
-	if timer.Get().Stop() {
+	// Before the turn, because a timer or an alarm ringing over one is what the person is reaching for.
+	stopped := timer.Get().Stop()
+	stopped = alarm.Get().Stop() || stopped
+	if stopped {
 		return true
 	}
 

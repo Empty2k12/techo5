@@ -14,7 +14,8 @@ import (
 )
 
 // registerScreen adds /screen.png: what the panel shows. ?sheet= opens the settings sheet on a
-// tab first (device, bluetooth, cameras, radio, theme, security; "off" closes it) and ?theme= switches the palette,
+// tab first (device, alarms, bluetooth, cameras, radio, theme, security; "off" closes it), ?alarm=new
+// opens the alarm editor, ?ring=preview shows the ringing page silently, and ?theme= switches the palette,
 // so the sheet and the themes can be looked at without a finger on the device. Off unless the
 // Screen web access switch is on: the options change what the device is doing.
 func (f *Feature) registerScreen(mux *http.ServeMux) {
@@ -40,12 +41,19 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 				home.Get().Play(station)
 			}
 		}
-		if tab := r.URL.Query().Get("sheet"); tab != "" {
-			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "theme": 4, "security": 5, "off": -1}
-			if t, ok := tabs[tab]; ok {
-				display.Get().OpenSheet(t)
-				time.Sleep(700 * time.Millisecond)
-			}
+		if tab := r.URL.Query().Get("sheet"); tab != "" && display.Get().OpenSheet(tab) {
+			time.Sleep(700 * time.Millisecond)
+		}
+		if r.URL.Query().Get("alarm") == "new" {
+			// The alarm editor on a new alarm, so its page can be looked at.
+			display.Get().OpenSheet("alarms")
+			display.Get().EditNewAlarm()
+			time.Sleep(700 * time.Millisecond)
+		}
+		if r.URL.Query().Get("ring") == "preview" {
+			// The ringing page, silent, for a look.
+			display.Get().PreviewRing(10 * time.Second)
+			time.Sleep(700 * time.Millisecond)
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()

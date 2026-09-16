@@ -13,8 +13,14 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   wake word works over music.
 - **Screen**: clock and weather, the conversation as it happens, a now-playing page with song and
   artwork, a forecast page, live views of Home Assistant cameras and of the Show's own camera, and
-  a swipe-down settings sheet with tabs (Device, Bluetooth, Cameras, Radio, Theme, Security) and Wi-Fi
+  a swipe-down settings sheet with its tabs down the left (Device, Alarms, Bluetooth, Cameras, Radio,
+  Theme, Security) and Wi-Fi
   setup with an on-screen keyboard. A first-run card shows once.
+- **Timers and alarms**: voice timers from Home Assistant count down under the clock; alarms are set
+  on the Alarms tab or with the `alarm_set` action, or followed from Home Assistant `input_datetime`
+  helpers (`alarms_follow`), and ring from the device's own clock even when Home Assistant is down.
+  A ringing timer or alarm takes the whole screen, lights a dark one, and offers Stop and Snooze
+  (9 minutes); the stop word, the action button and Home Assistant's Stop/Snooze buttons work too.
 - **Radio**: stations from Home Assistant's lists, playing on the device's own speaker or on
   Bluetooth earbuds; song, artist and cover from iHeartRadio or TuneIn behind the page.
 - **Camera**: the front camera as a Home Assistant camera entity (plus JPEG and MJPEG over HTTP
@@ -71,5 +77,4 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 - Song metadata rests on two undocumented service endpoints; when one changes shape the page
   falls back to the station logo.
 - Exposure has no scene awareness: a bright window behind a face still darkens the face.
-- Timers and alarms have no screen of their own.
 - The Wi-Fi keyboard offers letters, digits and common symbols; no other alphabets.

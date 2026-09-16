@@ -36,6 +36,7 @@ type Config struct {
 	Screen     Screen     `json:"screen"`
 	Home       Home       `json:"home"`
 	Security   Security   `json:"security"`
+	Alarms     Alarms     `json:"alarms"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -84,6 +85,7 @@ func (w Writer) Screen() ScreenWriter         { return ScreenWriter(w) }
 func (w Writer) Diag() DiagWriter             { return DiagWriter(w) }
 func (w Writer) Media() MediaWriter           { return MediaWriter(w) }
 func (w Writer) Security() SecurityWriter     { return SecurityWriter(w) }
+func (w Writer) Alarms() AlarmsWriter         { return AlarmsWriter(w) }
 func (w Writer) Sendspin() SendspinWriter     { return SendspinWriter(w) }
 func (w Writer) Home() HomeWriter             { return HomeWriter(w) }
 

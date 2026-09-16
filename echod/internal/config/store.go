@@ -97,7 +97,7 @@ func Load(path string) (*Store, error) {
 	return st, nil
 }
 
-// Get returns a copy. The wake words are copied too, or a caller holding the snapshot would be
+// Get returns a copy. The wake words and alarm lists are copied too, or a caller holding the snapshot would be
 // holding the store's own slice.
 func (st *Store) Get() Config {
 	st.mu.Lock()
@@ -105,6 +105,8 @@ func (st *Store) Get() Config {
 
 	c := st.c
 	c.Wake.Words = slices.Clone(st.c.Wake.Words)
+	c.Alarms.List = slices.Clone(st.c.Alarms.List)
+	c.Alarms.Follow = slices.Clone(st.c.Alarms.Follow)
 	return c
 }
 
