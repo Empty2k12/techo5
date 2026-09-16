@@ -7,8 +7,18 @@ type Screen struct {
 	Brightness int  `json:"brightness"`
 	Auto       bool `json:"auto"`
 
-	// Theme names the screen's palette; empty is the first one.
-	Theme string `json:"theme,omitempty"`
+	// Theme names the screen's palette; empty is the first one, "Custom" is Palette.
+	Theme   string  `json:"theme,omitempty"`
+	Palette Palette `json:"palette,omitempty"`
+}
+
+// Palette is a custom theme's five colours, as #rrggbb.
+type Palette struct {
+	Ground string `json:"ground,omitempty"`
+	Accent string `json:"accent,omitempty"`
+	Text   string `json:"text,omitempty"`
+	Dim    string `json:"dim,omitempty"`
+	Rules  string `json:"rules,omitempty"`
 }
 
 // DefaultScreenBrightness is comfortable on a desk in a lit room; the panel's own top is glaring.
@@ -34,4 +44,9 @@ func (w ScreenWriter) Auto(v bool) error {
 
 func (w ScreenWriter) Theme(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.Theme = v })
+}
+
+// Custom saves a palette and makes it the theme.
+func (w ScreenWriter) Custom(p Palette) error {
+	return w.st.Update(func(c *Config) { c.Screen.Theme, c.Screen.Palette = "Custom", p })
 }

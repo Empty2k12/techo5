@@ -38,7 +38,6 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 		st.wakeWord = "off"
 	}
 	st.version = layout.Version
-	st.theme = themes[themeIndex(config.Get().Screen.Theme)].name
 	st.slot = slotName()
 	st.address = address()
 

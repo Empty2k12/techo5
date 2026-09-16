@@ -3,32 +3,63 @@
 package display
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"log/slog"
+	"math"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
 
 // Themes: five colours make the whole screen — the ground, the accent, the text, a dim text and
 // the rules and boxes. The palette lives in package variables the renderer reads on every frame,
-// so switching is a matter of assigning them; the choice is saved with the screen settings.
+// so switching is a matter of assigning them; the choice is saved with the screen settings. A
+// preset is picked by name; a colour changed on the Theme tab makes the theme "Custom", saved as
+// its five colours.
 type theme struct {
-	name                             string
-	ground, accent, text, dim, rules color.RGBA
+	name   string
+	colors [roles]color.RGBA
+}
+
+// The five roles, in the order the Theme tab lists them.
+const (
+	roleGround = iota
+	roleAccent
+	roleText
+	roleDim
+	roleRules
+	roles
+)
+
+var roleNames = [roles]string{"Ground", "Accent", "Text", "Dim text", "Rules"}
+
+func rgb(v uint32) color.RGBA { return color.RGBA{uint8(v >> 16), uint8(v >> 8), uint8(v), 0xff} }
+
+func preset(name string, ground, accent, text, dim, rules uint32) theme {
+	return theme{name, [roles]color.RGBA{rgb(ground), rgb(accent), rgb(text), rgb(dim), rgb(rules)}}
 }
 
 var themes = []theme{
-	{"Walnut", color.RGBA{0x1c, 0x15, 0x11, 0xff}, color.RGBA{0xe9, 0xa2, 0x3b, 0xff}, color.RGBA{0xe8, 0xdc, 0xc8, 0xff}, color.RGBA{0x8a, 0x7d, 0x6c, 0xff}, color.RGBA{0x3a, 0x2c, 0x22, 0xff}},
-	{"Slate", color.RGBA{0x14, 0x19, 0x20, 0xff}, color.RGBA{0x5c, 0xb8, 0xff, 0xff}, color.RGBA{0xe4, 0xea, 0xf0, 0xff}, color.RGBA{0x7c, 0x88, 0x96, 0xff}, color.RGBA{0x27, 0x30, 0x3b, 0xff}},
-	{"Midnight", color.RGBA{0x08, 0x0a, 0x10, 0xff}, color.RGBA{0x2e, 0xd9, 0xb8, 0xff}, color.RGBA{0xdd, 0xe6, 0xe8, 0xff}, color.RGBA{0x6c, 0x7a, 0x80, 0xff}, color.RGBA{0x18, 0x1e, 0x2a, 0xff}},
-	{"Forest", color.RGBA{0x10, 0x1a, 0x14, 0xff}, color.RGBA{0xd8, 0xb4, 0x4a, 0xff}, color.RGBA{0xe6, 0xec, 0xdc, 0xff}, color.RGBA{0x7d, 0x8c, 0x78, 0xff}, color.RGBA{0x22, 0x34, 0x28, 0xff}},
-	{"Plum", color.RGBA{0x1a, 0x10, 0x1c, 0xff}, color.RGBA{0xf0, 0x7c, 0xa8, 0xff}, color.RGBA{0xf0, 0xe4, 0xec, 0xff}, color.RGBA{0x8c, 0x74, 0x88, 0xff}, color.RGBA{0x36, 0x24, 0x3c, 0xff}},
-	{"Paper", color.RGBA{0xf2, 0xea, 0xdc, 0xff}, color.RGBA{0xb8, 0x5c, 0x1e, 0xff}, color.RGBA{0x2a, 0x22, 0x1c, 0xff}, color.RGBA{0x7a, 0x6e, 0x62, 0xff}, color.RGBA{0xd8, 0xcc, 0xb8, 0xff}},
+	preset("Walnut", 0x1c1511, 0xe9a23b, 0xe8dcc8, 0x8a7d6c, 0x3a2c22),
+	preset("Slate", 0x141920, 0x5cb8ff, 0xe4eaf0, 0x7c8896, 0x27303b),
+	preset("Midnight", 0x080a10, 0x2ed9b8, 0xdde6e8, 0x6c7a80, 0x181e2a),
+	preset("Forest", 0x101a14, 0xd8b44a, 0xe6ecdc, 0x7d8c78, 0x223428),
+	preset("Plum", 0x1a101c, 0xf07ca8, 0xf0e4ec, 0x8c7488, 0x36243c),
+	preset("Ocean", 0x0a1622, 0x36c6e0, 0xdcecf4, 0x6e8896, 0x163040),
+	preset("Ember", 0x180c0a, 0xf05a3c, 0xf2e2da, 0x8e7068, 0x3a1c16),
+	preset("Mint", 0x0e1a18, 0x6ee7b7, 0xe2f2ec, 0x709088, 0x1c342e),
+	preset("Lavender", 0x14121e, 0xb69cff, 0xeae6f4, 0x8078a0, 0x2a2640),
+	preset("Graphite", 0x161616, 0xffffff, 0xe0e0e0, 0x8a8a8a, 0x303030),
+	preset("Cherry", 0x1c0a10, 0xff3b6b, 0xf4e0e6, 0x907080, 0x3c1824),
+	preset("Paper", 0xf2eadc, 0xb85c1e, 0x2a221c, 0x7a6e62, 0xd8ccb8),
+	preset("Linen", 0xf6f1e8, 0x2c6e9e, 0x1e2630, 0x6f7a86, 0xd9d1c4),
 }
 
-// themeIndex finds a theme by name; unknown names are the first.
+const customName = "Custom"
+
+// themeIndex finds a preset by name; unknown names (and Custom) are the first.
 func themeIndex(name string) int {
 	for i, t := range themes {
 		if t.name == name {
@@ -38,21 +69,119 @@ func themeIndex(name string) int {
 	return 0
 }
 
-// applyTheme sets the palette. Called from the display's goroutine only.
-func applyTheme(name string) {
-	t := themes[themeIndex(name)]
-	walnut, amber, cream, dim, ember = t.ground, t.accent, t.text, t.dim, t.rules
+// current is the palette in force, from the config.
+func current() theme {
+	sc := config.Get().Screen
+	if sc.Theme == customName {
+		t := theme{name: customName}
+		for i, hex := range [roles]string{sc.Palette.Ground, sc.Palette.Accent, sc.Palette.Text, sc.Palette.Dim, sc.Palette.Rules} {
+			c, err := parseHex(hex)
+			if err != nil {
+				return themes[0]
+			}
+			t.colors[i] = c
+		}
+		return t
+	}
+	return themes[themeIndex(sc.Theme)]
 }
 
-// nextTheme moves to the next theme and saves it.
-func nextTheme() string {
-	cur := config.Get().Screen.Theme
-	next := themes[(themeIndex(cur)+1)%len(themes)].name
-	if err := config.Set().Screen().Theme(next); err != nil {
+// applyTheme sets the palette the renderer draws with. Called from the display's goroutine only.
+func applyTheme(t theme) {
+	walnut, amber, cream, dim, ember = t.colors[roleGround], t.colors[roleAccent], t.colors[roleText], t.colors[roleDim], t.colors[roleRules]
+}
+
+// stepTheme moves to the next (or previous) preset and saves it.
+func stepTheme(by int) {
+	sc := config.Get().Screen
+	i := themeIndex(sc.Theme)
+	if sc.Theme == customName {
+		i = -1 // Custom sits before the first preset
+		if by < 0 {
+			i = len(themes)
+		}
+	}
+	i = ((i+by)%len(themes) + len(themes)) % len(themes)
+	if err := config.Set().Screen().Theme(themes[i].name); err != nil {
 		slog.Warn("saving the theme failed", "err", err)
 	}
-	slog.Info("theme", "name", next)
-	return next
+	slog.Info("theme", "name", themes[i].name)
+}
+
+// setRole changes one colour of the palette in force and saves the result as Custom.
+func setRole(role int, c color.RGBA) {
+	t := current()
+	t.colors[role] = c
+	p := config.Palette{Ground: hex(t.colors[0]), Accent: hex(t.colors[1]), Text: hex(t.colors[2]), Dim: hex(t.colors[3]), Rules: hex(t.colors[4])}
+	if err := config.Set().Screen().Custom(p); err != nil {
+		slog.Warn("saving the custom theme failed", "err", err)
+	}
+	slog.Info("theme", "role", roleNames[role], "color", hex(c))
+}
+
+func hex(c color.RGBA) string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
+
+func parseHex(s string) (color.RGBA, error) {
+	var r, g, b uint8
+	if _, err := fmt.Sscanf(s, "#%02x%02x%02x", &r, &g, &b); err != nil {
+		return color.RGBA{}, err
+	}
+	return color.RGBA{r, g, b, 0xff}, nil
+}
+
+// hsl makes a colour from hue (degrees), saturation and lightness (0..1).
+func hsl(h, s, l float64) color.RGBA {
+	c := (1 - math.Abs(2*l-1)) * s
+	hp := math.Mod(h, 360) / 60
+	x := c * (1 - math.Abs(math.Mod(hp, 2)-1))
+	var r, g, b float64
+	switch {
+	case hp < 1:
+		r, g, b = c, x, 0
+	case hp < 2:
+		r, g, b = x, c, 0
+	case hp < 3:
+		r, g, b = 0, c, x
+	case hp < 4:
+		r, g, b = 0, x, c
+	case hp < 5:
+		r, g, b = x, 0, c
+	default:
+		r, g, b = c, 0, x
+	}
+	m := l - c/2
+	return color.RGBA{uint8((r + m) * 255), uint8((g + m) * 255), uint8((b + m) * 255), 0xff}
+}
+
+// swatchCount is how many swatches a role's strip has: two neutrals and twelve hues.
+const swatchCount = 14
+
+// swatch is the i-th choice for a role: the strip is lit for the job the role does — grounds
+// dark, accents vivid, text pale, dim text muted, rules a shade above a ground.
+func swatch(role, i int) color.RGBA {
+	var s, l float64
+	switch role {
+	case roleGround:
+		s, l = 0.35, 0.13
+	case roleAccent:
+		s, l = 0.85, 0.60
+	case roleText:
+		s, l = 0.35, 0.88
+	case roleDim:
+		s, l = 0.15, 0.50
+	default:
+		s, l = 0.30, 0.24
+	}
+	switch i {
+	case 0: // a neutral at the role's lightness
+		return hsl(0, 0, l)
+	case 1: // a light neutral, for light themes and text
+		if role == roleGround || role == roleRules {
+			return hsl(30, 0.25, 1-l*0.7)
+		}
+		return hsl(0, 0, 0.2+l*0.7)
+	}
+	return hsl(float64(i-2)*30, s, l)
 }
 
 // shift lightens (positive) or darkens (negative) a colour by d per channel.
@@ -86,7 +215,6 @@ func (r *renderer) bevel(rect image.Rectangle, fill color.RGBA, raised bool) {
 		light, shadow = shadow, light
 	}
 	if raised {
-		// The drop shadow, two translucent steps below and to the right.
 		sh := image.Rect(rect.Min.X+3, rect.Max.Y, rect.Max.X+3, rect.Max.Y+3)
 		draw.Draw(r.dst, sh, image.NewUniform(shade), image.Point{}, draw.Over)
 		sh = image.Rect(rect.Max.X, rect.Min.Y+3, rect.Max.X+3, rect.Max.Y)
@@ -97,4 +225,48 @@ func (r *renderer) bevel(rect image.Rectangle, fill color.RGBA, raised bool) {
 	draw.Draw(r.dst, image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+2, rect.Max.Y), image.NewUniform(light), image.Point{}, draw.Src)
 	draw.Draw(r.dst, image.Rect(rect.Min.X, rect.Max.Y-2, rect.Max.X, rect.Max.Y), image.NewUniform(shadow), image.Point{}, draw.Src)
 	draw.Draw(r.dst, image.Rect(rect.Max.X-2, rect.Min.Y, rect.Max.X, rect.Max.Y), image.NewUniform(shadow), image.Point{}, draw.Src)
+}
+
+// The Theme tab: a preset row with previous and next, then a strip of swatches per role; a tap
+// on a swatch makes the theme Custom with that colour.
+const (
+	themeRowPreset = 0
+	themeRowRole   = 1 // roles rows follow, one each
+	swatchLeft     = 250
+)
+
+// swatchAt maps an x on a role row to a swatch index, or -1.
+func (r *renderer) swatchAt(x int) int {
+	x0 := r.margin + swatchLeft
+	w := (r.w - r.margin - x0) / swatchCount
+	if x < x0 || x >= x0+w*swatchCount {
+		return -1
+	}
+	return (x - x0) / w
+}
+
+func (r *renderer) themeTab(s scene) {
+	t := current()
+	top := r.row(themeRowPreset, "Preset", cream)
+	r.value(top, t.name, 2)
+	r.button(top, 1, "‹", false)
+	r.button(top, 2, "›", false)
+
+	x0 := r.margin + swatchLeft
+	w := (r.w - r.margin - x0) / swatchCount
+	for role := 0; role < roles; role++ {
+		top := r.row(themeRowRole+role, roleNames[role], cream)
+		// The colour in force, as a swatch beside the name.
+		cur := image.Rect(r.margin+170, top+6, r.margin+170+60, top+sheetRowHeight-6)
+		r.bevel(cur, t.colors[role], false)
+		for i := 0; i < swatchCount; i++ {
+			c := swatch(role, i)
+			rect := image.Rect(x0+i*w+2, top+5, x0+(i+1)*w-2, top+sheetRowHeight-5)
+			r.bevel(rect, c, true)
+			if c == t.colors[role] {
+				draw.Draw(r.dst, rect.Inset(6), image.NewUniform(t.colors[roleText]), image.Point{}, draw.Src)
+			}
+		}
+	}
+	r.text(r.tiny, "Tap a swatch to make the theme your own; ‹ › walk the presets", r.margin, sheetRowTop+(themeRowRole+roles)*sheetRowHeight+28, dim)
 }

@@ -107,9 +107,6 @@ type Display struct {
 	tab  int
 	page int
 
-	// theme is the palette to draw with; the frame applies it when it changes.
-	theme, themeOn string
-
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
 	weatherArmed bool
@@ -378,6 +375,11 @@ func (d *Display) gesture(g touch.Gesture) {
 
 	switch g.Kind {
 	case touch.Tap:
+		// A short swipe from the top edge that never made a notch arrives as a tap; it must not
+		// start a turn. The top band is the sheet's, taps there do nothing.
+		if g.Y < topEdge {
+			return
+		}
 		d.mu.Lock()
 		weatherUp := time.Now().Before(d.weatherUntil)
 		idle := d.view.Phase == "idle"
@@ -460,6 +462,17 @@ func (d *Display) sheetTap(h hit) {
 			d.showSheet(false)
 			home.Get().ShowCamera(cams[i].Entity, camListShow)
 		}
+	case tabTheme:
+		switch {
+		case h.row == themeRowPreset && h.button == 1:
+			stepTheme(-1)
+		case h.row == themeRowPreset && h.button == 2:
+			stepTheme(+1)
+		case h.row >= themeRowRole && h.row < themeRowRole+roles && d.r != nil:
+			if i := d.r.swatchAt(h.x); i >= 0 {
+				setRole(h.row-themeRowRole, swatch(h.row-themeRowRole, i))
+			}
+		}
 	case tabRadio:
 		rows := radioList(home.Get().Radio())
 		i, ok := d.listTap(len(rows), page, h.row)
@@ -526,13 +539,6 @@ func (d *Display) deviceTap(h hit) {
 	case rowMic:
 		if h.button == 2 {
 			mute.Get().Toggle()
-		}
-	case rowTheme:
-		if h.button == 2 {
-			name := nextTheme()
-			d.mu.Lock()
-			d.theme = name
-			d.mu.Unlock()
 		}
 	case rowRestart:
 		if h.button != 2 {
@@ -619,15 +625,11 @@ func (d *Display) Screenshot(ctx context.Context) (*image.RGBA, error) {
 	}
 }
 
-// SetTheme switches the palette by name and saves it.
+// SetTheme switches to a preset by name and saves it.
 func (d *Display) SetTheme(name string) {
-	name = themes[themeIndex(name)].name
-	if err := config.Set().Screen().Theme(name); err != nil {
+	if err := config.Set().Screen().Theme(themes[themeIndex(name)].name); err != nil {
 		slog.Warn("saving the theme failed", "err", err)
 	}
-	d.mu.Lock()
-	d.theme = name
-	d.mu.Unlock()
 	d.wake()
 }
 
@@ -703,19 +705,7 @@ func (d *Display) frame() time.Duration {
 		d.answerShots()
 		return time.Hour
 	}
-	d.mu.Lock()
-	if d.theme == "" {
-		d.theme = config.Get().Screen.Theme
-		if d.theme == "" {
-			d.theme = themes[0].name
-		}
-	}
-	theme, themeOn := d.theme, d.themeOn
-	d.themeOn = theme
-	d.mu.Unlock()
-	if theme != themeOn {
-		applyTheme(theme)
-	}
+	applyTheme(current())
 
 	d.mu.Lock()
 	booting, started := d.booting, d.started

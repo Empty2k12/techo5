@@ -45,10 +45,11 @@ const (
 	tabBluetooth
 	tabCameras
 	tabRadio
+	tabTheme
 	tabs
 )
 
-var tabNames = [tabs]string{"Device", "Bluetooth", "Cameras", "Radio"}
+var tabNames = [tabs]string{"Device", "Bluetooth", "Cameras", "Radio", "Theme"}
 
 // Device tab rows, in order.
 const (
@@ -56,7 +57,6 @@ const (
 	rowBrightness
 	rowAuto
 	rowMic
-	rowTheme
 	rowWake
 	rowAbout
 	rowRestart
@@ -99,6 +99,7 @@ type hit struct {
 	tab    int // a tab header, or -1
 	row    int // a row, or -1
 	button int // 0 none, 1 the narrow left button, 2 the wide right one
+	x      int // where across, for rows that are more than buttons
 	done   bool
 }
 
@@ -106,7 +107,6 @@ type hit struct {
 type settings struct {
 	tab        int
 	page       int // of the open tab's list, when it does not fit
-	theme      string
 	brightness int // ceiling, percent
 	auto       bool
 	muted      bool
@@ -122,7 +122,7 @@ type settings struct {
 
 // sheetHit maps a tap to what it landed on.
 func (r *renderer) sheetHit(x, y int) hit {
-	h := hit{tab: -1, row: -1}
+	h := hit{tab: -1, row: -1, x: x}
 	switch {
 	case y >= r.h-sheetDoneBar:
 		h.done = true
@@ -167,6 +167,8 @@ func (r *renderer) settingsPage(s scene) {
 		r.camerasTab(s)
 	case tabRadio:
 		r.radioTab(s)
+	case tabTheme:
+		r.themeTab(s)
 	}
 
 	top := r.h - sheetDoneBar
@@ -238,10 +240,6 @@ func (r *renderer) deviceTab(s scene) {
 	}
 	r.value(top, "the mute button does this too", 1)
 	r.button(top, 2, mic, lit)
-
-	top = r.row(rowTheme, "Theme", cream)
-	r.value(top, st.theme, 1)
-	r.button(top, 2, "Next", false)
 
 	top = r.row(rowWake, "Wake word", cream)
 	r.value(top, st.wakeWord, 0)

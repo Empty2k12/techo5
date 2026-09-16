@@ -20,7 +20,7 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 			display.Get().SetTheme(theme)
 		}
 		if tab := r.URL.Query().Get("sheet"); tab != "" {
-			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "off": -1}
+			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "theme": 4, "off": -1}
 			if t, ok := tabs[tab]; ok {
 				display.Get().OpenSheet(t)
 				time.Sleep(700 * time.Millisecond)
