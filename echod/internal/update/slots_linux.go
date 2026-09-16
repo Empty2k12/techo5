@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
-	"time"
 )
 
 // On the Linux image the daemon is not a file to swap but part of a root filesystem in one of
