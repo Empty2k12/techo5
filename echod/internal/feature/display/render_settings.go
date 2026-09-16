@@ -433,15 +433,15 @@ func (r *renderer) securityTab(s scene) {
 	}
 
 	top = r.row(secRowCamera, "Camera on the network", cream)
-	r.value(top, "port 8181, no login", 1)
+	r.value(top, "no login", 1)
 	r.button(top, 2, onOff(sec.Camera), sec.Camera)
 
 	top = r.row(secRowScreen, "Screen on the network", cream)
-	r.value(top, "port 8181, no login", 1)
+	r.value(top, "no login", 1)
 	r.button(top, 2, onOff(sec.Screen), sec.Screen)
 
 	top = r.row(secRowSendspin, "Sendspin player", cream)
-	r.value(top, "port 8928, for Music Assistant", 1)
+	r.value(top, "Music Assistant", 1)
 	r.button(top, 2, onOff(st.sendspin), st.sendspin)
 
 	top = r.row(secRowLink, "Home Assistant link", cream)

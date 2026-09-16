@@ -25,27 +25,37 @@ update.
 
 ## Status
 
-Early, but talking. The ported daemon (`echod/`) runs on a Show as an init service beside
-LineageOS, appears in Home Assistant as an ESPHome voice satellite, and completes voice turns:
-wake word on the device, transcription and reply through Home Assistant, speech from the
-speaker. The next step is a Linux-only image where the daemon also owns the screen; see
-`docs/porting-plan.md`.
+In daily use on a Show, with no Android at all: the unit boots its own Alpine Linux image and one
+daemon (`echod/`) does everything. It is a Home Assistant voice satellite with an on-device wake
+word and echo cancellation, a media player with radio and Bluetooth earbuds, a clock with weather,
+timers and alarms, a camera entity, and a touch settings sheet; it updates itself over the air
+from these releases into A/B slots with automatic fallback. [docs/overview.md](docs/overview.md) is
+the one-page description; [docs/porting-plan.md](docs/porting-plan.md) is how it got here.
 
-For daily use the working path on this hardware is still:
+Getting there still takes an unlocked bootloader
+([amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/))
+and the first-install steps in [tools/linux/README.md](tools/linux/README.md). A step-by-step
+guide for a new unit is being written from a first install on a second Show.
 
-- bootloader unlock with [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/),
-- [LineageOS 18.1 (unofficial)](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/),
-- the [ShowAssist](https://github.com/HuskerMinion/showassist) Android app as
-  the satellite and display.
+## Screenshots
 
-That works, but it is Android underneath. The plan in
-[docs/porting-plan.md](docs/porting-plan.md) is to replace the Android layers
-step by step, starting with the voice path.
+Taken from the device's own screen (`/screen.png`, with placeholders for names and addresses).
 
-## Installing on a Show
+| | |
+|---|---|
+| ![Clock with weather and the next alarm](docs/screenshots/clock.png) | ![An alarm ringing, with Stop and Snooze](docs/screenshots/ringing.png) |
+| Clock, weather and the next alarm | A ringing alarm |
+| ![Settings: Device tab](docs/screenshots/settings-device.png) | ![Settings: Alarms tab](docs/screenshots/settings-alarms.png) |
+| Settings: Device | Settings: Alarms |
+| ![Alarm editor](docs/screenshots/alarm-editor.png) | ![Settings: Security tab](docs/screenshots/settings-security.png) |
+| Setting an alarm | Settings: Security |
+| ![Settings: Theme tab](docs/screenshots/settings-theme.png) | |
+| Settings: Theme | |
 
-On a cronos unit already running LineageOS 18.1 with USB debugging and rooted debugging
-enabled:
+## Running the daemon beside LineageOS (the older route)
+
+Before the Linux image, the daemon ran as an init service on LineageOS 18.1. That still works, on a
+unit with USB debugging and rooted debugging enabled:
 
 ```powershell
 cd echod
@@ -65,8 +75,9 @@ when asked. Android and any app on the screen keep running, silently.
 [EchoLocal](https://github.com/ygelfand/echolocal) (MIT) already turns the
 Echo Dot 2 (`biscuit`, the same MT8163 family) into an ESPHome-native Home
 Assistant satellite with a single static Go daemon that drives the hardware
-directly. TECHO5 intends to bring that daemon to `cronos` and add the display
-layer it does not have, rather than port a whole Linux distribution first.
+directly. TECHO5 brought that daemon to `cronos`, added the display, camera,
+Bluetooth and update layers it did not have, and put it on a minimal Alpine
+root filesystem in place of Android.
 
 See:
 

@@ -139,6 +139,10 @@ type Display struct {
 	// until then.
 	draft       *alarmDraft
 	ringPreview time.Time
+
+	// demoUntil puts placeholders where the sheet shows the owner's details (name, network,
+	// address, SSH key names), for screenshots that are going to be published.
+	demoUntil time.Time
 }
 
 var (
@@ -1018,6 +1022,14 @@ func (d *Display) SetTheme(name string) {
 	d.wake()
 }
 
+// Demo puts placeholders in for the owner's details for a while, for published screenshots.
+func (d *Display) Demo(for_ time.Duration) {
+	d.mu.Lock()
+	d.demoUntil = time.Now().Add(for_)
+	d.mu.Unlock()
+	d.wake()
+}
+
 // OpenSheet puts the settings sheet up on the named tab, or takes it down for "off". It reports whether
 // the name meant anything.
 func (d *Display) OpenSheet(name string) bool {
@@ -1172,6 +1184,15 @@ func (d *Display) frame() time.Duration {
 		}
 		if tab == tabSecurity {
 			s.security = security.Get().State()
+		}
+		d.mu.Lock()
+		demo := now.Before(d.demoUntil)
+		d.mu.Unlock()
+		if demo {
+			s.sheet.name, s.sheet.wifi, s.sheet.address = "Kitchen", "HomeWiFi  ·  192.168.1.50", "192.168.1.50"
+			for i := range s.security.Keys {
+				s.security.Keys[i] = "laptop"
+			}
 		}
 		d.mu.Lock()
 		if d.draft != nil && tab == tabAlarms {
