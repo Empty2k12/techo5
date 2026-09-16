@@ -33,7 +33,7 @@ func write(t *testing.T) (deployed, update.Manifest) {
 	err := run(update.Manifest{Version: "0.0.7"}, "https://example/download/0.0.7", map[string]string{
 		"arm64": filepath.Join(dir, "echod-arm64"),
 		"arm":   filepath.Join(dir, "echod-arm"),
-	}, out)
+	}, "", out)
 	if err != nil {
 		t.Fatal(err)
 	}
