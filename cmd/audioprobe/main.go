@@ -25,13 +25,16 @@ import (
 // toneLevel is the tone amplitude, set from -level.
 var toneLevel = 0.3
 
+// captureChannels is the capture device's channel count, set from -cap-channels: 4 on the Echo Show 5
+// (two microphones and the stereo loopback), 6 on the Echo Spot (four microphones and the loopback).
+var captureChannels = 4
+
 const (
 	card = 0
 
-	captureDevice   = 22
-	captureRate     = 16000
-	captureChannels = 4
-	captureBits     = 24
+	captureDevice = 22
+	captureRate   = 16000
+	captureBits   = 24
 
 	playbackDevice   = 23
 	playbackRate     = 48000
@@ -56,8 +59,10 @@ func main() {
 	perPeriod := flag.Bool("per-period", false, "play a tone filling a fixed 768-frame stack buffer per write, the way the daemon's play tool does")
 	hold := flag.String("hold", "/dev/snd/pcmC0D1c", "hold this AFE node open so the DL1 driver takes its DRAM ring, not the SRAM ring that panics this kernel; empty for none")
 	level := flag.Float64("level", 0.3, "tone amplitude, 0 to 1")
+	capChannels := flag.Int("cap-channels", 4, "capture channels: 4 on the Echo Show 5, 6 on the Echo Spot")
 	flag.Parse()
 	toneLevel = *level
+	captureChannels = *capChannels
 
 	if *hold != "" {
 		h, err := os.OpenFile(*hold, os.O_RDWR|syscall.O_NONBLOCK, 0)
@@ -341,10 +346,10 @@ func writeWAV(path string, pcm []byte) error {
 	copy(hdr[8:], "WAVEfmt ")
 	binary.LittleEndian.PutUint32(hdr[16:], 16)
 	binary.LittleEndian.PutUint16(hdr[20:], 1)
-	binary.LittleEndian.PutUint16(hdr[22:], captureChannels)
+	binary.LittleEndian.PutUint16(hdr[22:], uint16(captureChannels))
 	binary.LittleEndian.PutUint32(hdr[24:], captureRate)
-	binary.LittleEndian.PutUint32(hdr[28:], captureRate*captureChannels*2)
-	binary.LittleEndian.PutUint16(hdr[32:], captureChannels*2)
+	binary.LittleEndian.PutUint32(hdr[28:], uint32(captureRate*captureChannels*2))
+	binary.LittleEndian.PutUint16(hdr[32:], uint16(captureChannels*2))
 	binary.LittleEndian.PutUint16(hdr[34:], 16)
 	copy(hdr[36:], "data")
 	binary.LittleEndian.PutUint32(hdr[40:], uint32(len(data)))
