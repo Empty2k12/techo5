@@ -439,8 +439,13 @@ session.
    `feature/camera` serves http://<device>:8181/camera.jpg and /camera.mjpeg
    for Home Assistant's Generic Camera / MJPEG IP Camera integrations; the
    cameras page lists "This Show" first, and "show this show" puts the live
-   view up. Still to do: 10-bit output, a proper demosaic, an ESPHome camera
-   entity so no URL setup is needed, and the CPU cost of JPEG at full rate.
+   view up. Later the same day: the Show is an ESPHome **camera entity**
+   (`camera.<area>_<device>_camera`, stills and paced streams over the API,
+   no URL setup; `component.Describer` puts the entry ahead of the library's
+   entity list). Cost measured: the daemon sits at ~37 % of the two cores
+   with the wake word running and ~58 % while the MJPEG stream is served
+   (14 fps conversion plus ~4.5 fps JPEG); 40 % of the machine stays idle.
+   Still to do: 10-bit output and a proper demosaic.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
    shows the weather on the clock and a radio page whose stations come from

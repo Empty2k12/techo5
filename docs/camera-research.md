@@ -246,3 +246,20 @@ Next steps, in order: frame sync via the TG frame counter; continuous capture in
 white balance and a real demosaic in the daemon; a live "camera" page on the panel; a snapshot
 served to Home Assistant (the ESPHome camera image API or a plain HTTP endpoint) so the Show works
 as a camera entity; 10-bit output later.
+
+## In the daemon (2026-09-16, later)
+
+`echod/internal/hardware/camera` is the streaming version of camframe: three DMA slots, the TG
+frame counter for sync, 800x600 RGBA out with grey-world white balance, sensor on only while
+acquired (5 s linger), refused while the mute button is engaged. `feature/camera` serves
+`/camera.jpg` and `/camera.mjpeg` on port 8181 and is also the **ESPHome camera entity**: the
+library has no camera domain, so the feature sends `ListEntitiesCameraResponse` itself (a
+`component.Describer` runs ahead of the library's entity list so the entry lands before Done)
+and answers `CameraImageRequest` with the JPEG in 1 KiB `CameraImageResponse` pieces, a still for
+`single`, frames every 500 ms for 5 s per `stream` request. Home Assistant created
+`camera.bench_show_camera` on the next connection and its camera proxy returns stills.
+The cameras page lists "This Show" first; "show this show" by voice works (log: heard → camera up
+entity=local → "Showing it").
+
+Cost on the device: daemon at ~37 % of two cores idle (wake word), ~58 % while the MJPEG stream
+runs (14 fps conversion plus ~4.5 fps JPEG encode), 40 % idle left.
