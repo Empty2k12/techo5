@@ -494,6 +494,15 @@ session.
    (good and a `command=` line refused), SSH off from Home Assistant with a
    session open (session kept, new logins refused), on again from the tab,
    8181 open/404/closed per switch, password logins refused.
+   RESCUE HARDENED 2026-09-16: boot image rebuilt with the same kernel
+   (techo5-linux-boot-sec.img, written with dd from the running system after
+   a backup of the partition); rescue SSH is keys only (the image's key plus
+   userdata's), no empty root password. A forced rescue boot also showed an
+   older gap: the lease came after t5_wifi_up's wait, so rescue skipped SSH
+   and the daemon and sat on the test screen reachable only over USB. The
+   init now starts both from its wait loop whenever the address shows up.
+   Verified: rescue boot with SSH and daemon up at 38 s, password logins
+   refused, normal slot boot afterwards.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

@@ -172,7 +172,15 @@ if [ -n "$VENDOR" ]; then
 	t5_wifi_conf $LOGDIR/wpa_supplicant.conf
 	t5_wifi_up $VENDOR/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
 fi
-if [ -n "$IP" ]; then
+
+# SSH and the daemon, once there is an address. Called again from the wait loop below: a lease
+# that arrives after t5_wifi_up gave up (udhcpc keeps trying in the background) must still make
+# the unit reachable, or a slow DHCP server leaves it in rescue with nothing but the USB console.
+network_up() {
+	[ -e /tmp/network-up ] && return 0
+	[ -n "$IP" ] || return 1
+	: > /tmp/network-up
+	crumb "network: $IP"
 	# Keys only, even here: the key built into this boot image plus the ones Home Assistant gave
 	# the device (userdata). No password logins — an empty root password would let in anyone on
 	# the network while a unit sits in rescue.
@@ -183,26 +191,26 @@ if [ -n "$IP" ]; then
 	chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
 	t5_dropbear $LOGDIR/dropbear -s
 	t5_ntp
-fi
 
-# The daemon, from the same place as the vendor tree, so a rescue boot still answers.
-DAEMON=
-for f in ${VENDOR%/vendor}/usr/local/bin/techo5 ${VENDOR%/vendor}/bin/techo5; do
-	[ -x "$f" ] && { DAEMON=$f; break; }
-done
-if [ -n "$IP" ] && [ -n "$DAEMON" ]; then
-	killall fbprobe 2>/dev/null
-	mkdir -p /data/misc/techo5/models
-	(setsid $DAEMON run >> $LOGDIR/techo5.log 2>&1 &)
-	sleep 3
-	if pidof techo5 >/dev/null; then
-		crumb "daemon running from $DAEMON (pid $(pidof techo5)); staying up"
-		touch /tmp/stay
-	else
-		crumb "daemon failed to start: $(tail -2 $LOGDIR/techo5.log | tr '\n' ' ')"
+	# The daemon, from the same place as the vendor tree, so a rescue boot still answers.
+	DAEMON=
+	for f in ${VENDOR%/vendor}/usr/local/bin/techo5 ${VENDOR%/vendor}/bin/techo5; do
+		[ -x "$f" ] && { DAEMON=$f; break; }
+	done
+	if [ -n "$DAEMON" ]; then
+		killall fbprobe 2>/dev/null
+		mkdir -p /data/misc/techo5/models
+		(setsid $DAEMON run >> $LOGDIR/techo5.log 2>&1 &)
+		sleep 3
+		if pidof techo5 >/dev/null; then
+			crumb "daemon running from $DAEMON (pid $(pidof techo5)); staying up"
+		else
+			crumb "daemon failed to start: $(tail -2 $LOGDIR/techo5.log | tr '\n' ' ')"
+		fi
 	fi
-fi
-[ -n "$IP" ] && touch /tmp/stay
+	touch /tmp/stay
+}
+network_up
 
 snapshot
 crumb "rescue ready; reboot in ${STAY_MINUTES} min unless /tmp/stay exists"
@@ -211,6 +219,7 @@ i=0
 while true; do
 	sleep 30
 	i=$((i+1))
+	[ -e /tmp/network-up ] || { IP=$(t5_ip); network_up; }
 	snapshot
 	[ -e /tmp/stay ] && continue
 	if [ $((i*30)) -ge $((STAY_MINUTES*60)) ]; then
