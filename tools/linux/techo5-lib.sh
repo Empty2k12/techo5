@@ -110,6 +110,46 @@ t5_wifi_up() {
 # t5_ip: the current IPv4 address on wlan0, empty if none.
 t5_ip() { ip -4 addr show wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1; }
 
+# t5_wifi_prefer5: move to the network's 5 GHz radio when it has one worth having.
+#
+# The supplicant picks a radio at connect time and often takes 2.4 GHz, sometimes on a farther access
+# point, where the Bluetooth half of the same chip shares its antenna and spectrum: on the bench that
+# was 1-4 MB/s against 3-12 MB/s on 5 GHz with earbuds connected (2026-09-16). This asks for 5 GHz only
+# on the running supplicant (nothing is saved), and only when the scan shows the same SSID on 5 GHz at
+# T5_5G_MIN dBm or better. If it does not associate there within 30 s it goes back to every band and
+# leaves it for 30 minutes. A restarted supplicant reads the saved file and has every band again, so a
+# network whose 5 GHz radio goes away is recovered by the keeper's ordinary no-address path.
+T5_5G_FREQS="5180 5200 5220 5240 5260 5280 5300 5320 5500 5520 5540 5560 5580 5600 5620 5640 5660 5680 5700 5720 5745 5765 5785 5805 5825"
+t5_wifi_prefer5() {
+	w="wpa_cli -p /run/wpa -i wlan0"
+	freq=$(iw dev wlan0 link 2>/dev/null | sed -n 's/.*freq: \([0-9]*\).*/\1/p')
+	[ -n "$freq" ] && [ "$freq" -lt 4000 ] || return 0
+	now=$(cut -d. -f1 /proc/uptime)
+	[ "$now" -ge "$(cat /run/techo5/prefer5-after 2>/dev/null || echo 0)" ] || return 0
+	id=$($w list_networks 2>/dev/null | awk -F'\t' 'NR>1 && $4 ~ /CURRENT/ {print $1}')
+	ssid=$($w status 2>/dev/null | sed -n 's/^ssid=//p')
+	[ -n "$id" ] && [ -n "$ssid" ] || return 0
+	best=$($w scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" 'NR>1 && $5 == s && $2 > 4000 {print $3}' | sort -n | tail -1)
+	[ -n "$best" ] && [ "$best" -ge "${T5_5G_MIN:--70}" ] || return 0
+	log "wifi: on $freq MHz while '$ssid' is on 5 GHz at $best dBm; moving"
+	$w set_network "$id" freq_list "$T5_5G_FREQS" >/dev/null 2>&1
+	$w reassociate >/dev/null 2>&1
+	n=0
+	while [ $n -lt 30 ]; do
+		sleep 2; n=$((n+2))
+		f=$(iw dev wlan0 link 2>/dev/null | sed -n 's/.*freq: \([0-9]*\).*/\1/p')
+		if [ "${f:-0}" -gt 4000 ] && $w status 2>/dev/null | grep -q '^wpa_state=COMPLETED'; then
+			log "wifi: on $f MHz"
+			return 0
+		fi
+	done
+	log "wifi: no 5 GHz association in 30 s; back to every band for 30 minutes"
+	$w set_network "$id" freq_list "" >/dev/null 2>&1
+	$w reassociate >/dev/null 2>&1
+	mkdir -p /run/techo5
+	echo $((now + 1800)) > /run/techo5/prefer5-after
+}
+
 # t5_ntp: set the clock once from NTP (the RTC is not trusted), then write it
 # to the RTC so the next boot starts closer. Bounded: an unreachable server
 # must not hold the boot.

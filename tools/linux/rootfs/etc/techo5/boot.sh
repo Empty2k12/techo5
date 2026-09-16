@@ -80,6 +80,7 @@ t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
 				killall udhcpc 2>/dev/null
 				udhcpc -i wlan0 -b -R -t 10 -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
 			fi
+			t5_wifi_prefer5
 			continue
 		fi
 		down=$((down+1))

@@ -531,6 +531,16 @@ session.
    percentile is over 3x the central median. Synthetic backlit frame: metered
    262 against a plain mean of 564. Bench, face under an overhead light:
    readable face, dark furniture black (darkest 5/255).
+   WI-FI BAND 2026-09-16: transfers to the bench crawled (1 MB/s in, 4 MB/s
+   out, 2 Mbit/s tx rate while earbuds reconnected). Cause: the supplicant
+   had picked HomeWiFi on 2.4 GHz from a different access point, where the
+   chip's Bluetooth shares antenna and spectrum; Bluetooth off doubled it.
+   The same network also offers 5 GHz at -27 dBm: 2.7 MB/s in, 11.9
+   MB/s out with earbuds connected. `t5_wifi_prefer5` (network keeper, once
+   a minute) moves a 2.4 GHz link to the same SSID's 5 GHz radio when the
+   scan shows it at -70 dBm or better, on the running supplicant only, and
+   backs off for 30 minutes if that does not associate in 30 s. Tested by
+   forcing 2.4 GHz: back on 5180 MHz in 6 s with address and route intact.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,
