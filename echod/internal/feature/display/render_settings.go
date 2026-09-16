@@ -171,22 +171,23 @@ func (r *renderer) sheetLeft() int { return sidebarW + sheetPad }
 
 func (r *renderer) settingsPage(s scene) {
 	st := s.sheet
-	// The sidebar: a column in the rules colour, the open tab raised in the accent and running into the
-	// content, the others as plain names, and Done at the foot.
-	draw.Draw(r.dst, image.Rect(0, 0, sidebarW, r.h), image.NewUniform(ember), image.Point{}, draw.Src)
+	// The sidebar: each tab a block of its own, sunk into the ground; the open one raised in the accent
+	// and running into the content. Done is a raised button at the foot, and a rule marks the edge.
+	draw.Draw(r.dst, image.Rect(sidebarW-2, 0, sidebarW, r.h), image.NewUniform(ember), image.Point{}, draw.Src)
 	for i, name := range tabNames {
 		top := i * tabItemH
 		baseline := top + tabItemH/2 + 12
 		if i == st.tab {
-			r.bevel(image.Rect(8, top+5, sidebarW+4, top+tabItemH-5), amber, true)
+			r.bevel(image.Rect(8, top+4, sidebarW+4, top+tabItemH-4), amber, true)
 			r.text(r.small, name, 26, baseline, walnut)
 			continue
 		}
+		r.bevel(image.Rect(8, top+4, sidebarW-10, top+tabItemH-4), ember, false)
 		r.text(r.small, name, 26, baseline, dim)
 	}
-	doneTop := r.h - sheetDoneBar
-	draw.Draw(r.dst, image.Rect(0, doneTop, sidebarW, doneTop+2), image.NewUniform(walnut), image.Point{}, draw.Src)
-	r.text(r.body, "Done", (sidebarW-r.width(r.body, "Done"))/2, doneTop+46, cream)
+	done := image.Rect(8, r.h-sheetDoneBar+6, sidebarW-10, r.h-6)
+	r.bevel(done, shift(ember, 16), true)
+	r.text(r.body, "Done", done.Min.X+(done.Dx()-r.width(r.body, "Done"))/2, done.Max.Y-14, cream)
 
 	switch st.tab {
 	case tabDevice:
