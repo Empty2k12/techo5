@@ -14,7 +14,6 @@ const (
 	Dev
 )
 
-const releases = "https://github.com/HuskerMinion/techo5/releases"
 
 // Label is what the setting is called in Home Assistant, and what is stored.
 func (c Channel) Label() string {
