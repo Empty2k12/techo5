@@ -446,6 +446,13 @@ session.
    with the wake word running and ~58 % while the MJPEG stream is served
    (14 fps conversion plus ~4.5 fps JPEG); 40 % of the machine stays idle.
    Still to do: 10-bit output and a proper demosaic.
+   SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
+   brightness with −/+ buttons, auto-brightness and microphone toggles, wake
+   word, About, Restart), Bluetooth (connect/disconnect the remembered device,
+   Pair opens the scan page), Cameras and Radio (rows with a button, paged
+   past seven). The separate radio and cameras pages are gone. A swipe down
+   from the top quarter opens it. `/screen.png[?sheet=<tab>|off]` on port
+   8181 is a screenshot of the panel, for checking layouts from the PC.
 10. **Home on the screen** (2026-09-15 late): `feature/hastate` follows Home
    Assistant entities over the ESPHome state subscription; `feature/home`
    shows the weather on the clock and a radio page whose stations come from

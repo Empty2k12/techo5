@@ -57,10 +57,9 @@ type scene struct {
 	showSheet bool
 	sheet     settings
 
-	// radio is the radio page, likewise; weather is on the clock when known.
-	showRadio bool
-	radio     home.Radio
-	weather   home.Weather
+	// radio feeds the sheet's Radio tab and the now-playing screen; weather is on the clock when known.
+	radio   home.Radio
+	weather home.Weather
 
 	// showWeather is the forecast page, for a while after a weather question; nowPlaying is the
 	// idle screen while the radio plays or sits paused.
@@ -68,11 +67,10 @@ type scene struct {
 	forecast    forecastDays
 	nowPlaying  bool
 
-	// showCamera is a live camera view, over everything but the sheet; showCameras is the list.
-	showCamera  bool
-	camera      home.CameraView
-	showCameras bool
-	cameras     []config.Camera
+	// showCamera is a live camera view, over everything but the sheet; cameras feeds the sheet's tab.
+	showCamera bool
+	camera     home.CameraView
+	cameras    []config.Camera
 }
 
 const sheetVolumeSteps = media.VolumeSteps
@@ -144,20 +142,6 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showCamera {
 		r.cameraView(s, s.camera)
-		if s.showVolume {
-			r.volumeBar(s)
-		}
-		return
-	}
-	if s.showCameras {
-		r.camerasPage(s)
-		if s.showVolume {
-			r.volumeBar(s)
-		}
-		return
-	}
-	if s.showRadio {
-		r.radioPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

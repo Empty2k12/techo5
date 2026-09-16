@@ -53,6 +53,7 @@ func (f *Feature) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/camera.jpg", f.snapshot)
 	mux.HandleFunc("/camera.mjpeg", f.stream)
+	f.registerScreen(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "TECHO5 camera: /camera.jpg (snapshot), /camera.mjpeg (stream)")
 	})

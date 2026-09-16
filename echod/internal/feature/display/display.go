@@ -19,6 +19,8 @@ package display
 
 import (
 	"context"
+	"errors"
+	"image"
 	"log/slog"
 	"math"
 	"strings"
@@ -85,8 +87,11 @@ type Display struct {
 	volAt   time.Time
 
 	poke chan struct{}
-	dev  *screen.Device
-	r    *renderer
+
+	// shots are screenshot requests, answered with a copy of the next frame drawn.
+	shots chan chan *image.RGBA
+	dev   *screen.Device
+	r     *renderer
 
 	// booting is the splash: from the first frame until Home Assistant is listening and at least
 	// splashMin has passed.
@@ -98,9 +103,9 @@ type Display struct {
 	sheet      bool
 	restartArm time.Time
 
-	// radio is the radio page being shown; cameras the cameras list.
-	radio   bool
-	cameras bool
+	// tab is the sheet's open tab; page is how far down its list, when the list does not fit.
+	tab  int
+	page int
 
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
@@ -132,8 +137,9 @@ func build() *Display {
 				Category: esphome.CategoryConfig,
 			},
 		},
-		poke: make(chan struct{}, 1),
-		view: voice.State{Phase: "idle"},
+		poke:  make(chan struct{}, 1),
+		shots: make(chan chan *image.RGBA, 4),
+		view:  voice.State{Phase: "idle"},
 	}
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
@@ -269,7 +275,7 @@ func (d *Display) changed(s voice.State) {
 		// "Go home": whatever page is up comes down, back to the clock or the radio.
 		if h := strings.ToLower(s.Heard); strings.Contains(h, "go home") || strings.Contains(h, "home screen") || strings.Contains(h, "main screen") {
 			d.weatherArmed, d.weatherUntil = false, time.Time{}
-			d.sheet, d.radio, d.cameras = false, false, false
+			d.sheet = false
 			go home.Get().HideCamera()
 			slog.Info("screen: home by voice")
 		}
@@ -352,34 +358,16 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	// The cameras page: a row shows that camera for a while, the bar closes the page.
+	// The settings sheet: tabs, rows and buttons do things, the bar at the bottom closes it.
 	d.mu.Lock()
-	sheet, radio, cameras := d.sheet, d.radio, d.cameras
+	sheet := d.sheet
 	d.mu.Unlock()
-	if cameras {
-		if g.Kind == touch.Tap && d.r != nil {
-			d.cameraTap(d.r.camRowAt(g.Y))
-		}
-		d.wake()
-		return
-	}
-
-	// The radio page: a row plays (or stops), the bar closes it.
-	if radio {
-		if g.Kind == touch.Tap && d.r != nil {
-			d.radioTap(d.r.radioRowAt(g.Y))
-		}
-		d.wake()
-		return
-	}
-
-	// The settings sheet: rows do things, the bar at the bottom closes it.
 	if sheet {
 		// Vertical swipes do nothing here: the swipe that opened the sheet keeps reporting notches
-		// until the finger lifts, and those must not turn into volume steps. The Volume row takes
-		// taps on its halves instead.
+		// until the finger lifts, and those must not turn into volume steps. The Volume row has
+		// buttons instead.
 		if g.Kind == touch.Tap && d.r != nil {
-			d.sheetTap(d.r.sheetRowAt(g.Y), g.X)
+			d.sheetTap(d.r.sheetHit(g.X, g.Y))
 		}
 		d.wake()
 		return
@@ -430,57 +418,6 @@ func (d *Display) nowPlaying() bool {
 	return home.Get().Radio().Configured
 }
 
-func (d *Display) showCameras(on bool) {
-	d.mu.Lock()
-	d.cameras = on
-	d.mu.Unlock()
-	slog.Info("cameras page", "open", on)
-	d.wake()
-}
-
-// cameraTap is a finger on a row of the cameras page.
-func (d *Display) cameraTap(row int) {
-	if row == camRows {
-		d.showCameras(false)
-		return
-	}
-	cams := home.Get().Cameras()
-	if row < 0 || row >= len(cams) {
-		return
-	}
-	d.showCameras(false)
-	home.Get().ShowCamera(cams[row].Entity, camListShow)
-}
-
-func (d *Display) showRadio(on bool) {
-	d.mu.Lock()
-	d.radio = on
-	d.mu.Unlock()
-	slog.Info("radio page", "open", on)
-	d.wake()
-}
-
-// radioTap is a finger on a row of the radio page.
-func (d *Display) radioTap(row int) {
-	if row == radioRows {
-		d.showRadio(false)
-		return
-	}
-	if row < 0 {
-		return
-	}
-	rd := home.Get().Radio()
-	rows := radioList(rd)
-	if row >= len(rows) {
-		return
-	}
-	if rows[row] == "■ Stop" {
-		home.Get().Stop()
-		return
-	}
-	home.Get().Play(rows[row])
-}
-
 func (d *Display) showSheet(on bool) {
 	d.mu.Lock()
 	d.sheet = on
@@ -490,43 +427,107 @@ func (d *Display) showSheet(on bool) {
 	d.wake()
 }
 
-// sheetTap is a finger on a row of the settings sheet; x is where across it landed.
-func (d *Display) sheetTap(row, x int) {
-	switch row {
-	case sheetRows:
+// sheetTap is a finger on the settings sheet.
+func (d *Display) sheetTap(h hit) {
+	if h.done {
 		d.showSheet(false)
-	case rowRadio:
-		d.showSheet(false)
-		d.showRadio(true)
-	case rowCameras:
-		d.showSheet(false)
-		d.showCameras(true)
+		return
+	}
+	if h.tab >= 0 {
+		d.mu.Lock()
+		d.tab, d.page, d.restartArm = h.tab, 0, time.Time{}
+		d.mu.Unlock()
+		return
+	}
+	if h.row < 0 {
+		return
+	}
+	d.mu.Lock()
+	tab, page := d.tab, d.page
+	d.mu.Unlock()
+	switch tab {
+	case tabDevice:
+		d.deviceTap(h)
+	case tabBluetooth:
+		d.bluetoothTap(h)
+	case tabCameras:
+		cams := home.Get().Cameras()
+		i, ok := d.listTap(len(cams), page, h.row)
+		if ok {
+			d.showSheet(false)
+			home.Get().ShowCamera(cams[i].Entity, camListShow)
+		}
+	case tabRadio:
+		rows := radioList(home.Get().Radio())
+		i, ok := d.listTap(len(rows), page, h.row)
+		if !ok {
+			return
+		}
+		if rows[i] == "■ Stop" {
+			home.Get().Stop()
+			return
+		}
+		home.Get().Play(rows[i])
+	}
+}
+
+// listTap maps a row of a paged list to the item it shows; the More row turns the page instead.
+func (d *Display) listTap(n, page, row int) (int, bool) {
+	start, end, more := pageOf(n, page)
+	if more && row == sheetRows-1 {
+		d.mu.Lock()
+		d.page++
+		d.mu.Unlock()
+		return 0, false
+	}
+	if start+row >= end {
+		return 0, false
+	}
+	return start + row, true
+}
+
+// deviceTap is a row of the Device tab: the buttons act, the rest of the row does nothing.
+func (d *Display) deviceTap(h hit) {
+	switch h.row {
 	case rowVolume:
-		// Left half down, right half up.
-		if d.r != nil && x < d.r.w/2 {
+		switch h.button {
+		case 1:
 			media.Get().Adjust(-1)
-		} else {
+		case 2:
 			media.Get().Adjust(+1)
 		}
-	case rowBluetooth:
-		d.showSheet(false)
-		btaudio.Get().SetPairing(true)
 	case rowBrightness:
-		// Round the dial: 25, 50, 75, 100.
 		pct := d.ceilingOrDefault()
-		next := (pct/25 + 1) * 25
-		if next > 100 {
-			next = 25
+		switch h.button {
+		case 1:
+			pct -= 25
+		case 2:
+			pct += 25
+		default:
+			return
 		}
-		d.apply(true, next, true)
+		if pct < 25 {
+			pct = 25
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		d.apply(true, pct, true)
 	case rowAuto:
-		d.mu.Lock()
-		on := d.autoOn
-		d.mu.Unlock()
-		d.setAuto(!on, true)
+		if h.button == 2 {
+			d.mu.Lock()
+			on := d.autoOn
+			d.mu.Unlock()
+			d.setAuto(!on, true)
+		}
 	case rowMic:
-		mute.Get().Toggle()
+		if h.button == 2 {
+			mute.Get().Toggle()
+		}
 	case rowRestart:
+		if h.button != 2 {
+			return
+		}
 		d.mu.Lock()
 		armed := !d.restartArm.IsZero() && time.Since(d.restartArm) < restartWindow
 		if !armed {
@@ -540,6 +541,28 @@ func (d *Display) sheetTap(row, x int) {
 	}
 }
 
+// bluetoothTap is a row of the Bluetooth tab.
+func (d *Display) bluetoothTap(h hit) {
+	bt := btaudio.Get()
+	st := bt.State()
+	switch h.row {
+	case btRowDevice:
+		if h.button != 2 {
+			return
+		}
+		if st.Connected != "" {
+			bt.Disconnect()
+		} else if st.Remembered != "" {
+			bt.Reconnect()
+		}
+	case btRowPair:
+		if h.button == 2 {
+			d.showSheet(false)
+			bt.SetPairing(true)
+		}
+	}
+}
+
 func (d *Display) ceilingOrDefault() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -547,6 +570,55 @@ func (d *Display) ceilingOrDefault() int {
 		return config.DefaultScreenBrightness
 	}
 	return d.ceiling
+}
+
+// answerShots hands a copy of the canvas to whoever asked for a screenshot.
+func (d *Display) answerShots() {
+	for {
+		select {
+		case ch := <-d.shots:
+			var img *image.RGBA
+			if d.r != nil {
+				img = image.NewRGBA(d.r.dst.Rect)
+				copy(img.Pix, d.r.dst.Pix)
+			}
+			ch <- img
+		default:
+			return
+		}
+	}
+}
+
+// Screenshot is the next frame drawn, for a look at the panel from afar.
+func (d *Display) Screenshot(ctx context.Context) (*image.RGBA, error) {
+	ch := make(chan *image.RGBA, 1)
+	select {
+	case d.shots <- ch:
+	default:
+		return nil, errors.New("too many screenshot requests")
+	}
+	d.wake()
+	select {
+	case img := <-ch:
+		if img == nil {
+			return nil, errors.New("the screen is not up")
+		}
+		return img, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// OpenSheet puts the settings sheet up on a tab, or takes it down for a tab below zero.
+func (d *Display) OpenSheet(tab int) {
+	if tab < 0 {
+		d.showSheet(false)
+		return
+	}
+	d.mu.Lock()
+	d.sheet, d.tab, d.restartArm = true, tab%tabs, time.Time{}
+	d.mu.Unlock()
+	d.wake()
 }
 
 func (d *Display) wake() {
@@ -606,6 +678,7 @@ func (d *Display) frame() time.Duration {
 	now := time.Now()
 	if !on {
 		// Dark panel: nothing to draw, and nothing to redraw until told.
+		d.answerShots()
 		return time.Hour
 	}
 
@@ -635,21 +708,18 @@ func (d *Display) frame() time.Duration {
 	}
 	s.bt = btaudio.Get().State()
 	d.mu.Lock()
-	s.showSheet, s.showRadio = d.sheet, d.radio
-	restartArm := d.restartArm
+	s.showSheet = d.sheet
+	restartArm, tab := d.restartArm, d.tab
 	d.mu.Unlock()
 	if s.showSheet {
-		s.sheet = d.gather(s, restartArm)
+		s.sheet = d.gather(s, restartArm, tab)
+		if tab == tabCameras {
+			s.cameras = home.Get().Cameras()
+		}
 	}
 	s.camera, s.showCamera = home.Get().Camera()
-	d.mu.Lock()
-	s.showCameras = d.cameras
-	d.mu.Unlock()
-	if s.showCameras {
-		s.cameras = home.Get().Cameras()
-	}
 	s.nowPlaying = (s.phase == "idle") && d.nowPlaying()
-	if s.showRadio || s.nowPlaying {
+	if (s.showSheet && tab == tabRadio) || s.nowPlaying {
 		s.radio = home.Get().Radio()
 	}
 	s.weather = home.Get().Weather()
@@ -664,11 +734,12 @@ func (d *Display) frame() time.Duration {
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
+	d.answerShots()
 
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
 	}
-	if s.bt.Pairing || s.showSheet || s.showRadio || s.showCameras {
+	if s.bt.Pairing || s.showSheet {
 		return 500 * time.Millisecond
 	}
 	if s.showWeather || s.nowPlaying {

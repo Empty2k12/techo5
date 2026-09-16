@@ -3,7 +3,6 @@
 package display
 
 import (
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -12,8 +11,6 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -21,9 +18,9 @@ import (
 
 // gather collects what the settings sheet shows. Cheap enough per frame: a few reads and one
 // interface listing.
-func (d *Display) gather(s scene, restartArm time.Time) settings {
+func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 	d.mu.Lock()
-	st := settings{brightness: d.ceiling, auto: d.autoOn, now: s.now, restartArm: restartArm}
+	st := settings{tab: tab, page: d.page, brightness: d.ceiling, auto: d.autoOn, now: s.now, restartArm: restartArm}
 	d.mu.Unlock()
 	if st.brightness == 0 {
 		st.brightness = config.DefaultScreenBrightness
@@ -40,37 +37,10 @@ func (d *Display) gather(s scene, restartArm time.Time) settings {
 	if st.wakeWord == "" {
 		st.wakeWord = "off"
 	}
-	st.version = layout.VersionString()
+	st.version = layout.Version
 	st.slot = slotName()
 	st.address = address()
 
-	rd := home.Get().Radio()
-	switch {
-	case !rd.Configured:
-		st.radio = "not set up"
-	case rd.Playing && rd.Now != "":
-		st.radio = "playing " + rd.Now + "  ·  tap to open"
-	default:
-		st.radio = "tap to choose a station"
-	}
-
-	if n := len(home.Get().Cameras()); n == 0 {
-		st.cameras = "not set up"
-	} else {
-		st.cameras = fmt.Sprintf("%d  ·  tap to open, or say \"show the …\"", n)
-	}
-
-	bt := btaudio.Get().State()
-	switch {
-	case !bt.Available:
-		st.bluetooth = "not available"
-	case bt.Connected != "":
-		st.bluetooth = bt.Connected + "  ·  tap to pair another"
-	case bt.Remembered != "":
-		st.bluetooth = bt.Remembered + " (not connected)  ·  tap to pair"
-	default:
-		st.bluetooth = "tap to pair earbuds"
-	}
 	return st
 }
 
