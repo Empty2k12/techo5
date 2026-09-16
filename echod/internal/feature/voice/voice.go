@@ -236,6 +236,24 @@ func (v *Voice) OnWakeWord(load func(ids []string) []string, selected func()) {
 	}
 }
 
+// ChooseWakeWord puts id in the first slot from the device itself — the settings sheet — by the same
+// path Home Assistant's selection takes, keeping a second slot if one is set. The API then reconnects,
+// because Home Assistant reads the selection once per connection and would otherwise keep showing
+// the old word.
+func (v *Voice) ChooseWakeWord(id string) {
+	set := v.vs.OnSetActiveWakeWords
+	if set == nil || id == "" {
+		return
+	}
+	ids := []string{id}
+	if cur := v.vs.ActiveWakeWords; len(cur) > 1 && cur[1] != id {
+		ids = append(ids, cur[1])
+	}
+	slog.Info("wake word chosen on the device", "id", id)
+	set(ids)
+	component.Reconnect.Emit(struct{}{})
+}
+
 // ActiveWakeWords is what the device is advertising as listening, by slot.
 func (v *Voice) ActiveWakeWords() []string { return v.vs.ActiveWakeWords }
 

@@ -34,6 +34,7 @@ import (
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/timer"
+	_ "github.com/HuskerMinion/techo5/echod/internal/feature/timezone"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 )

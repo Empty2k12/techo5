@@ -1,8 +1,13 @@
 package detect
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zserge/microwakeword"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
@@ -177,5 +182,39 @@ func TestSwappingWithinAKindKeepsTheEngine(t *testing.T) {
 	}
 	if _, ok := f.loaded["wall-e"]; !ok {
 		t.Error("the model that replaced it is not loaded")
+	}
+}
+
+// A damaged model file is an error from load, never a panic: the parser trusts the file, and the
+// v0.2.5 image shipped models whose CR bytes before LF had been stripped.
+func TestMicroLoadSurvivesDamagedModels(t *testing.T) {
+	good, err := os.ReadFile("assets/stop.tflite")
+	if err != nil {
+		t.Skip("no model to damage:", err)
+	}
+	dir := t.TempDir()
+	damaged := map[string][]byte{
+		"crlf-stripped": bytes.ReplaceAll(good, []byte{'\r', '\n'}, []byte{'\n'}),
+		"truncated":     good[:len(good)/3],
+		"flipped":       func() []byte { b := bytes.Clone(good); b[4], b[5], b[6], b[7] = 0xff, 0xff, 0xff, 0x7f; return b }(),
+		"empty":         nil,
+	}
+	for name, data := range damaged {
+		path := filepath.Join(dir, name+".tflite")
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		b := &microBackend{dets: map[string]*microwakeword.Detector{}, scores: map[string]float64{}}
+		m := wake.Model{ID: name, Path: path, Config: microwakeword.Config{ModelPath: path, SlidingWindowSize: 5, FeaturesStepMs: 10}}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: load panicked: %v", name, r)
+				}
+			}()
+			if err := b.load(m); err == nil && !bytes.Equal(data, good) {
+				t.Logf("%s: parsed without error (the damage missed anything the parser reads)", name)
+			}
+		}()
 	}
 }

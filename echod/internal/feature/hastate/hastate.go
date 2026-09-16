@@ -36,6 +36,8 @@ type Key struct {
 type Update struct {
 	Key
 	Value string
+	// First is the value's first arrival since start: what it already was, not a change.
+	First bool
 }
 
 type Tracker struct {
@@ -131,7 +133,7 @@ func (t *Tracker) Handle(ctx context.Context, c *esphome.Conn, msg proto.Message
 		t.values[k] = m.State
 		t.mu.Unlock()
 		if !had || old != m.State {
-			t.Changed.Emit(Update{Key: k, Value: m.State})
+			t.Changed.Emit(Update{Key: k, Value: m.State, First: !had})
 		}
 	}
 	return nil

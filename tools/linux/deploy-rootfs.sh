@@ -13,19 +13,15 @@
 #
 # Environment: HOST (the device, required), KEY (the SSH key), TECHO5_INPUTS (the
 # directory with the Alpine minirootfs, vendor.tar.gz and apks312/; kept out
-# of the repo), TZ_NAME (default: this PC's time zone), GO (go binary),
+# of the repo), TZ_NAME (a new unit's zone until Home Assistant sets it; UTC), GO (go binary),
 # WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
 set -euo pipefail
 
 HOST=${HOST:-}
 KEY=${KEY:-D:/platform-tools/echoshow/linux-image/techo5_ed25519}
 INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
-TZ_NAME=${TZ_NAME:-}
-# The device's clock zone: this PC's own unless given. Windows names its zones differently; .NET
-# converts them to the IANA names the image uses.
-if [ -z "$TZ_NAME" ] && command -v pwsh >/dev/null 2>&1; then
-	TZ_NAME=$(pwsh -NoProfile -Command '$iana = $null; [void][TimeZoneInfo]::TryConvertWindowsIdToIanaId([TimeZoneInfo]::Local.Id, [ref]$iana); $iana' 2>/dev/null | tr -d '\r')
-fi
+# The zone a unit starts on before Home Assistant tells it its own (feature/timezone); images meant
+# for anyone keep UTC.
 TZ_NAME=${TZ_NAME:-UTC}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 VERSION=${VERSION:-}
@@ -76,12 +72,19 @@ cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
 if [ -n "$VENDOR_TGZ" ]; then cp "$VENDOR_TGZ" "$STAGE/inputs/vendor.tar.gz"; else cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"; fi
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
-# Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
-# them into the state directory when it is empty.
-if [ -d "$INPUTS/models" ]; then mkdir -p "$STAGE/overlay/usr/share/techo5/models"; cp "$INPUTS"/models/*.tflite "$INPUTS"/models/*.json "$STAGE/overlay/usr/share/techo5/models/"; fi
 # scripts must reach the device with LF endings whatever the checkout did
 for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do sed -i 's/\r$//' "$f"; done
 find "$STAGE/overlay" -type f -exec sed -i 's/\r$//' {} +
+# Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
+# them into the state directory when it is empty. They go in after the line endings are fixed:
+# the models are binary, and stripping a CR before every LF byte corrupted three of four (v0.2.5).
+if [ -d "$INPUTS/models" ]; then
+	mkdir -p "$STAGE/overlay/usr/share/techo5/models"
+	cp "$INPUTS"/models/*.tflite "$INPUTS"/models/*.json "$STAGE/overlay/usr/share/techo5/models/"
+	for m in "$INPUTS"/models/*.tflite; do
+		cmp -s "$m" "$STAGE/overlay/usr/share/techo5/models/$(basename "$m")" || { echo "model copy differs: $m" >&2; exit 1; }
+	done
+fi
 
 OUT=/data/techo5-linux/techo5-rootfs-$VERSION.tar.gz
 REMOTE=/data/techo5-linux/build

@@ -24,7 +24,10 @@ param(
     [string]$DotRootfs = '',
     # The release signing key (ed25519 seed, base64). Devices take a manifest only with its signature, so
     # a release cannot be published without it. Keep it off every repository and backed up.
-    [string]$SignKey = 'D:\platform-tools\keys\techo5-release.key'
+    [string]$SignKey = 'D:\platform-tools\keys\techo5-release.key',
+    # A boot image built with build-image.sh --no-key, published as techo5-boot-<version>.img for new
+    # units (docs/install.md). Refused if it carries an SSH key.
+    [string]$Boot = ''
 )
 $ErrorActionPreference = 'Stop'
 if (-not (Test-Path $SignKey)) { throw "no release signing key at $SignKey" }
@@ -67,6 +70,16 @@ $args = @('release', 'create', $Version, (Join-Path $bin 'echod-arm'), (Join-Pat
     (Join-Path $bin 'manifest.json.sig'), '--repo', $repo, '--title', $Version, '--notes', $Notes)
 if ($Rootfs) { $args += $Rootfs }
 if ($DotRootfs) { $args += $DotRootfs }
+if ($Boot) {
+    # An image built without --no-key carries the builder's key in its initramfs; that must not ship.
+    # The check is for the file entry (its name ends in a NUL), not the init script that mentions it.
+    $py = "import gzip,lzma,struct,sys; b=open(sys.argv[1],'rb').read(); ks,_,rs=struct.unpack('<3I',b[8:20]); ps=struct.unpack('<I',b[36:40])[0]; r0=ps+((ks+ps-1)//ps)*ps; r=b[r0:r0+rs]; d=gzip.decompress(r) if r[:2]==b'\x1f\x8b' else lzma.decompress(r); sys.exit(1 if b'root/.ssh/authorized_keys'+bytes(1) in d else 0)"
+    python -c $py $Boot
+    if ($LASTEXITCODE -ne 0) { throw "$Boot carries an SSH key: build it with build-image.sh --no-key" }
+    $named = Join-Path $bin "techo5-boot-$Version.img"
+    Copy-Item $Boot $named -Force
+    $args += $named
+}
 if ($Prerelease) { $args += '--prerelease' }
 & gh @args
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }

@@ -46,6 +46,15 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 				home.Get().Play(station)
 			}
 		}
+		switch r.URL.Query().Get("weather") {
+		case "forecast":
+			display.Get().ShowWeather(false)
+			time.Sleep(700 * time.Millisecond)
+		case "radar":
+			// The map's tiles take a few seconds the first time.
+			display.Get().ShowWeather(true)
+			time.Sleep(12 * time.Second)
+		}
 		if tab := r.URL.Query().Get("sheet"); tab != "" && display.Get().OpenSheet(tab) {
 			time.Sleep(700 * time.Millisecond)
 		}

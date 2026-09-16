@@ -43,6 +43,11 @@ if [ -z "${KPATCHED:-}" ]; then
 		exit 1
 	fi
 fi
+# The kernel records who built it and on what machine (uname -v, the boot log); keep the builder's
+# account and host name out of an image that may be published. Module loading is unaffected: the
+# vendor modules check the release string and symbol versions, not this.
+export KBUILD_BUILD_USER=${KBUILD_BUILD_USER:-techo5} KBUILD_BUILD_HOST=${KBUILD_BUILD_HOST:-techo5}
+export TZ=UTC # the build date in the version string, without the builder's zone
 export ARCH=arm64 CROSS_COMPILE
 mkdir -p "$KOUT"
 make -s O="$KOUT" cronos_defconfig

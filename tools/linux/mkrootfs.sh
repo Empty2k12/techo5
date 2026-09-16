@@ -94,13 +94,14 @@ rm -rf "$R/root/.ssh"
 ln -s /data/misc/techo5/ssh "$R/root/.ssh"
 sed -i 's|^root:[^:]*:|root:*:|' "$R/etc/shadow"
 
-# Clock.
-if [ -e "$R/usr/share/zoneinfo/$TZNAME" ]; then
-	ln -sf "/usr/share/zoneinfo/$TZNAME" "$R/etc/localtime"
-	echo "$TZNAME" > "$R/etc/timezone"
-else
-	say "warning: no zoneinfo for $TZNAME; UTC"
-fi
+# Clock. The zone is the unit's, not the image's: /etc/localtime and /etc/timezone link to userdata,
+# where echod writes the zone Home Assistant reports (feature/timezone). boot.sh creates them from
+# /etc/techo5/default-timezone (-z, UTC unless given) on a unit that has none yet.
+[ -e "$R/usr/share/zoneinfo/$TZNAME" ] || { say "warning: no zoneinfo for $TZNAME; UTC"; TZNAME=UTC; }
+echo "$TZNAME" > "$R/etc/techo5/default-timezone"
+rm -f "$R/etc/localtime" "$R/etc/timezone"
+ln -s /data/misc/techo5/localtime "$R/etc/localtime"
+ln -s /data/misc/techo5/timezone "$R/etc/timezone"
 
 mkdir -p "$R/store" "$R/data" "$R/run" "$R/proc" "$R/sys" "$R/dev" "$R/tmp" "$R/newroot"
 chmod 1777 "$R/tmp"

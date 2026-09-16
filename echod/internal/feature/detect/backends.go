@@ -57,10 +57,18 @@ type microBackend struct {
 // detector to apply it would wipe the streaming state a model needs to score well.
 const neverFires = 1.1
 
-func (b *microBackend) load(m wake.Model) error {
+func (b *microBackend) load(m wake.Model) (err error) {
 	cfg := m.Config
 	cfg.ProbabilityCutoff = neverFires
 
+	// The parser trusts the file: a damaged model panics inside it (a slice out of range on a
+	// truncated or altered flatbuffer), which took the whole daemon down in a loop on a unit whose
+	// image carried corrupted models. A model that cannot be read is an error, not a crash.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("wake: loading %s: damaged model: %v", m.Path, r)
+		}
+	}()
 	det, err := microwakeword.NewDetector(cfg)
 	if err != nil {
 		return fmt.Errorf("wake: loading %s: %w", m.Path, err)

@@ -110,6 +110,13 @@ KERNEL=.../Image.gz-dtb-bt-nodownmix KERNEL_IMAGE=.../boot-lineage-18.1-20260904
   bash tools/linux/build-image.sh -o techo5-linux-boot-bt.img
 ```
 
+The image published with releases is built with `--no-key` (no SSH key inside:
+the rescue environment then accepts only keys already on userdata, and starts
+no SSH server without one, so a new unit is set up from the USB serial console),
+from a kernel built in a clean checkout of the LineageOS tree; `build-kernel.sh`
+sets `KBUILD_BUILD_USER`/`KBUILD_BUILD_HOST` to `techo5` and builds in UTC, so the
+version string names no one.
+
 `KERNEL` replaces the kernel blob; the header, load addresses and command line
 still come from `KERNEL_IMAGE`.
 

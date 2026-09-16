@@ -5,6 +5,9 @@ package display
 import (
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
+	"math"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -71,6 +74,7 @@ func (r *renderer) weatherPage(s scene) {
 		msg := "No forecast yet: call the home_assistant action with a token"
 		r.text(r.tiny, msg, r.w/2-20, 200, dim)
 	}
+	r.weatherToggle("Radar")
 }
 
 // shortCondition is a word that fits a column.
@@ -90,3 +94,80 @@ func shortCondition(c string) string {
 
 // forecastDays is a type alias for the scene.
 type forecastDays = []hass.Day
+
+// radarStep is how long each frame of the rain map's loop shows; the newest holds for three.
+const radarStep = 600 * time.Millisecond
+
+// weatherButton is the button at the foot of the weather page that turns between the forecast and
+// the rain map.
+func (r *renderer) weatherButton() image.Rectangle {
+	return image.Rect(r.w-r.margin-150, r.h-100, r.w-r.margin, r.h-52)
+}
+
+func (r *renderer) weatherToggle(label string) {
+	b := r.weatherButton()
+	r.bevel(b, shift(ember, 16), true)
+	r.text(r.small, label, b.Min.X+(b.Dx()-r.width(r.small, label))/2, b.Max.Y-15, cream)
+}
+
+// radarPage is the rain map filling the panel, the loop's time and the credits over it, and home
+// marked in the middle.
+func (r *renderer) radarPage(s scene) {
+	v := s.radar
+	draw.Draw(r.dst, r.dst.Bounds(), image.NewUniform(walnut), image.Point{}, draw.Src)
+	if len(v.Frames) == 0 {
+		r.text(r.small, "Radar", r.margin, r.margin+26, amber)
+		msg := "Loading the rain map…"
+		if !v.Loading && v.Problem != "" {
+			msg = "No rain map: " + v.Problem
+		}
+		for i, line := range r.wrap(r.body, msg, r.w-2*r.margin) {
+			r.text(r.body, line, r.margin, 200+i*44, dim)
+		}
+		r.weatherToggle("Forecast")
+		return
+	}
+
+	// The loop: each past frame for a step, the newest for three.
+	n := len(v.Frames)
+	cycle := int64(n+2) * radarStep.Milliseconds()
+	i := int(s.now.UnixMilli() % cycle / radarStep.Milliseconds())
+	if i >= n {
+		i = n - 1
+	}
+	f := v.Frames[i]
+	draw.Draw(r.dst, r.dst.Bounds(), f.Image, image.Point{}, draw.Src)
+
+	// Home: a ring in the accent with a dark edge, readable over rain and map alike.
+	h := v.Home
+	r.ring(h, 9, walnut)
+	r.ring(h, 7, amber)
+	r.ring(h, 5, amber)
+
+	// The time of the frame, and the clock, on dark bands so they read over the map.
+	shade := func(rect image.Rectangle) {
+		draw.Draw(r.dst, rect, image.NewUniform(color.RGBA{0, 0, 0, 150}), image.Point{}, draw.Over)
+	}
+	label := "Radar  " + f.At.Local().Format("3:04 PM")
+	if i == n-1 {
+		label += "  (latest)"
+	}
+	shade(image.Rect(0, 0, r.w, r.margin+42))
+	r.text(r.small, label, r.margin, r.margin+26, amber)
+	r.cornerClock(s)
+
+	credit := "Radar RainViewer  ·  Map © OpenStreetMap contributors"
+	shade(image.Rect(0, r.h-34, r.w, r.h))
+	r.text(r.tiny, credit, r.margin, r.h-10, dim)
+	r.weatherToggle("Forecast")
+}
+
+// ring is a circle outline one pixel wide.
+func (r *renderer) ring(c image.Point, radius int, col color.RGBA) {
+	for a := 0; a < 360; a += 2 {
+		rad := float64(a) * math.Pi / 180
+		x := c.X + int(math.Round(float64(radius)*math.Cos(rad)))
+		y := c.Y + int(math.Round(float64(radius)*math.Sin(rad)))
+		r.dst.SetRGBA(x, y, col)
+	}
+}
