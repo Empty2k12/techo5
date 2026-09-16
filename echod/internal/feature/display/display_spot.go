@@ -7,6 +7,9 @@
 // the Show; the layouts are the Spot's own (render_spot.go), because nothing of a 960×480 page fits a
 // circle.
 //
+// The weather: the reading under the clock, and a weather face (weather_spot.go) from the dial or after
+// a question about the weather.
+//
 // Touch: a tap starts or ends a turn (on a dark screen it only lights it); a swipe up or down is the
 // volume, a step per 60 pixels; a held finger opens the ring menu (menu_spot.go). While the menu is open
 // the touch screen follows every moving finger, so dragging round the ring turns the dial (or, for a
@@ -37,6 +40,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
@@ -126,6 +130,10 @@ type Display struct {
 	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
 	wasNight bool
 
+	// weatherArmed is a weather question in progress; weatherUntil when the weather face comes down.
+	weatherArmed bool
+	weatherUntil time.Time
+
 	poke chan struct{}
 	dev  *screen.Device
 	r    *roundRenderer
@@ -165,6 +173,7 @@ func build() *Display {
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
+	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	// The mute button toggles the mute on the buttons' goroutine; redraw once it has.
 	buttons.Get().Events.Listen(func(buttons.Event) {
 		go func() {
@@ -293,8 +302,20 @@ func (d *Display) lux(float64) {
 
 func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
+	newHeard := s.Heard != "" && s.Heard != d.view.Heard
 	d.view = s
 	d.viewAt = time.Now()
+	// A question about the weather brings the weather face up once the answer is done.
+	if newHeard && aboutWeather(s.Heard) {
+		d.weatherArmed = true
+	}
+	if s.Phase == "idle" && d.weatherArmed {
+		d.weatherArmed = false
+		if !d.menuOpen || d.menuMode == modeWeather {
+			d.openMenu(modeWeather, "")
+			d.weatherUntil = time.Now().Add(weatherShow)
+		}
+	}
 	d.mu.Unlock()
 	d.wake()
 }
@@ -401,6 +422,13 @@ func (d *Display) menuGesture(g touch.Gesture) {
 			d.openMenu(modeSettings, itemInfo)
 		}
 
+	case mode == modeWeather:
+		if g.Kind == touch.Tap {
+			d.closeMenu()
+		} else {
+			d.weatherUntil = time.Now().Add(weatherIdle)
+		}
+
 	default:
 		items := itemsFor(mode)
 		n := len(items)
@@ -505,6 +533,11 @@ func (d *Display) act(id itemID) {
 		}
 	case itemVolume:
 		d.locked(func() { d.openMenu(modeVolume, "") })
+	case itemWeather:
+		d.locked(func() {
+			d.openMenu(modeWeather, "")
+			d.weatherUntil = time.Now().Add(weatherIdle)
+		})
 	case itemTimers:
 		if timer.Get().Ringing() {
 			timer.Get().Stop()
@@ -673,6 +706,10 @@ func (d *Display) frame() time.Duration {
 		switch {
 		case d.menuMode.jogging() && now.Sub(d.menuAt) > jogIdle:
 			d.finishJog(d.menuMode)
+		case d.menuMode == modeWeather:
+			if now.After(d.weatherUntil) {
+				d.closeMenu()
+			}
 		case !d.menuMode.jogging() && now.Sub(d.menuAt) > menuIdle:
 			d.closeMenu()
 		}
@@ -725,6 +762,10 @@ func (d *Display) frame() time.Duration {
 		}
 	}
 	s.timerRinging = timer.Get().Ringing()
+	s.weather = home.Get().Weather()
+	if s.menuOpen && s.menuMode == modeWeather {
+		s.forecast = home.Get().Forecast()
+	}
 	if s.menuOpen {
 		if s.menuMode != modeNightFrom && s.menuMode != modeNightTo {
 			s.nightFrom, s.nightTo = nightHours()

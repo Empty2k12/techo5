@@ -36,6 +36,7 @@ const (
 	modeNightFrom
 	modeNightTo
 	modeInfo
+	modeWeather
 )
 
 // jogging is whether the mode turns the ring into a jog wheel.
@@ -50,6 +51,7 @@ const (
 	itemMute       itemID = "mute"
 	itemMedia      itemID = "media"
 	itemVolume     itemID = "volume"
+	itemWeather    itemID = "weather"
 	itemTimers     itemID = "timers"
 	itemSettings   itemID = "settings"
 	itemSleep      itemID = "sleep"
@@ -72,6 +74,7 @@ var mainItems = []menuItem{
 	{itemMute, color.RGBA{229, 72, 77, 255}},
 	{itemMedia, color.RGBA{60, 203, 127, 255}},
 	{itemVolume, color.RGBA{58, 160, 255, 255}},
+	{itemWeather, color.RGBA{255, 196, 64, 255}},
 	{itemTimers, color.RGBA{255, 176, 32, 255}},
 	{itemSettings, color.RGBA{176, 150, 255, 255}},
 	{itemSleep, color.RGBA{120, 140, 255, 255}},
@@ -182,6 +185,8 @@ func itemName(s roundScene, id itemID) string {
 		return "Play"
 	case itemVolume:
 		return "Volume"
+	case itemWeather:
+		return "Weather"
 	case itemTimers:
 		return "Timers"
 	case itemSettings:
@@ -223,6 +228,11 @@ func itemHint(s roundScene, id itemID) string {
 		return "nothing playing"
 	case itemVolume:
 		return fmt.Sprintf("%d · tap, then turn", s.volume)
+	case itemWeather:
+		if l := weatherLine(s.weather); l != "" {
+			return l
+		}
+		return "forecast"
 	case itemTimers:
 		switch {
 		case s.timerRinging:
@@ -266,6 +276,8 @@ func (r *roundRenderer) menu(s roundScene) {
 		r.jog(s)
 	case s.menuMode == modeInfo:
 		r.info(s)
+	case s.menuMode == modeWeather:
+		r.weatherFace(s)
 	default:
 		r.dial(s)
 	}
@@ -370,6 +382,10 @@ func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c colo
 		r.speakerIcon(x-0.2*u, y, u*0.9, w, c)
 		r.ringAt(x+0.05*u, y, 0.45*u-w/2, 0.45*u+w/2, 0.25*math.Pi, 0.75*math.Pi, c)
 		r.ringAt(x+0.05*u, y, 0.85*u-w/2, 0.85*u+w/2, 0.25*math.Pi, 0.75*math.Pi, c)
+	case itemWeather:
+		r.sunIcon(x+0.38*u, y-0.32*u, 0.62*u, w*0.8, c)
+		r.cloud(x-0.12*u, y+0.22*u, 1.02*u, colIconGround)
+		r.cloud(x-0.12*u, y+0.22*u, 0.8*u, c)
 	case itemTimers:
 		r.line(x-0.6*u, y-0.9*u, x+0.6*u, y-0.9*u, w, c)
 		r.line(x-0.6*u, y+0.9*u, x+0.6*u, y+0.9*u, w, c)

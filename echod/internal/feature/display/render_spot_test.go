@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
 // The dials: each item's rest puts it at the top, a tap lands on the item under it or the middle, and
@@ -48,7 +50,17 @@ func TestDialGeometry(t *testing.T) {
 // a PNG to look at.
 func TestRoundScenesDraw(t *testing.T) {
 	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
+	sky := home.Weather{Condition: "partlycloudy", Temp: "72°"}
+	var week []hass.Day
+	for i, c := range []string{"partlycloudy", "rainy", "lightning-rainy", "sunny", "snowy", "cloudy"} {
+		week = append(week, hass.Day{When: at.AddDate(0, 0, i), Condition: c, High: float64(78 - 3*i), Low: float64(55 - 2*i), Rain: 10 * i})
+	}
 	scenes := map[string]roundScene{
+		"clock-weather":  {now: at, phase: "idle", weather: sky, timers: []timer.Countdown{{Left: 272 * time.Second, Total: 600 * time.Second, Active: true}}},
+		"menu-weather":   {now: at, phase: "idle", weather: sky, menuOpen: true, menuMode: modeMain, menuSel: 4, menuRot: restFor(4, len(mainItems))},
+		"weather":        {now: at, phase: "idle", weather: sky, forecast: week, menuOpen: true, menuMode: modeWeather},
+		"weather-now":    {now: at, phase: "idle", weather: home.Weather{Condition: "clear-night", Temp: "58°"}, menuOpen: true, menuMode: modeWeather},
+		"weather-none":   {now: at, phase: "idle", menuOpen: true, menuMode: modeWeather},
 		"clock":          {now: at, phase: "idle", volume: 12, maxVolume: 30},
 		"clock-timer":    {now: at, phase: "idle", timers: []timer.Countdown{{Name: "pasta", Left: 4*time.Minute + 32*time.Second, Total: 10 * time.Minute, Active: true}}},
 		"muted":          {now: at, phase: "idle", muted: true},
@@ -57,7 +69,7 @@ func TestRoundScenesDraw(t *testing.T) {
 		"replying":       {now: at, phase: "replying", heard: "what time is it", reply: "It's 2:07 PM. Have a great afternoon, and don't forget the pasta timer is still running in the kitchen."},
 		"volume":         {now: at, phase: "idle", volume: 18, maxVolume: 30, showVolume: true},
 		"menu":           {now: at, phase: "idle", volume: 12, menuOpen: true, menuMode: modeMain, menuSel: 0, menuRot: restFor(0, len(mainItems))},
-		"menu-timers":    {now: at, phase: "idle", menuOpen: true, menuMode: modeMain, menuSel: 4, menuRot: restFor(4, len(mainItems)) + 0.3, timers: []timer.Countdown{{Left: 272 * time.Second, Total: 600 * time.Second, Active: true}}},
+		"menu-timers":    {now: at, phase: "idle", menuOpen: true, menuMode: modeMain, menuSel: 5, menuRot: restFor(5, len(mainItems)) + 0.3, timers: []timer.Countdown{{Left: 272 * time.Second, Total: 600 * time.Second, Active: true}}},
 		"menu-settings":  {now: at, phase: "idle", menuOpen: true, menuMode: modeSettings, menuSel: 1, menuRot: restFor(1, len(settingsItems)), nightFrom: 22, nightTo: 7, brightness: 72},
 		"jog-volume":     {now: at, phase: "idle", menuOpen: true, menuMode: modeVolume, volume: 14, maxVolume: 30},
 		"jog-brightness": {now: at, phase: "idle", menuOpen: true, menuMode: modeBrightness, brightness: 72},

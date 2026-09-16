@@ -17,6 +17,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 )
 
@@ -63,6 +64,9 @@ type roundScene struct {
 	nightFrom, nightTo                 int // hours
 	restartArmed                       bool
 	infoName, infoAddress, infoVersion string
+
+	weather  home.Weather
+	forecast forecastDays
 }
 
 type roundRenderer struct {
@@ -146,6 +150,10 @@ func (r *roundRenderer) clockFace(s roundScene) {
 	r.centred(r.small, now.Format("Monday, January 2"), 330, colDim)
 
 	line := 372
+	if weatherLine(s.weather) != "" {
+		r.clockWeather(s.weather, line)
+		line += 38
+	}
 	if len(s.timers) > 0 {
 		t := s.timers[0]
 		r.centred(r.body, "Timer "+clockDuration(t.Left), line, colTimer)
