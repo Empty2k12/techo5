@@ -130,7 +130,18 @@ t5_wifi_prefer5() {
 	ssid=$($w status 2>/dev/null | sed -n 's/^ssid=//p')
 	[ -n "$id" ] && [ -n "$ssid" ] || return 0
 	best=$($w scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" 'NR>1 && $5 == s && $2 > 4000 {print $3}' | sort -n | tail -1)
-	[ -n "$best" ] && [ "$best" -ge "${T5_5G_MIN:--70}" ] || return 0
+	if [ -z "$best" ]; then
+		# A connected supplicant stops scanning, and its list ages out to the radio it is on: the
+		# bench sat on 2.4 GHz for good with a -33 dBm 5 GHz radio unlisted (2026-09-16). Ask for a
+		# scan now and then; the keeper's next call reads it.
+		mkdir -p /run/techo5
+		if [ "$now" -ge "$(cat /run/techo5/prefer5-scan 2>/dev/null || echo 0)" ]; then
+			$w scan >/dev/null 2>&1
+			echo $((now + 300)) > /run/techo5/prefer5-scan
+		fi
+		return 0
+	fi
+	[ "$best" -ge "${T5_5G_MIN:--70}" ] || return 0
 	log "wifi: on $freq MHz while '$ssid' is on 5 GHz at $best dBm; moving"
 	$w set_network "$id" freq_list "$T5_5G_FREQS" >/dev/null 2>&1
 	$w reassociate >/dev/null 2>&1
