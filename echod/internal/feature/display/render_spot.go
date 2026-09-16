@@ -23,13 +23,10 @@ import (
 // The round panel: everything is laid out from its centre, and nothing may sit where the circle
 // cuts it off.
 const (
-	side    = 480
-	centre  = side / 2
-	rimOut  = 236 // outer edge of the status ring
-	rimIn   = 222 // inner edge
-	menuR   = 162 // radius the menu items sit on
-	itemR   = 44  // radius of a menu item
-	menuHub = 96  // inside this a finger is on no item
+	side   = 480
+	centre = side / 2
+	rimOut = 236 // outer edge of the status ring
+	rimIn  = 222 // inner edge
 )
 
 var (
@@ -42,8 +39,6 @@ var (
 	colReplying   = color.RGBA{60, 203, 127, 255}
 	colMuted      = color.RGBA{229, 72, 77, 255}
 	colTimer      = color.RGBA{255, 176, 32, 255}
-	colItem       = color.RGBA{30, 36, 44, 255}
-	colItemSel    = color.RGBA{58, 160, 255, 255}
 )
 
 type roundScene struct {
@@ -58,51 +53,8 @@ type roundScene struct {
 	showVolume   bool
 	timers       []timer.Countdown
 	menuOpen     bool
-	menuSel      int
-}
-
-type itemID string
-
-const (
-	itemTalk       itemID = "talk"
-	itemVolumeUp   itemID = "volume_up"
-	itemMute       itemID = "mute"
-	itemPlayPause  itemID = "play_pause"
-	itemVolumeDown itemID = "volume_down"
-	itemScreenOff  itemID = "screen_off"
-)
-
-type menuItem struct {
-	id    itemID
-	label string
-}
-
-// menuItems go clockwise from the top.
-var menuItems = []menuItem{
-	{itemTalk, "Talk"},
-	{itemVolumeUp, "Vol +"},
-	{itemMute, "Mute"},
-	{itemPlayPause, "Play"},
-	{itemVolumeDown, "Vol −"},
-	{itemScreenOff, "Off"},
-}
-
-// itemAngle is where item i sits, in radians clockwise from straight up.
-func itemAngle(i int) float64 { return float64(i) * 2 * math.Pi / float64(len(menuItems)) }
-
-// menuAt is the item a point on the screen is over: by its direction from the centre, once it is out
-// of the hub. -1 is none.
-func menuAt(x, y int) int {
-	dx, dy := float64(x-centre), float64(y-centre)
-	if math.Hypot(dx, dy) < menuHub {
-		return -1
-	}
-	a := math.Atan2(dx, -dy) // clockwise from up
-	if a < 0 {
-		a += 2 * math.Pi
-	}
-	step := 2 * math.Pi / float64(len(menuItems))
-	return int(math.Floor(a/step+0.5)) % len(menuItems)
+	menuSel      int     // the chosen item, at or turning to the top
+	menuRot      float64 // the dial's rotation, radians clockwise
 }
 
 type roundRenderer struct {
@@ -149,7 +101,7 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.clockFace(s)
 	}
 	if s.menuOpen {
-		r.menu(s)
+		r.dial(s)
 	}
 }
 
@@ -236,48 +188,20 @@ func (r *roundRenderer) volume(s roundScene) {
 	r.centred(r.small, "VOLUME", 320, colDim)
 }
 
-func (r *roundRenderer) menu(s roundScene) {
-	// Dim what is behind the menu.
-	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.RGBA{0, 0, 0, 225}), image.Point{}, draw.Over)
-	for i, it := range menuItems {
-		a := itemAngle(i)
-		cx := centre + int(math.Round(menuR*math.Sin(a)))
-		cy := centre - int(math.Round(menuR*math.Cos(a)))
-		fill := colItem
-		if i == s.menuSel {
-			fill = colItemSel
-		}
-		label := it.label
-		switch it.id {
-		case itemMute:
-			if s.muted {
-				label, fill = "Unmute", pick(i == s.menuSel, colItemSel, colMuted)
-			}
-		case itemPlayPause:
-			if s.playing {
-				label = "Pause"
-			}
-		}
-		r.disc(cx, cy, itemR, fill)
-		w := r.width(r.label, label)
-		r.text(r.label, label, cx-w/2, cy+7, colText)
-	}
-	hub := "Hold, slide, let go"
-	if s.menuSel >= 0 {
-		hub = ""
-	}
-	r.centred(r.label, hub, centre+7, colDim)
-}
-
 // arc fills the ring between radii r0 and r1 from angle a0 to a1, clockwise from straight up, with
 // a one-pixel soft edge on both circles.
 func (r *roundRenderer) arc(r0, r1 float64, a0, a1 float64, c color.RGBA) {
+	r.ringAt(centre, centre, r0, r1, a0, a1, c)
+}
+
+// ringAt is arc about any centre.
+func (r *roundRenderer) ringAt(cx, cy, r0, r1 float64, a0, a1 float64, c color.RGBA) {
 	full := a1-a0 >= 2*math.Pi-1e-9
 	b := r.dst.Rect
-	for y := max(centre-int(r1)-1, b.Min.Y); y <= min(centre+int(r1)+1, b.Max.Y-1); y++ {
-		dy := float64(y) + 0.5 - centre
-		for x := max(centre-int(r1)-1, b.Min.X); x <= min(centre+int(r1)+1, b.Max.X-1); x++ {
-			dx := float64(x) + 0.5 - centre
+	for y := max(int(cy-r1)-1, b.Min.Y); y <= min(int(cy+r1)+1, b.Max.Y-1); y++ {
+		dy := float64(y) + 0.5 - cy
+		for x := max(int(cx-r1)-1, b.Min.X); x <= min(int(cx+r1)+1, b.Max.X-1); x++ {
+			dx := float64(x) + 0.5 - cx
 			d := math.Hypot(dx, dy)
 			if d < r0-1 || d > r1+1 {
 				continue
@@ -305,20 +229,67 @@ func (r *roundRenderer) arc(r0, r1 float64, a0, a1 float64, c color.RGBA) {
 	}
 }
 
-func (r *roundRenderer) disc(cx, cy, rad int, c color.RGBA) {
-	fr := float64(rad)
-	for y := cy - rad - 1; y <= cy+rad+1; y++ {
-		for x := cx - rad - 1; x <= cx+rad+1; x++ {
+func (r *roundRenderer) discAt(cx, cy, rad float64, c color.RGBA) {
+	for y := int(cy - rad - 1); y <= int(cy+rad+1); y++ {
+		for x := int(cx - rad - 1); x <= int(cx+rad+1); x++ {
 			if !(image.Point{x, y}.In(r.dst.Rect)) {
 				continue
 			}
-			d := math.Hypot(float64(x)+0.5-float64(cx), float64(y)+0.5-float64(cy))
-			if d > fr+1 {
+			d := math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy)
+			if d > rad+1 {
 				continue
 			}
-			r.blend(x, y, c, math.Min(fr+1-d, 1))
+			r.blend(x, y, c, math.Min(rad+1-d, 1))
 		}
 	}
+}
+
+// line strokes a segment w wide with round ends.
+func (r *roundRenderer) line(x0, y0, x1, y1, w float64, c color.RGBA) {
+	hw := w / 2
+	dx, dy := x1-x0, y1-y0
+	l2 := dx*dx + dy*dy
+	for y := int(math.Min(y0, y1) - hw - 1); y <= int(math.Max(y0, y1)+hw+1); y++ {
+		for x := int(math.Min(x0, x1) - hw - 1); x <= int(math.Max(x0, x1)+hw+1); x++ {
+			if !(image.Point{x, y}.In(r.dst.Rect)) {
+				continue
+			}
+			px, py := float64(x)+0.5, float64(y)+0.5
+			t := 0.0
+			if l2 > 0 {
+				t = math.Min(math.Max(((px-x0)*dx+(py-y0)*dy)/l2, 0), 1)
+			}
+			d := math.Hypot(px-(x0+t*dx), py-(y0+t*dy))
+			r.blend(x, y, c, math.Min(hw+0.5-d, 1))
+		}
+	}
+}
+
+// triangle fills a triangle, with a soft edge.
+func (r *roundRenderer) triangle(ax, ay, bx, by, cx, cy float64, c color.RGBA) {
+	edge := func(px, py, x0, y0, x1, y1 float64) float64 {
+		ex, ey := x1-x0, y1-y0
+		return ((px-x0)*ey - (py-y0)*ex) / math.Hypot(ex, ey)
+	}
+	sign := 1.0
+	if edge(cx, cy, ax, ay, bx, by) < 0 {
+		sign = -1
+	}
+	for y := int(math.Min(ay, math.Min(by, cy))) - 1; y <= int(math.Max(ay, math.Max(by, cy)))+1; y++ {
+		for x := int(math.Min(ax, math.Min(bx, cx))) - 1; x <= int(math.Max(ax, math.Max(bx, cx)))+1; x++ {
+			if !(image.Point{x, y}.In(r.dst.Rect)) {
+				continue
+			}
+			px, py := float64(x)+0.5, float64(y)+0.5
+			d := math.Min(sign*edge(px, py, ax, ay, bx, by), math.Min(sign*edge(px, py, bx, by, cx, cy), sign*edge(px, py, cx, cy, ax, ay)))
+			r.blend(x, y, c, math.Min(d+0.5, 1))
+		}
+	}
+}
+
+// dim darkens the whole canvas by alpha.
+func (r *roundRenderer) dim(alpha uint8) {
+	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.RGBA{0, 0, 0, alpha}), image.Point{}, draw.Over)
 }
 
 func (r *roundRenderer) blend(x, y int, c color.RGBA, cover float64) {
@@ -396,11 +367,4 @@ func clockDuration(d time.Duration) string {
 
 func fade(c color.RGBA, k float64) color.RGBA {
 	return color.RGBA{c.R, c.G, c.B, uint8(float64(c.A) * math.Min(math.Max(k, 0), 1))}
-}
-
-func pick(cond bool, a, b color.RGBA) color.RGBA {
-	if cond {
-		return a
-	}
-	return b
 }

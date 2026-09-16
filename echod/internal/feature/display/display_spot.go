@@ -8,8 +8,8 @@
 // circle.
 //
 // Touch: a tap starts or ends a turn (on a dark screen it only lights it); a vertical swipe is the
-// volume; a held finger opens the ring menu, and sliding onto an item and letting go picks it. Letting
-// go in the middle leaves the menu open for taps, and a tap in the middle closes it.
+// volume; a held finger opens the ring menu (menu_spot.go), a dial: keep holding and slide round to
+// spin it, let go and it snaps to the nearest item, tap the middle to do the item at the top.
 //
 // To Home Assistant the screen is a light with brightness, and a switch for auto-brightness, the
 // same entities the Show has.
@@ -53,6 +53,11 @@ const (
 	// menuIdle closes a ring menu nobody is touching.
 	menuIdle = 6 * time.Second
 
+	// dialFrame is the redraw while the dial turns; dialEase how much of the way to its rest it moves
+	// each frame.
+	dialFrame = 40 * time.Millisecond
+	dialEase  = 0.35
+
 	idleFrame   = time.Second
 	activeFrame = 120 * time.Millisecond
 
@@ -80,12 +85,16 @@ type Display struct {
 	volume  int
 	volAt   time.Time
 
-	// menuOpen is the ring menu on the screen; menuSel the item under the finger (-1 none);
-	// menuAt the last time anyone touched it; dragging a held finger still down.
-	menuOpen bool
-	menuSel  int
-	menuAt   time.Time
-	dragging bool
+	// menuOpen is the ring menu on the screen; menuSel the item at (or turning to) the top; menuRot
+	// the dial's rotation now and menuRest where it is heading; menuAt the last touch; spinning a held
+	// finger turning it, last its direction from the centre.
+	menuOpen  bool
+	menuSel   int
+	menuRot   float64
+	menuRest  float64
+	menuAt    time.Time
+	spinning  bool
+	spinAngle float64
 
 	poke chan struct{}
 	dev  *screen.Device
@@ -116,9 +125,8 @@ func build() *Display {
 				Category: esphome.CategoryConfig,
 			},
 		},
-		poke:    make(chan struct{}, 1),
-		view:    voice.State{Phase: "idle"},
-		menuSel: -1,
+		poke: make(chan struct{}, 1),
+		view: voice.State{Phase: "idle"},
 	}
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
@@ -274,48 +282,57 @@ func (d *Display) gesture(g touch.Gesture) {
 		media.Get().Adjust(-1)
 	case touch.Hold:
 		d.mu.Lock()
-		d.menuOpen, d.menuSel, d.menuAt, d.dragging = true, -1, time.Now(), true
+		d.menuOpen, d.menuAt = true, time.Now()
+		d.menuRot = restFor(d.menuSel)
+		d.menuRest = d.menuRot
+		d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
 		d.mu.Unlock()
 		d.wake()
 	}
 }
 
 func (d *Display) menuGesture(g touch.Gesture) {
-	item := menuAt(g.X, g.Y)
 	d.mu.Lock()
 	d.menuAt = time.Now()
+	n := len(menuItems)
 	switch g.Kind {
+	case touch.Hold:
+		// Another held finger: it spins the dial from where it is.
+		d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
 	case touch.Drag:
-		d.menuSel = item
-		d.mu.Unlock()
-		d.wake()
-		return
-	case touch.Release, touch.Tap:
-		d.dragging = false
-		if item < 0 {
-			if g.Kind == touch.Tap {
-				d.menuOpen = false // a tap in the middle closes it
-			}
-			d.menuSel = -1
+		if d.spinning {
+			a := fingerAngle(g.X, g.Y)
+			d.menuRot += wrapAngle(a - d.spinAngle)
+			d.spinAngle = a
+			d.menuRest = d.menuRot
+			d.menuSel = topItem(d.menuRot)
+		}
+	case touch.Release:
+		d.spinning = false
+		d.menuRest = nearestRest(d.menuRot, d.menuSel)
+	case touch.Tap:
+		item, middle := dialHitAt(g.X, g.Y, d.menuRot)
+		switch {
+		case middle || item == d.menuSel:
+			chosen := d.menuSel
+			d.menuOpen = false
 			d.mu.Unlock()
+			d.act(chosen)
 			d.wake()
 			return
+		case item >= 0:
+			d.menuSel = item
+			d.menuRest = nearestRest(d.menuRot, item)
 		}
-		d.menuOpen, d.menuSel = false, -1
-		d.mu.Unlock()
-		d.act(item)
-		d.wake()
-		return
-	case touch.SwipeUp:
-		d.mu.Unlock()
-		media.Get().Adjust(+1)
-		return
-	case touch.SwipeDown:
-		d.mu.Unlock()
-		media.Get().Adjust(-1)
-		return
+	case touch.SwipeLeft:
+		d.menuSel = (d.menuSel + 1) % n
+		d.menuRest = nearestRest(d.menuRot, d.menuSel)
+	case touch.SwipeRight:
+		d.menuSel = (d.menuSel + n - 1) % n
+		d.menuRest = nearestRest(d.menuRot, d.menuSel)
 	}
 	d.mu.Unlock()
+	d.wake()
 }
 
 // act does what a ring menu item says.
@@ -343,6 +360,12 @@ func (d *Display) act(item int) {
 		d.apply(false, ceiling, true)
 	}
 	slog.Info("ring menu", "item", menuItems[item].id)
+}
+
+func (d *Display) isSpinning() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.spinning
 }
 
 func (d *Display) ceilingOrDefault() int {
@@ -398,8 +421,17 @@ func (d *Display) Run(ctx context.Context) error {
 func (d *Display) frame() time.Duration {
 	now := time.Now()
 	d.mu.Lock()
-	if d.menuOpen && !d.dragging && now.Sub(d.menuAt) > menuIdle {
-		d.menuOpen, d.menuSel = false, -1
+	if d.menuOpen && !d.spinning && now.Sub(d.menuAt) > menuIdle {
+		d.menuOpen = false
+	}
+	turning := false
+	if d.menuOpen && !d.spinning {
+		if diff := d.menuRest - d.menuRot; math.Abs(diff) > 0.002 {
+			d.menuRot += diff * dialEase
+			turning = true
+		} else {
+			d.menuRot = d.menuRest
+		}
 	}
 	on, view, at := d.on, d.view, d.viewAt
 	s := roundScene{
@@ -409,6 +441,7 @@ func (d *Display) frame() time.Duration {
 		reply:    view.Reply,
 		menuOpen: d.menuOpen,
 		menuSel:  d.menuSel,
+		menuRot:  d.menuRot,
 	}
 	if !d.volAt.IsZero() && now.Sub(d.volAt) < volumeShow {
 		s.volume, s.showVolume = d.volume, true
@@ -439,6 +472,8 @@ func (d *Display) frame() time.Duration {
 	}
 
 	switch {
+	case turning || (s.menuOpen && d.isSpinning()):
+		return dialFrame
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen:
 		return activeFrame
 	default:

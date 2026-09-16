@@ -14,24 +14,30 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 )
 
-// A finger over an item picks it, whichever way round the ring; the hub picks nothing.
-func TestMenuAtFollowsTheRing(t *testing.T) {
-	if got := menuAt(centre, centre); got != -1 {
-		t.Fatalf("centre: got %d, want -1", got)
-	}
+// The dial: each item's rest puts it at the top, a tap lands on the item under it or the middle, and
+// snapping always takes the short way round.
+func TestDialGeometry(t *testing.T) {
 	for i := range menuItems {
-		a := itemAngle(i)
-		x := centre + int(math.Round(menuR*math.Sin(a)))
-		y := centre - int(math.Round(menuR*math.Cos(a)))
-		if got := menuAt(x, y); got != i {
-			t.Errorf("item %d at %d,%d: got %d", i, x, y, got)
+		rot := restFor(i)
+		if got := topItem(rot); got != i {
+			t.Errorf("rest for %d: top is %d", i, got)
 		}
-		// Past the item, towards the rim, is still the item.
-		x = centre + int(math.Round(225*math.Sin(a)))
-		y = centre - int(math.Round(225*math.Cos(a)))
-		if got := menuAt(x, y); got != i {
-			t.Errorf("item %d near the rim: got %d", i, got)
+		x, y := itemPos(i, rot)
+		if math.Abs(x-centre) > 0.5 || math.Abs(y-(centre-dialR)) > 0.5 {
+			t.Errorf("item %d at rest is at %.1f,%.1f, not the top", i, x, y)
 		}
+		for j := range menuItems {
+			jx, jy := itemPos(j, rot)
+			if got, middle := dialHitAt(int(math.Round(jx)), int(math.Round(jy)), rot); middle || got != j {
+				t.Errorf("rot for %d: tap on item %d hit %d (middle %v)", i, j, got, middle)
+			}
+		}
+	}
+	if _, middle := dialHitAt(centre, centre, 0); !middle {
+		t.Error("the centre is not the middle")
+	}
+	if d := nearestRest(restFor(0), 5) - restFor(0); math.Abs(d) > math.Pi {
+		t.Errorf("snapping from 0 to 5 turns %.2f rad, the long way", d)
 	}
 }
 
@@ -47,8 +53,9 @@ func TestRoundScenesDraw(t *testing.T) {
 		"thinking":      {now: at, phase: "thinking", heard: "what's the weather going to be like this afternoon"},
 		"replying":      {now: at, phase: "replying", heard: "what time is it", reply: "It's 2:07 PM. Have a great afternoon, and don't forget the pasta timer is still running in the kitchen."},
 		"volume":        {now: at, phase: "idle", volume: 18, maxVolume: 30, showVolume: true},
-		"menu":          {now: at, phase: "idle", menuOpen: true, menuSel: -1},
-		"menu-selected": {now: at, phase: "idle", menuOpen: true, menuSel: 2, playing: true},
+		"menu":          {now: at, phase: "idle", volume: 12, menuOpen: true, menuSel: 0, menuRot: restFor(0)},
+		"menu-selected": {now: at, phase: "idle", volume: 12, menuOpen: true, menuSel: 2, menuRot: restFor(2), playing: true},
+		"menu-turning":  {now: at, phase: "idle", volume: 12, menuOpen: true, menuSel: 1, menuRot: restFor(1) + 0.35},
 	}
 	dir := os.Getenv("SPOT_PREVIEW")
 	for name, s := range scenes {
