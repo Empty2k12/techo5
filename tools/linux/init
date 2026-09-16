@@ -189,7 +189,13 @@ network_up() {
 	mkdir -p /root/.ssh
 	[ -r /data/misc/techo5/ssh/authorized_keys ] && cat /data/misc/techo5/ssh/authorized_keys >> /root/.ssh/authorized_keys
 	chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
-	t5_dropbear $LOGDIR/dropbear -s
+	# The image published with releases has no key: with none on userdata either, nobody could log
+	# in, so SSH stays closed and the USB serial console is the way in.
+	if [ -s /root/.ssh/authorized_keys ]; then
+		t5_dropbear $LOGDIR/dropbear -s
+	else
+		crumb "ssh: no key in the image or on userdata; USB serial console only"
+	fi
 	t5_ntp
 
 	# The daemon, from the same place as the vendor tree, so a rescue boot still answers.

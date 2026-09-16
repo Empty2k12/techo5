@@ -17,8 +17,8 @@ on your network, `<version>` a release such as `v0.2.7`.
   [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/),
   connected to your Wi-Fi in Android, with USB debugging on.
 - Its power adapter and a USB **data** cable to the PC. Keep it on mains power while flashing.
-- A Windows PC with Git Bash, `adb` and `fastboot` (Android platform tools), Go, Python 3 and WSL
-  (Ubuntu) — for building the boot image.
+- A Windows PC with Git Bash, `adb` and `fastboot` (Android platform tools), and a serial terminal
+  such as PuTTY. Go, Python 3 and WSL (Ubuntu) only if you build the boot image yourself.
 - Home Assistant with the ESPHome integration.
 
 Work in Git Bash. It rewrites arguments that look like paths, including paths on the device, so set
@@ -27,22 +27,27 @@ Work in Git Bash. It rewrites arguments that look like paths, including paths on
 If more than one Android or fastboot device is plugged in, pass `-s <serial>` to every `adb` and
 `fastboot` command and check `adb devices -l` first.
 
-## 1. Build a boot image with your own key
+## 1. Get the boot image
 
-The boot image (kernel plus the rescue initramfs) is not published: it carries the SSH key the
-rescue environment accepts, and that key should be yours.
+The boot image is the kernel plus the small rescue environment that sets a unit up. Two ways:
+
+- **From a release (simplest).** Download `techo5-boot-<version>.img` from the same
+  [release](https://github.com/HuskerMinion/techo5/releases) as the root filesystem. It carries no
+  SSH key, so steps 4 and 5 are typed into the unit's **USB serial console**.
+- **Built yourself with your own SSH key**, to SSH into the rescue environment instead:
+
+  ```
+  ssh-keygen -t ed25519 -f techo5_ed25519        # into your inputs directory
+  ```
+
+  then build the kernel and boot image as [tools/linux/README.md](../tools/linux/README.md) describes
+  ("Build": inputs, `build-kernel.sh` in WSL, `patch-dtb.py`, `build-image.sh`).
+
+Either way the kernel is the LineageOS commit the Show's own kernel came from, so the vendor Wi-Fi
+and Bluetooth modules load. Check before flashing:
 
 ```
-ssh-keygen -t ed25519 -f techo5_ed25519        # into your inputs directory
-```
-
-Then build the kernel and boot image as [tools/linux/README.md](../tools/linux/README.md) describes
-("Build": inputs, `build-kernel.sh` in WSL, `patch-dtb.py`, `build-image.sh`). The kernel must be the
-LineageOS commit the unit's own kernel came from, so the vendor Wi-Fi and Bluetooth modules load.
-Check before flashing:
-
-```
-adb -s <serial> shell uname -r      # must equal the kernel you built, e.g. 4.9.337-g8d928c5176cc
+adb -s <serial> shell uname -r      # must be 4.9.337-g8d928c5176cc
 ```
 
 ## 2. Put the root filesystem on the unit
@@ -61,20 +66,22 @@ adb -s <serial> shell md5sum /sdcard/Download/techo5-rootfs-<version>.tar.gz   #
 ```
 adb -s <serial> reboot bootloader
 fastboot devices                                  # exactly the unit you mean
-fastboot -s <serial> flash boot techo5-linux-boot.img
+fastboot -s <serial> flash boot techo5-boot-<version>.img    # or your own techo5-linux-boot.img
 fastboot -s <serial> continue
 ```
 
 The unit boots the TECHO5 initramfs. With LineageOS still on `system` there is no slot store, so it
-stays in the **rescue environment**: it joins the Wi-Fi network Android saved, starts SSH on port 22
-with your key, and shows a test screen. Within about a minute:
+stays in the **rescue environment**: it joins the Wi-Fi network Android saved and shows a test
+screen. Open a root shell on it:
 
-```
-ssh -i techo5_ed25519 root@<address>
-```
+- **USB serial console** (any boot image): the unit appears in Device Manager as a new "USB Serial
+  Device (COMn)". Open that port in PuTTY (connection type Serial, speed 115200) and press Enter for
+  a `#` prompt.
+- **SSH** (a boot image built with your key), within about a minute:
 
-No network? The rescue environment also puts a root shell on the USB serial port (a new COM port,
-115200 baud).
+  ```
+  ssh -i techo5_ed25519 root@<address>
+  ```
 
 ## 4. Create the slot store and install
 
@@ -89,8 +96,8 @@ STORE=/store slotctl install /data/media/0/Download/techo5-rootfs-<version>.tar.
 STORE=/store slotctl status                       # slot a: trial 3
 ```
 
-If `mkfs failed` mentions `libgcc_s.so.1`, the boot image predates the fix (built before
-2026-09-16): take the library from the root filesystem and run `mkstore` again.
+If `mkfs failed` mentions `libgcc_s.so.1`, the boot image predates the fix (one older than v0.2.8):
+take the library from the root filesystem and run `mkstore` again.
 
 ```
 tar xzf /data/media/0/Download/techo5-rootfs-<version>.tar.gz -C /tmp ./usr/lib/libgcc_s.so.1
@@ -108,8 +115,8 @@ printf 'Kitchen\n' > /data/misc/techo5/name       # the name Home Assistant show
 # The ESPHome encryption key. Keep the printed value for Home Assistant.
 umask 077; head -c 32 /dev/urandom | base64 > /data/misc/techo5/psk; cat /data/misc/techo5/psk
 
-# SSH after the switch to the slot: your key, and the switch on. Otherwise SSH is off
-# and keys arrive from Home Assistant (the ssh_keys action).
+# Only with a boot image built with your key: keep SSH after the switch to the slot. Otherwise
+# skip these four lines; SSH stays off, and a key comes later from Home Assistant (ssh_keys).
 mkdir -p -m 700 /data/misc/techo5/ssh
 cp /root/.ssh/authorized_keys /data/misc/techo5/ssh/authorized_keys
 chmod 600 /data/misc/techo5/ssh/authorized_keys

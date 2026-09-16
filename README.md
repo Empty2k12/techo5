@@ -34,8 +34,8 @@ the one-page description; [docs/porting-plan.md](docs/porting-plan.md) is how it
 
 Getting there takes an unlocked bootloader
 ([amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/))
-and a boot image built with your own key; [docs/install.md](docs/install.md) walks through the rest,
-from LineageOS to a unit in Home Assistant.
+and LineageOS; each release carries the boot image and root filesystem, and
+[docs/install.md](docs/install.md) walks through the rest, from LineageOS to a unit in Home Assistant.
 
 ## Screenshots
 
