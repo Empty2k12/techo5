@@ -11,6 +11,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/diag"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
@@ -68,6 +69,12 @@ func newDetect() *Detect {
 	}
 
 	e.OnDetect = func(slot int) {
+		// A call has the microphones and the speaker. The far end talking through the speaker is not
+		// someone in the room, and a turn would take the call's audio away mid-sentence.
+		if phone.Get().Busy() {
+			slog.Debug("wake word ignored during a call", "slot", slot+1)
+			return
+		}
 		if slot == StopSlot {
 			voice.Get().Interrupt()
 			return
