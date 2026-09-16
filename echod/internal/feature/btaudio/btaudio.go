@@ -88,6 +88,11 @@ type Feature struct {
 	state   State
 	busy    map[string]bool
 	pairOff *time.Timer
+	// On a device with no screen to choose on (autoPick), pairing mode connects the strongest audio
+	// device it hears once it has listened a while; tried keeps a refusal from being picked again.
+	pairingSince time.Time
+	tried        map[string]bool
+	picking      bool
 	poke    chan struct{}
 
 	// refusals counts stream opens bluetoothd refused for the current connection; see attach.
@@ -350,6 +355,17 @@ func (f *Feature) refresh() {
 		}
 		sort.SliceStable(st.Devices, func(i, j int) bool { return st.Devices[i].RSSI > st.Devices[j].RSSI })
 	}
+	pick := ""
+	if autoPick && st.Pairing && st.Connected == "" && !f.picking && time.Since(f.pairingSince) >= pickAfter {
+		for _, d := range st.Devices {
+			if !f.tried[strings.ToLower(d.Address)] && !d.Busy {
+				pick = d.Address
+				f.tried[strings.ToLower(pick)] = true
+				f.picking = true
+				break
+			}
+		}
+	}
 	text := notConnected
 	if st.Connected != "" {
 		text = st.Connected
@@ -362,6 +378,19 @@ func (f *Feature) refresh() {
 		f.status.Set(text)
 	}
 	f.Changed.Emit(snapshot)
+
+	if pick != "" {
+		slog.Info("bluetooth pairing: connecting the strongest audio device heard", "address", pick)
+		safe.Go("bluetooth auto pick", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*connectTimeout)
+			defer cancel()
+			f.connect(ctx, pick, true)
+			f.mu.Lock()
+			f.picking = false
+			f.mu.Unlock()
+			f.wake()
+		})
+	}
 }
 
 func displayName(d bluez.Device) string {
@@ -451,6 +480,7 @@ func (f *Feature) SetPairing(on bool) {
 		f.pairOff = nil
 	}
 	f.state.Pairing = on && a != nil
+	f.pairingSince, f.tried = time.Now(), map[string]bool{}
 	if on && a != nil {
 		f.pairOff = time.AfterFunc(pairingFor, func() { f.SetPairing(false) })
 		f.state.Status = "Put your earbuds in pairing mode"

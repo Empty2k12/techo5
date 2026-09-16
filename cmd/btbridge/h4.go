@@ -45,6 +45,23 @@ func (f *h4Framer) feed(b []byte) [][]byte {
 	return out
 }
 
+// capFeaturePages lowers the maximum page number in a successful Read Local Extended Features reply
+// to max. The Echo Dot's MediaTek controller reports two pages beyond the first and then answers a
+// read of page 2 with "Parameter Out Of Mandatory Range"; the 3.18 kernel treats that as a failed
+// init and never brings hci0 up, so BlueZ never sees it. Newer kernels carry a quirk for this.
+// Reports whether the packet was changed.
+func capFeaturePages(pkt []byte, max byte) bool {
+	// 04 0e plen ncmd opcode(04 10) status page max_page features[8]
+	if len(pkt) < 9 || pkt[0] != h4Event || pkt[1] != 0x0e || pkt[4] != 0x04 || pkt[5] != 0x10 {
+		return false
+	}
+	if pkt[6] != 0 || pkt[8] <= max {
+		return false
+	}
+	pkt[8] = max
+	return true
+}
+
 // packetLen is the whole length of the packet at the start of b: -1 for an unknown type, 0 when the
 // header is not all there yet.
 func packetLen(b []byte) int {

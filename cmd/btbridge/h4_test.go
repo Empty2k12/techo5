@@ -66,6 +66,29 @@ func TestTwoByteLengths(t *testing.T) {
 	check(t, f.feed(join(long, evt, iso, sco)), long, evt, iso, sco)
 }
 
+// The Dot's controller claims page 2 of its extended features and refuses to read it: its replies
+// say page 1 is the last, and nothing else is touched.
+func TestCapFeaturePages(t *testing.T) {
+	page0 := []byte{0x04, 0x0e, 0x0e, 0x01, 0x04, 0x10, 0x00, 0x00, 0x02, 1, 2, 3, 4, 5, 6, 7, 8}
+	if !capFeaturePages(page0, 1) || page0[8] != 1 {
+		t.Errorf("max page not capped: % x", page0)
+	}
+	if page0[7] != 0 || page0[9] != 1 || page0[16] != 8 {
+		t.Errorf("more than the max page changed: % x", page0)
+	}
+	failed := []byte{0x04, 0x0e, 0x0e, 0x01, 0x04, 0x10, 0x30, 0x02, 0x02, 0, 0, 0, 0, 0, 0, 0, 0}
+	if capFeaturePages(failed, 1) {
+		t.Error("a failed reply was changed")
+	}
+	version := []byte{0x04, 0x0e, 0x0c, 0x01, 0x01, 0x10, 0x00, 0x06, 0x20, 0x17, 0x08, 0x46, 0x00, 0x18, 0x04}
+	if capFeaturePages(version, 1) {
+		t.Error("another command's reply was changed")
+	}
+	if capFeaturePages(evt, 1) {
+		t.Error("an unrelated event was changed")
+	}
+}
+
 // Packets handed out earlier are not overwritten by later reads.
 func TestPacketsStayIntact(t *testing.T) {
 	var f h4Framer

@@ -30,6 +30,8 @@ func main() {
 	vhciPath := flag.String("vhci", "/dev/vhci", "kernel virtual HCI device")
 	bdaddr := flag.String("bdaddr", "idme", "public address to give the controller first: 12 hex digits, "+
 		"\"idme\" for the factory one from /proc/idme/bt_mac_addr, \"\" to leave the firmware's")
+	maxPage := flag.Int("max-feature-page", -1, "report at most this extended features page to the kernel "+
+		"(1 on the Echo Dot, whose controller refuses page 2 after claiming it); -1 leaves replies alone")
 	flag.Parse()
 
 	stp, err := syscall.Open(*stpPath, syscall.O_RDWR, 0)
@@ -63,7 +65,7 @@ func main() {
 
 	errc := make(chan error, 2)
 	go func() { errc <- vhciToStp(vhci, stp) }()
-	go func() { errc <- stpToVhci(stp, vhci) }()
+	go func() { errc <- stpToVhci(stp, vhci, *maxPage) }()
 	die("%v", <-errc)
 }
 
@@ -87,7 +89,7 @@ func vhciToStp(vhci *os.File, stp int) error {
 // stpToVhci forwards packets from the controller; waits with select when the
 // driver has nothing queued. What a read returns is framed into whole packets
 // first (h4.go): the Echo Dot's driver does not keep packet boundaries.
-func stpToVhci(stp int, vhci *os.File) error {
+func stpToVhci(stp int, vhci *os.File, maxPage int) error {
 	buf := make([]byte, 65536)
 	var framer h4Framer
 	dropped := 0
@@ -105,6 +107,9 @@ func stpToVhci(stp int, vhci *os.File) error {
 		}
 		for _, pkt := range framer.feed(buf[:n]) {
 			fixSupportedCommands(pkt)
+			if maxPage >= 0 && capFeaturePages(pkt, byte(maxPage)) {
+				fmt.Fprintln(os.Stderr, "btbridge: extended features capped at page", maxPage)
+			}
 			if _, err := vhci.Write(pkt); err != nil {
 				return fmt.Errorf("vhci: write %d bytes: %w", len(pkt), err)
 			}
