@@ -100,6 +100,7 @@ func stpToVhci(stp int, vhci *os.File) error {
 			wait(stp)
 			continue
 		}
+		fixSupportedCommands(buf[:n])
 		if _, err := vhci.Write(buf[:n]); err != nil {
 			return fmt.Errorf("vhci: write %d bytes: %w", n, err)
 		}
@@ -113,6 +114,26 @@ func wait(fd int) {
 	set.Bits[fd/32] |= 1 << (uint(fd) % 32)
 	tv := syscall.Timeval{Usec: 50000}
 	_, _ = syscall.Select(fd+1, &set, nil, nil, &tv)
+}
+
+// fixSupportedCommands fills in the LE part of the controller's Read Local
+// Supported Commands reply. The MT7668 firmware leaves octets 25-28 empty
+// although it runs every command they stand for; the kernel builds the LE
+// event mask from that table, so without them it never asks for advertising
+// reports or LE connection events and every LE scan comes back empty. Only a
+// reply with all four octets zero is touched.
+func fixSupportedCommands(p []byte) {
+	// 04 0E plen ncmd 02 10 status, then 64 octets of commands
+	const first = 7
+	if len(p) < first+64 || p[0] != 0x04 || p[1] != 0x0e || p[4] != 0x02 || p[5] != 0x10 || p[6] != 0 {
+		return
+	}
+	le := p[first+25 : first+29]
+	if le[0]|le[1]|le[2]|le[3] != 0 {
+		return
+	}
+	// The Bluetooth 4.0 LE commands: octet 25 has a reserved bit 3, octet 28 ends at bit 6.
+	copy(le, []byte{0xf7, 0xff, 0xff, 0x7f})
 }
 
 // setBdaddr sends MediaTek's vendor Set_BD_ADDR command (opcode 0xFC1A, six

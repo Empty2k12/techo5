@@ -19,8 +19,8 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   Bluetooth earbuds; song, artist and cover from iHeartRadio or TuneIn behind the page.
 - **Camera**: the front camera as a Home Assistant camera entity, plus JPEG and MJPEG over HTTP,
   with auto-exposure. Off unless something is looking, and off while the mute button is engaged.
-- **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant exists but is
-  off by default and, on the Show, still unproven (see below).
+- **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant (scanning
+  through BlueZ on the Show), off by default.
 - **Updates**: two root filesystem slots with a trial and automatic fallback; a release that
   carries a rootfs tarball installs over the air from Home Assistant's update entity.
 
@@ -56,9 +56,8 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 
 ## Known gaps
 
-- The Bluetooth proxy scans through BlueZ on the Show, but BlueZ's LE discovery reports no
-  devices through the bridged controller; whether that is the vendor firmware, the bridge, or a
-  missing scan parameter is open. The switch stays off by default.
+- The Bluetooth proxy on the Show only scans: BlueZ owns the controller, so there is no beacon
+  and no active connections for Home Assistant. It stays off by default until it has run a while.
 - Song metadata rests on two undocumented service endpoints; when one changes shape the page
   falls back to the station logo.
 - Exposure has no scene awareness: a bright window behind a face still darkens the face.

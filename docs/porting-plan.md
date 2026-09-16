@@ -471,6 +471,15 @@ session.
    committed after the trial — the reboot itself had to be done by hand,
    because the updater rebooted from a goroutine the supervisor's restart
    killed; fixed to reboot synchronously (goes out with the next release).
+   LE SCANNING FIXED 2026-09-16: the empty BlueZ LE discovery was the
+   firmware's Read Local Supported Commands reply — the MT7668 leaves
+   octets 25-28 (the Bluetooth 4.0 LE commands) all zero, and the kernel
+   builds the LE event mask from that table, so it sent `LE Set Event Mask`
+   0x5d0 without LE Advertising Report or LE Connection Complete. The
+   controller scanned and discarded every report; power-cycling hci0 did
+   not help. `btbridge` now fills those four octets when the firmware
+   leaves them empty. On the bench: 431 advertising reports in 10 s where
+   there were none, and the proxy's rate sensor at ~33 advertisements/s.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,
