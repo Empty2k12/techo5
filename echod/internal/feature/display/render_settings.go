@@ -57,6 +57,7 @@ const (
 	rowBrightness
 	rowAuto
 	rowMic
+	rowNight
 	rowWake
 	rowAbout
 	rowRestart
@@ -112,6 +113,7 @@ type settings struct {
 	muted      bool
 	wakeWord   string
 	volume     int // step out of media.VolumeSteps
+	night      string
 	name       string
 	version    string
 	slot       string
@@ -240,6 +242,10 @@ func (r *renderer) deviceTab(s scene) {
 	}
 	r.value(top, "the mute button does this too", 1)
 	r.button(top, 2, mic, lit)
+
+	top = r.row(rowNight, "Screen off at night", cream)
+	r.value(top, nightLabel(st.night), 1)
+	r.button(top, 2, "Next", false)
 
 	top = r.row(rowWake, "Wake word", cream)
 	r.value(top, st.wakeWord, 0)

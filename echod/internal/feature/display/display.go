@@ -20,6 +20,7 @@ package display
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
 	"math"
@@ -106,6 +107,11 @@ type Display struct {
 	// tab is the sheet's open tab; page is how far down its list, when the list does not fit.
 	tab  int
 	page int
+
+	// touchedAt is the last finger on the panel; nightDark is the screen having been put out by the
+	// night schedule rather than by anyone.
+	touchedAt time.Time
+	nightDark bool
 
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
@@ -314,6 +320,9 @@ func (d *Display) gesture(g touch.Gesture) {
 	on := d.on
 	d.mu.Unlock()
 	slog.Info("touch", "gesture", g.String())
+	d.mu.Lock()
+	d.touchedAt = time.Now()
+	d.mu.Unlock()
 
 	if !on {
 		if g.Kind == touch.Tap {
@@ -442,6 +451,9 @@ func (d *Display) sheetTap(h hit) {
 		d.mu.Lock()
 		d.tab, d.page, d.restartArm = h.tab, 0, time.Time{}
 		d.mu.Unlock()
+		if h.tab == tabCameras {
+			go home.Get().Prewarm()
+		}
 		return
 	}
 	if h.row < 0 {
@@ -540,6 +552,12 @@ func (d *Display) deviceTap(h hit) {
 		if h.button == 2 {
 			mute.Get().Toggle()
 		}
+	case rowNight:
+		if h.button == 2 {
+			if err := config.Set().Screen().Night(nextNight(config.Get().Screen.Night)); err != nil {
+				slog.Warn("saving the night setting failed", "err", err)
+			}
+		}
 	case rowRestart:
 		if h.button != 2 {
 			return
@@ -586,6 +604,85 @@ func (d *Display) ceilingOrDefault() int {
 		return config.DefaultScreenBrightness
 	}
 	return d.ceiling
+}
+
+// night puts the screen out inside the night window once nothing has happened for a while, and
+// brings it back when the window ends. It reports true when it changed the screen, so the frame
+// is redrawn from the new state.
+func (d *Display) night(now time.Time, on bool, view voice.State) bool {
+	in := inNight(config.Get().Screen.Night, now)
+	d.mu.Lock()
+	dark, touched := d.nightDark, d.touchedAt
+	d.mu.Unlock()
+	switch {
+	case in && on:
+		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle
+		if playing, _ := media.Get().Playing(); playing || busy {
+			return false
+		}
+		slog.Info("screen: night, going dark")
+		d.mu.Lock()
+		d.nightDark = true
+		d.mu.Unlock()
+		d.apply(false, d.ceilingOrDefault(), false)
+		return true
+	case !in && dark && !on:
+		slog.Info("screen: night over, back on")
+		d.mu.Lock()
+		d.nightDark = false
+		d.mu.Unlock()
+		d.apply(true, d.ceilingOrDefault(), false)
+		return true
+	case !in && dark:
+		d.mu.Lock()
+		d.nightDark = false
+		d.mu.Unlock()
+	}
+	return false
+}
+
+// nightIdle is how long the panel stays lit after a finger or a turn during the night.
+const nightIdle = 90 * time.Second
+
+// nightPresets are the choices the Device tab cycles through.
+var nightPresets = []string{"", "22-6", "23-6", "0-7", "21-7", "23-8"}
+
+func nextNight(cur string) string {
+	for i, p := range nightPresets {
+		if p == cur {
+			return nightPresets[(i+1)%len(nightPresets)]
+		}
+	}
+	return nightPresets[1]
+}
+
+// nightLabel is what the row shows for a setting.
+func nightLabel(v string) string {
+	from, to, ok := nightHours(v)
+	if !ok {
+		return "never"
+	}
+	return fmt.Sprintf("%02d:00 to %02d:00", from, to)
+}
+
+func nightHours(v string) (from, to int, ok bool) {
+	if _, err := fmt.Sscanf(v, "%d-%d", &from, &to); err != nil || from < 0 || from > 23 || to < 0 || to > 23 || from == to {
+		return 0, 0, false
+	}
+	return from, to, true
+}
+
+// inNight is whether now falls in the window, which may cross midnight.
+func inNight(v string, now time.Time) bool {
+	from, to, ok := nightHours(v)
+	if !ok {
+		return false
+	}
+	h := now.Hour()
+	if from < to {
+		return h >= from && h < to
+	}
+	return h >= from || h < to
 }
 
 // answerShots hands a copy of the canvas to whoever asked for a screenshot.
@@ -700,9 +797,15 @@ func (d *Display) frame() time.Duration {
 	d.mu.Unlock()
 
 	now := time.Now()
+	if d.night(now, on, view) {
+		return time.Minute
+	}
 	if !on {
-		// Dark panel: nothing to draw, and nothing to redraw until told.
+		// Dark panel: nothing to draw, and nothing to redraw until told, or until the night ends.
 		d.answerShots()
+		if config.Get().Screen.Night != "" {
+			return time.Minute
+		}
 		return time.Hour
 	}
 	applyTheme(current())

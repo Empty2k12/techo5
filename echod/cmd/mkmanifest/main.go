@@ -22,10 +22,11 @@ func main() {
 	var (
 		m update.Manifest
 
-		from  = flag.String("from", "", "where this release's assets can be fetched from")
-		arm64 = flag.String("arm64", "", "the arm64 build, hashed and measured")
-		arm   = flag.String("arm", "", "the arm build, hashed and measured")
-		out   = flag.String("out", "", "where to write the manifest, or stdout")
+		from   = flag.String("from", "", "where this release's assets can be fetched from")
+		arm64  = flag.String("arm64", "", "the arm64 build, hashed and measured")
+		arm    = flag.String("arm", "", "the arm build, hashed and measured")
+		rootfs = flag.String("rootfs-arm", "", "the arm rootfs tarball for slot devices, hashed and measured")
+		out    = flag.String("out", "", "where to write the manifest, or stdout")
 	)
 	flag.StringVar(&m.Version, "version", "", "version as Home Assistant will compare it")
 	flag.StringVar(&m.Title, "title", "", "title for Home Assistant's update card")
@@ -33,13 +34,13 @@ func main() {
 	flag.StringVar(&m.ReleaseURL, "release-url", "", "what the card's link points at")
 	flag.Parse()
 
-	if err := run(m, *from, map[string]string{"arm64": *arm64, "arm": *arm}, *out); err != nil {
+	if err := run(m, *from, map[string]string{"arm64": *arm64, "arm": *arm}, *rootfs, *out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(m update.Manifest, from string, builds map[string]string, out string) error {
+func run(m update.Manifest, from string, builds map[string]string, rootfs string, out string) error {
 	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "") {
 		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm are required")
 	}
@@ -59,6 +60,14 @@ func run(m update.Manifest, from string, builds map[string]string, out string) e
 
 	// The flat fields are what an older device reads; they carry the arm64 build where there is one,
 	// and the arm build for a release that only has that (TECHO5 on cronos is 32-bit).
+	if rootfs != "" {
+		b, err := measure(rootfs)
+		if err != nil {
+			return err
+		}
+		b.URL = from + "/" + filepath.Base(rootfs)
+		m.Rootfs = map[string]update.Binary{"arm": b}
+	}
 	flat, ok := m.Binaries["arm64"]
 	if !ok {
 		flat = m.Binaries["arm"]

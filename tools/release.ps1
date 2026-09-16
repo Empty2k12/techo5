@@ -15,7 +15,10 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$')][string]$Version,
     [Parameter(Mandatory)][string]$Notes,
     [switch]$Prerelease,
-    [string]$Go = 'go'
+    [string]$Go = 'go',
+    # A rootfs tarball (tools/linux/deploy-rootfs.sh builds one on the device under
+    # /data/techo5-linux/); slot devices update from it, and it is published with the release.
+    [string]$Rootfs = ''
 )
 $ErrorActionPreference = 'Stop'
 $repo = 'HuskerMinion/techo5'
@@ -38,9 +41,11 @@ try {
 
     Write-Host "== manifest"
     $from = "https://github.com/$repo/releases/download/$Version"
-    & $Go run ./cmd/mkmanifest -version $Version -title "TECHO5 $Version" -notes $Notes `
-        -release-url "https://github.com/$repo/releases/tag/$Version" `
-        -from $from -arm (Join-Path $bin 'echod-arm') -out (Join-Path $bin 'manifest.json')
+    $mk = @('run', './cmd/mkmanifest', '-version', $Version, '-title', "TECHO5 $Version", '-notes', $Notes,
+        '-release-url', "https://github.com/$repo/releases/tag/$Version",
+        '-from', $from, '-arm', (Join-Path $bin 'echod-arm'), '-out', (Join-Path $bin 'manifest.json'))
+    if ($Rootfs) { $mk += @('-rootfs-arm', $Rootfs) }
+    & $Go @mk
     if ($LASTEXITCODE -ne 0) { throw 'mkmanifest failed' }
     Get-Content (Join-Path $bin 'manifest.json')
 } finally { Pop-Location }
@@ -48,6 +53,7 @@ try {
 Write-Host "== release $Version"
 $args = @('release', 'create', $Version, (Join-Path $bin 'echod-arm'), (Join-Path $bin 'manifest.json'),
     '--repo', $repo, '--title', $Version, '--notes', $Notes)
+if ($Rootfs) { $args += $Rootfs }
 if ($Prerelease) { $args += '--prerelease' }
 & gh @args
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }

@@ -32,6 +32,10 @@ type Manifest struct {
 	// Binaries is keyed by the Go architecture each build targets.
 	Binaries map[string]Binary `json:"binaries"`
 
+	// Rootfs is the whole root filesystem for devices that boot from slots (the Linux image),
+	// keyed the same way. A manifest without one leaves those devices where they are.
+	Rootfs map[string]Binary `json:"rootfs,omitempty"`
+
 	Title      string `json:"title,omitempty"`
 	Notes      string `json:"notes,omitempty"`
 	ReleaseURL string `json:"release_url,omitempty"`

@@ -179,6 +179,22 @@ func (f *Feature) localFrames() {
 	}
 }
 
+// Prewarm asks Home Assistant for one frame from every camera and drops it. Some cameras take
+// seconds to start a stream on the first request; asking while the list is on screen means the
+// one that gets tapped answers at once.
+func (f *Feature) Prewarm() {
+	for _, c := range f.Cameras() {
+		if c.Entity == LocalCamera {
+			continue
+		}
+		go func(entity string) {
+			if _, err := hass.Get().Fetch("/api/camera_proxy/" + entity); err != nil {
+				slog.Debug("camera prewarm", "entity", entity, "err", err)
+			}
+		}(c.Entity)
+	}
+}
+
 // snapshot fetches one frame and scales it to fit the panel.
 func (f *Feature) snapshot(entity string) (*image.RGBA, error) {
 	b, err := hass.Get().Fetch("/api/camera_proxy/" + entity)

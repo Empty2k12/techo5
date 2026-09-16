@@ -7,6 +7,10 @@ type Screen struct {
 	Brightness int  `json:"brightness"`
 	Auto       bool `json:"auto"`
 
+	// Night is when the screen goes dark on its own, as "22-6" (from 22:00 to 06:00); empty
+	// never. A tap wakes it for a while.
+	Night string `json:"night,omitempty"`
+
 	// Theme names the screen's palette; empty is the first one, "Custom" is Palette.
 	Theme   string  `json:"theme,omitempty"`
 	Palette Palette `json:"palette,omitempty"`
@@ -44,6 +48,10 @@ func (w ScreenWriter) Auto(v bool) error {
 
 func (w ScreenWriter) Theme(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.Theme = v })
+}
+
+func (w ScreenWriter) Night(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.Night = v })
 }
 
 // Custom saves a palette and makes it the theme.

@@ -38,6 +38,7 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 		st.wakeWord = "off"
 	}
 	st.version = layout.Version
+	st.night = config.Get().Screen.Night
 	st.slot = slotName()
 	st.address = address()
 

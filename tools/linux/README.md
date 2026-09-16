@@ -213,6 +213,22 @@ settings sheet — Bluetooth (opens the pairing page), brightness (tap to step
 (name, version, slot, address) and a two-tap restart. Vertical swipes anywhere
 else are the volume; a tap is the action button.
 
+## Camera
+
+`cmd/camframe` grabs one frame from the OV02B10 the way the daemon does (register windows
+through the ISP driver's mmap; docs/camera-research.md has the map). In the daemon,
+`hardware/camera` streams on demand with auto-exposure and `feature/camera` serves
+`http://<device>:8181/camera.jpg`, `/camera.mjpeg` and the ESPHome camera entity Home Assistant
+creates on its own. `/screen.png[?sheet=<tab>&theme=<name>]` on the same port is a screenshot of
+the panel, for checking layouts from a PC.
+
+## Updates on the slots
+
+A release may carry a rootfs tarball (`release.ps1 -Rootfs <techo5-rootfs-*.tar.gz>`, built by
+`deploy-rootfs.sh` and copied back from `/data/techo5-linux/`). A device that boots from a slot
+installs that through `slotctl install` into the other slot and reboots; the boot scripts run the
+trial and commit or fall back. The daemon-only binary in the manifest is for the Android install.
+
 ## Next
 
 The camera: the kernel at this commit already carries the OV02B10 sensor
