@@ -54,6 +54,7 @@ func (a Advertisement) Addr() uint64 {
 type Radio struct {
 	mu       sync.Mutex
 	fd       int
+	kernel   bool // fd is a raw socket on hci0, not the node
 	open     bool
 	scanning bool
 	stop     context.CancelFunc
@@ -108,13 +109,8 @@ func (r *Radio) Start(scan, active bool, advertisement []byte, found func(Advert
 		return nil
 	}
 
-	// A blocking open never returns: the driver powers the chip on inside it.
-	fd, err := syscall.Open(Node, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
+	fd, err := r.openController()
 	if err != nil {
-		return fmt.Errorf("ble: opening %s: %w", Node, err)
-	}
-	if err := clearNonBlock(fd); err != nil {
-		_ = syscall.Close(fd)
 		return err
 	}
 	r.fd = fd
@@ -161,9 +157,34 @@ func (r *Radio) Stop() {
 	slog.Info("ble stopped")
 }
 
+// openController opens the node, or hci0 when the kernel's stack owns the controller (kernel.go).
+// Held with mu.
+func (r *Radio) openController() (int, error) {
+	if viaKernel() {
+		fd, err := openKernel()
+		r.kernel = err == nil
+		return fd, err
+	}
+	r.kernel = false
+	// A blocking open never returns: the driver powers the chip on inside it.
+	fd, err := syscall.Open(Node, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return -1, fmt.Errorf("ble: opening %s: %w", Node, err)
+	}
+	if err := clearNonBlock(fd); err != nil {
+		_ = syscall.Close(fd)
+		return -1, err
+	}
+	return fd, nil
+}
+
 // begin resets and configures the controller. Held with mu.
 func (r *Radio) begin(scanning, active bool, advertisement []byte) error {
-	if err := r.send("reset", cmdReset, nil); err != nil {
+	if r.kernel {
+		// bluetoothd has set the controller up and may be scanning for its own reasons: no reset under
+		// it, and a scan of its own is stopped first, since new parameters are refused while one runs.
+		_ = r.send("scan disable", cmdLEScanEnable, []byte{0x00, 0x00})
+	} else if err := r.send("reset", cmdReset, nil); err != nil {
 		return err
 	}
 	// This MTK controller can scan and advertise together, but only when scanning is enabled first.
@@ -310,10 +331,16 @@ func command(fd int, held []byte, opcode uint16, params []byte) ([]byte, error) 
 	}
 
 	buf := make([]byte, 512)
+	quiet := 0
 	for {
 		n, err := syscall.Read(fd, buf)
 		if err != nil {
 			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			// The hci0 socket's reads time out each second; five of them is a controller not answering.
+			if errors.Is(err, syscall.EAGAIN) && quiet < 5 {
+				quiet++
 				continue
 			}
 			return held, err

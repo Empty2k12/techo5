@@ -85,9 +85,12 @@ func vhciToStp(vhci *os.File, stp int) error {
 }
 
 // stpToVhci forwards packets from the controller; waits with select when the
-// driver has nothing queued.
+// driver has nothing queued. What a read returns is framed into whole packets
+// first (h4.go): the Echo Dot's driver does not keep packet boundaries.
 func stpToVhci(stp int, vhci *os.File) error {
 	buf := make([]byte, 65536)
+	var framer h4Framer
+	dropped := 0
 	for {
 		n, err := syscall.Read(stp, buf)
 		if err == syscall.EINTR || err == syscall.EAGAIN {
@@ -100,9 +103,15 @@ func stpToVhci(stp int, vhci *os.File) error {
 			wait(stp)
 			continue
 		}
-		fixSupportedCommands(buf[:n])
-		if _, err := vhci.Write(buf[:n]); err != nil {
-			return fmt.Errorf("vhci: write %d bytes: %w", n, err)
+		for _, pkt := range framer.feed(buf[:n]) {
+			fixSupportedCommands(pkt)
+			if _, err := vhci.Write(pkt); err != nil {
+				return fmt.Errorf("vhci: write %d bytes: %w", len(pkt), err)
+			}
+		}
+		if framer.dropped != dropped {
+			fmt.Fprintf(os.Stderr, "btbridge: skipped %d bytes that began no packet\n", framer.dropped-dropped)
+			dropped = framer.dropped
 		}
 	}
 }
@@ -178,9 +187,17 @@ func setBdaddr(stp int, hexaddr string) error {
 }
 
 func writeAll(fd int, b []byte) error {
+	full := 0
 	for len(b) > 0 {
 		n, err := syscall.Write(fd, b)
 		if err == syscall.EINTR {
+			continue
+		}
+		// The Dot's driver answers ENOSPC while its transmit queue is full: wait
+		// for it to drain rather than tearing the bridge down (up to a second).
+		if err == syscall.ENOSPC && full < 100 {
+			full++
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		if err != nil {
