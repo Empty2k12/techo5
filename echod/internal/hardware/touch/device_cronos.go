@@ -15,6 +15,9 @@ const (
 
 	// holdGestures: the Show's screen has no use for holds; its taps and swipes stay as they were.
 	holdGestures = false
+
+	// tapMove is how far a finger may wander and still be a tap.
+	tapMove = 24
 )
 
 func toFrame(rawW, rawH, rx, ry int) (x, y int) {

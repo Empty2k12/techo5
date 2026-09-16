@@ -7,9 +7,14 @@
 // the Show; the layouts are the Spot's own (render_spot.go), because nothing of a 960×480 page fits a
 // circle.
 //
-// Touch: a tap starts or ends a turn (on a dark screen it only lights it); a vertical swipe is the
-// volume; a held finger opens the ring menu (menu_spot.go), a dial: keep holding and slide round to
-// spin it, let go and it snaps to the nearest item, tap the middle to do the item at the top.
+// Touch: a tap starts or ends a turn (on a dark screen it only lights it); a held finger opens the
+// ring menu (menu_spot.go), a dial: keep holding and slide round to spin it, let go and it snaps to the
+// nearest item, tap the middle to do the item at the top. The volume is in the dial and on the buttons;
+// a swipe for it was too easy to set off on this panel.
+//
+// The backlight: the panel shows almost nothing below about 120 of 255 and glares at 255, so a
+// brightness in percent spans backlightMin to the top. From 22:00 to 07:00 (config Screen.Night) it is
+// held to nightCeiling.
 //
 // To Home Assistant the screen is a light with brightness, and a switch for auto-brightness, the
 // same entities the Show has.
@@ -17,6 +22,7 @@ package display
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"log/slog"
 	"math"
@@ -61,12 +67,18 @@ const (
 	idleFrame   = time.Second
 	activeFrame = 120 * time.Millisecond
 
-	// floor is the dimmest an "on" backlight goes; below it the panel reads as off.
-	floor = 8
+	// backlightMin is where this panel starts to be readable: 0 % of brightness lands here. Measured
+	// by eye 2026-09-16: 120 looks almost off in a lit room, 191 is fine, 255 is too bright.
+	backlightMin = 120
 
-	// Auto-brightness, as on the Show: from darkFraction of the ceiling in the dark to all of it at
-	// brightLux, smoothed.
-	darkFraction = 0.12
+	// nightCeiling is the most brightness the night allows, in percent; defaultNight the hours when
+	// nothing is set.
+	nightCeiling = 30
+	defaultNight = "22-7"
+
+	// Auto-brightness: from darkFraction of the ceiling in the dark to all of it at brightLux,
+	// smoothed. Milder than the Show's, because the panel's own range is already narrow.
+	darkFraction = 0.6
 	brightLux    = 400.0
 	autoSmooth   = 0.25
 )
@@ -95,6 +107,9 @@ type Display struct {
 	menuAt    time.Time
 	spinning  bool
 	spinAngle float64
+
+	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
+	wasNight bool
 
 	poke chan struct{}
 	dev  *screen.Device
@@ -201,16 +216,21 @@ func (d *Display) setAuto(on bool, save bool) {
 }
 
 func (d *Display) relight(jump bool) {
+	night := inNight(time.Now())
 	d.mu.Lock()
+	d.wasNight = night
 	target := 0.0
 	if d.on {
-		target = float64(d.ceiling) * screen.BacklightMax / 100
+		pct := float64(d.ceiling)
+		if night {
+			pct = math.Min(pct, nightCeiling)
+		}
 		if d.autoOn {
 			if lux, _, ok := ambient.Get().Current(); ok {
-				target *= allowed(lux)
+				pct *= allowed(lux)
 			}
 		}
-		target = math.Max(target, floor)
+		target = backlightMin + (screen.BacklightMax-backlightMin)*math.Min(math.Max(pct, 0), 100)/100
 	}
 	if jump || d.level == 0 {
 		d.level = target
@@ -223,6 +243,23 @@ func (d *Display) relight(jump bool) {
 	if err := screen.SetBacklight(level); err != nil {
 		slog.Warn("setting the backlight failed", "err", err)
 	}
+}
+
+// inNight says whether now is within the night hours, "from-to" in whole hours, wrapping midnight.
+func inNight(now time.Time) bool {
+	v := config.Get().Screen.Night
+	if v == "" {
+		v = defaultNight
+	}
+	var from, to int
+	if _, err := fmt.Sscanf(v, "%d-%d", &from, &to); err != nil || from == to {
+		return false
+	}
+	h := now.Hour()
+	if from < to {
+		return h >= from && h < to
+	}
+	return h >= from || h < to
 }
 
 func allowed(lux float64) float64 {
@@ -276,10 +313,6 @@ func (d *Display) gesture(g touch.Gesture) {
 	switch g.Kind {
 	case touch.Tap:
 		voice.Get().Action()
-	case touch.SwipeUp:
-		media.Get().Adjust(+1)
-	case touch.SwipeDown:
-		media.Get().Adjust(-1)
 	case touch.Hold:
 		d.mu.Lock()
 		d.menuOpen, d.menuAt = true, time.Now()
@@ -420,6 +453,12 @@ func (d *Display) Run(ctx context.Context) error {
 
 func (d *Display) frame() time.Duration {
 	now := time.Now()
+	d.mu.Lock()
+	nightChanged := d.wasNight != inNight(now)
+	d.mu.Unlock()
+	if nightChanged {
+		d.relight(true)
+	}
 	d.mu.Lock()
 	if d.menuOpen && !d.spinning && now.Sub(d.menuAt) > menuIdle {
 		d.menuOpen = false

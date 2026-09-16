@@ -28,14 +28,14 @@ func init() {
 }
 
 const (
+	btnTouch        = 0x14a
 	absMTSlot       = 0x2f
 	absMTPositionX  = 0x35
 	absMTPositionY  = 0x36
 	absMTTrackingID = 0x39
 	synReport       = 0
 
-	// tapMove is how far a finger may wander and still be a tap; tapHold how long it may stay.
-	tapMove = 24
+	// tapHold is how long a tap may stay down; how far it may wander is the device's tapMove.
 	tapHold = 500 * time.Millisecond
 
 	// notch is how far a vertical swipe travels per step it reports, so a slow drag turns the volume
@@ -215,6 +215,33 @@ func (s *Screen) Run(ctx context.Context) error {
 					f = nil
 					s.setDown(false)
 				}
+			}
+		case input.EvKey:
+			// BTN_TOUCH is the only lift some controllers send: the Spot's mtk-tpd reports multitouch
+			// protocol A, with no slots and no tracking id of -1. On the Show it arrives beside the
+			// tracking id and whichever comes second finds nothing to do.
+			if e.Code != btnTouch {
+				continue
+			}
+			switch {
+			case e.Value == 1 && f == nil:
+				f = &finger{slot: slot, at: time.Now(), sx: -1}
+				s.setDown(true)
+				if holdGestures {
+					nf := f
+					s.mu.Lock()
+					nf.holdTimer = time.AfterFunc(holdAfter, func() { s.holdFired(nf) })
+					s.mu.Unlock()
+				}
+			case e.Value == 0 && f != nil:
+				s.mu.Lock()
+				if f.holdTimer != nil {
+					f.holdTimer.Stop()
+				}
+				s.mu.Unlock()
+				s.lift(f)
+				f = nil
+				s.setDown(false)
 			}
 		case input.EvSyn:
 			if e.Code != synReport || f == nil {

@@ -15,6 +15,10 @@ const (
 
 	// holdGestures: the ring menu opens on a hold.
 	holdGestures = true
+
+	// tapMove is how far a finger may wander and still be a tap: a still finger on this controller
+	// drifts over 20 pixels in the time of a tap (recorded 2026-09-16).
+	tapMove = 40
 )
 
 func toFrame(rawW, rawH, rx, ry int) (x, y int) {
