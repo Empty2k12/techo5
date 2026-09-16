@@ -282,3 +282,32 @@ of every 13th five-byte group and aims for a mean of 290 on the 10-bit scale.
 `cmd/camprobe` and `cmd/camframe` were removed; `echod/internal/hardware/camera` is the working
 version of everything above and the place to read. The probes are in git history if a register
 experiment is ever needed again.
+
+## The Echo Spot's GC0312 (2026-09-16, night)
+
+Same SoC, same ISP and SENINF blocks, a different sensor on a different bus. `hardware/camera` is now
+split: `camera_common.go` (users, frames, linger, the mute) for every camera, `camera.go` the Show's
+OV02B10, `camera_spot.go` the Spot's. The Spot's path, found with a probe (`cmd/spotcam`, in history):
+
+- **Parallel, not MIPI**, whatever the driver's directory name says: `gc0312_mipi_raw` declares
+  `SENSOR_INTERFACE_TYPE_PARALLEL`, RAW, R first, 640x480, pclk 15 MHz, line 974, frame 504 (30 fps).
+  rook's device tree muxes the CSI0 pads to CMDAT2..9, CMHSYNC, CMVSYNC and CMPCLK in the camera's
+  default pin state.
+- **Sub socket.** `camera_hw/rook` runs the GC0312's power sequence only for pin set 1, so SET_DRIVER,
+  CONTROL and FEATURECONTROL use socket 2 (`DUAL_CAMERA_SUB_SENSOR`). The id reads 0xb310 at 0x42.
+- **Receiver**, after HalSensor's `PARALLEL_SENSOR` branch: SENINF4_CTRL (0x8D00) enable, source 3,
+  PAD2CAM_DATA_SEL 4 (eight bits on data 9..2; 3 loses the top two bits and the picture wraps);
+  SENINF4 mux soft reset; SENINF1_MUX_CTRL source 3, FIFO flush 0x1B push 0x1F, full-write on, **both
+  sync polarities 0**; SENINF_TOP_MUX_CTRL low nibble 3 (mux 1 fed by SENINF4). `KDIMGSENSORIOC_X_SET_GPIO`
+  is compiled out in this kernel, so the pads are the analog blocks' business: **the GPI input enables
+  (0x1041041 at +0x4C and +0x50) on all three** CSI analog blocks (0x10217000, +0x1000, +0x2000);
+  setSeninf4Parallel sets only the last two, and half the data bits then read 0.
+- **Pixel clock:** SENINF_TOP_CTRL with SENINF1_PCLK_EN (bit 10) only. With the clock off nothing
+  arrives; with SENINF1_PCLK_SEL (bit 8) every sample is taken twice and the lines run 1024 wide.
+- ISP as on the Show, with CAM_OUT_FMT 0 (a byte a pixel), IMGO 640x480 stride 640, and the same frame
+  counter sync. The first DMA pass after a start can be empty: the first three frames are dropped.
+- Exposure is the daemon's (the init table turns the sensor's AEC off): SET_ESHUTTER (lines, 6..4095;
+  longer than a frame slows the rate) and SET_GAIN (1/64), aiming the raw mean at 58. Every other frame
+  is demosaiced (bilinear, grey-world, 0.2/99.5 % levels, gamma 2.2): about 33 % of a core streaming.
+- The Spot's mute is software, so `camera_common.go` checks it every 300 ms while the sensor runs: muted
+  powers the sensor down and hands out one black frame; unmuted brings it back.
