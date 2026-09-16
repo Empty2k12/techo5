@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// The settings sheet: a swipe down from the top opens it. Four tabs across the top — Device,
-// Bluetooth, Cameras, Radio — rows under them a finger can hit, buttons on the right of the rows
+// The settings sheet: a swipe down from the top opens it. Tabs across the top — Device, Bluetooth,
+// Cameras, Radio, Theme, Security — rows under them a finger can hit, buttons on the right of the rows
 // that do something, and a bar at the bottom that closes the sheet. Geometry is shared with the
 // gesture handler. The panel is 960 by 480 in landscape.
 const (
@@ -46,10 +46,11 @@ const (
 	tabCameras
 	tabRadio
 	tabTheme
+	tabSecurity
 	tabs
 )
 
-var tabNames = [tabs]string{"Device", "Bluetooth", "Cameras", "Radio", "Theme"}
+var tabNames = [tabs]string{"Device", "Bluetooth", "Cameras", "Radio", "Theme", "Security"}
 
 // Device tab rows, in order.
 const (
@@ -107,21 +108,23 @@ type hit struct {
 
 // settings is what the sheet shows, gathered by the display each frame.
 type settings struct {
-	tab        int
-	page       int // of the open tab's list, when it does not fit
-	brightness int // ceiling, percent
-	auto       bool
-	muted      bool
-	wakeWord   string
-	volume     int // step out of media.VolumeSteps
-	night      string
-	wifi       string
-	name       string
-	version    string
-	slot       string
-	address    string
-	restartArm time.Time // set after a first tap on Restart
-	now        time.Time
+	tab         int
+	page        int // of the open tab's list, when it does not fit
+	brightness  int // ceiling, percent
+	auto        bool
+	muted       bool
+	wakeWord    string
+	volume      int // step out of media.VolumeSteps
+	night       string
+	wifi        string
+	name        string
+	version     string
+	slot        string
+	address     string
+	sendspin    bool
+	insecureTLS bool
+	restartArm  time.Time // set after a first tap on Restart
+	now         time.Time
 }
 
 // sheetHit maps a tap to what it landed on.
@@ -152,7 +155,7 @@ func (r *renderer) settingsPage(s scene) {
 	tabW := r.w / tabs
 	draw.Draw(r.dst, image.Rect(0, tabBarBottom-2, r.w, tabBarBottom), image.NewUniform(ember), image.Point{}, draw.Src)
 	for i, name := range tabNames {
-		rect := image.Rect(i*tabW+8, 14, (i+1)*tabW-8, tabBarBottom-2)
+		rect := image.Rect(i*tabW+3, 14, (i+1)*tabW-3, tabBarBottom-2)
 		if i == st.tab {
 			r.bevel(image.Rect(rect.Min.X, rect.Min.Y-4, rect.Max.X, tabBarBottom), amber, true)
 			r.text(r.small, name, i*tabW+(tabW-r.width(r.small, name))/2, 50, walnut)
@@ -173,6 +176,8 @@ func (r *renderer) settingsPage(s scene) {
 		r.radioTab(s)
 	case tabTheme:
 		r.themeTab(s)
+	case tabSecurity:
+		r.securityTab(s)
 	}
 
 	top := r.h - sheetDoneBar
@@ -343,6 +348,77 @@ func (r *renderer) radioTab(s scene) {
 		}
 		top := r.row(i, label, c)
 		r.button(top, 2, right, playing)
+	}
+}
+
+// Security tab rows, in order.
+const (
+	secRowSSH = iota
+	secRowKeys
+	secRowCamera
+	secRowScreen
+	secRowSendspin
+	secRowLink
+	secRowTLS
+)
+
+func (r *renderer) securityTab(s scene) {
+	sec, st := s.security, s.sheet
+
+	top := r.row(secRowSSH, "SSH", cream)
+	switch {
+	case !sec.SSHAvailable:
+		r.value(top, "not managed on this system", 0)
+	default:
+		note := "closed"
+		switch {
+		case sec.SSH && len(sec.Keys) == 0:
+			note = "on, but no key yet: nothing listens"
+		case sec.SSH && sec.SSHRunning:
+			note = "port 22, keys only"
+		case sec.SSH:
+			note = "starting…"
+		case sec.SSHRunning:
+			note = "stopping…"
+		}
+		r.value(top, note, 1)
+		r.button(top, 2, onOff(sec.SSH), sec.SSH)
+	}
+
+	if sec.SSHAvailable {
+		top = r.row(secRowKeys, "SSH keys", cream)
+		switch len(sec.Keys) {
+		case 0:
+			r.value(top, "none: send one with the ssh_keys action in Home Assistant", 0)
+		default:
+			r.value(top, strings.Join(sec.Keys, ", "), 0)
+		}
+	}
+
+	top = r.row(secRowCamera, "Camera on the network", cream)
+	r.value(top, "port 8181, no login", 1)
+	r.button(top, 2, onOff(sec.Camera), sec.Camera)
+
+	top = r.row(secRowScreen, "Screen on the network", cream)
+	r.value(top, "port 8181, no login", 1)
+	r.button(top, 2, onOff(sec.Screen), sec.Screen)
+
+	top = r.row(secRowSendspin, "Sendspin player", cream)
+	r.value(top, "port 8928, for Music Assistant", 1)
+	r.button(top, 2, onOff(st.sendspin), st.sendspin)
+
+	top = r.row(secRowLink, "Home Assistant link", cream)
+	if sec.Encrypted {
+		r.value(top, "encrypted with this device's key", 0)
+	} else {
+		r.value(top, "not encrypted yet: add the device in Home Assistant", 0)
+	}
+
+	top = r.row(secRowTLS, "Certificate checks", cream)
+	if st.insecureTLS {
+		r.value(top, "OFF for downloads (Skip certificate checks, in Home Assistant)", 0)
+	} else {
+		r.value(top, "on for updates and downloads", 0)
 	}
 }
 

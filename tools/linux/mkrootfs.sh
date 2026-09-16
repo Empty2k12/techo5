@@ -19,7 +19,6 @@
 #   inputs/alpine-minirootfs-*-armv7.tar.gz
 #   inputs/vendor.tar.gz                                   LineageOS system: vendor/ (modules, firmware, audio tuning)
 #   inputs/apks312/*.apk                                   wpa_supplicant 2.9 + libssl1.1 + libcrypto1.1
-#   inputs/authorized_keys                                 SSH public key(s) for root
 set -e
 
 IN=; OUT=; WORK=/data/techo5-linux/build; VERSION=dev; TZNAME=UTC; ARCH=; APK=apk
@@ -86,9 +85,10 @@ ln -s /data/techo5-linux/dropbear "$R/etc/dropbear"
 rm -f "$R/etc/resolv.conf"
 ln -s /run/resolv.conf "$R/etc/resolv.conf"
 
-# Root: key-only SSH, no password.
-install -d -m 700 "$R/root/.ssh"
-install -m 600 "$IN/inputs/authorized_keys" "$R/root/.ssh/authorized_keys"
+# Root: no password, and no SSH key in the image. Keys live on userdata and only arrive from Home
+# Assistant (echod's ssh_keys action); echod starts dropbear when the SSH switch is on.
+rm -rf "$R/root/.ssh"
+ln -s /data/misc/techo5/ssh "$R/root/.ssh"
 sed -i 's|^root:[^:]*:|root:*:|' "$R/etc/shadow"
 
 # Clock.

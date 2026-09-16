@@ -30,6 +30,7 @@ import (
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/recording"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/room"
+	_ "github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/voice"

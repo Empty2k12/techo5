@@ -173,11 +173,15 @@ if [ -n "$VENDOR" ]; then
 	t5_wifi_up $VENDOR/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
 fi
 if [ -n "$IP" ]; then
-	# root with an empty password (-B) as the fallback next to the baked-in key: this is the rescue
-	printf 'root::0:0:root:/root:/bin/sh\n' > /etc/passwd
-	printf 'root::0:0:99999:7:::\n' > /etc/shadow
+	# Keys only, even here: the key built into this boot image plus the ones Home Assistant gave
+	# the device (userdata). No password logins — an empty root password would let in anyone on
+	# the network while a unit sits in rescue.
+	printf 'root:x:0:0:root:/root:/bin/sh\n' > /etc/passwd
+	printf 'root:*:0:0:99999:7:::\n' > /etc/shadow
+	mkdir -p /root/.ssh
+	[ -r /data/misc/techo5/ssh/authorized_keys ] && cat /data/misc/techo5/ssh/authorized_keys >> /root/.ssh/authorized_keys
 	chmod 700 /root /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null
-	t5_dropbear $LOGDIR/dropbear -B
+	t5_dropbear $LOGDIR/dropbear -s
 	t5_ntp
 fi
 

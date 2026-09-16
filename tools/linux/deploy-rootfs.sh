@@ -12,8 +12,8 @@
 # namespace so files can be owned by root without sudo.
 #
 # Environment: HOST (192.168.1.50), KEY (the SSH key), TECHO5_INPUTS (the
-# directory with the Alpine minirootfs, vendor.tar.gz, apks312/, and the
-# public key; kept out of the repo), TZ_NAME (America/New_York), GO (go binary),
+# directory with the Alpine minirootfs, vendor.tar.gz and apks312/; kept out
+# of the repo), TZ_NAME (America/New_York), GO (go binary),
 # WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
 set -euo pipefail
 
@@ -63,7 +63,6 @@ cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
 cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
-cp "$INPUTS/techo5_ed25519.pub" "$STAGE/inputs/authorized_keys"
 # Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
 # them into the state directory when it is empty.
 if [ -d "$INPUTS/models" ]; then mkdir -p "$STAGE/overlay/usr/share/techo5/models"; cp "$INPUTS"/models/*.tflite "$INPUTS"/models/*.json "$STAGE/overlay/usr/share/techo5/models/"; fi

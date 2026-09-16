@@ -75,7 +75,8 @@ Inputs (kept out of the repo, `D:\platform-tools\echoshow\linux-image`):
   wpa_supplicant 2.9 set (both)
 - `vendor/system-vendor-cronos-lineage-18.1-20260904.tar.gz` — `vendor/` from the
   LineageOS system partition (taken from the bench unit before it was wiped)
-- `techo5_ed25519` / `.pub` — the SSH key
+- `techo5_ed25519` / `.pub` — the SSH key built into the rescue boot image (`build-image.sh`);
+  root filesystems carry no key: send one with the `ssh_keys` action and turn on the SSH switch
 
 Boot image (kernel + rescue initramfs). The kernel comes from the LineageOS
 boot image with one device-tree edit: `amzn,mic-downmix` removed, so the
@@ -220,9 +221,10 @@ The camera is driven from userspace through the ISP driver's register windows; t
 (The probe tools that got there, camprobe and camframe, were removed once the package worked;
 they are in the history before 2026-09-16 evening.) `hardware/camera` streams on demand with
 auto-exposure and `feature/camera` serves
-`http://<device>:8181/camera.jpg`, `/camera.mjpeg` and the ESPHome camera entity Home Assistant
-creates on its own. `/screen.png[?sheet=<tab>&theme=<name>]` on the same port is a screenshot of
-the panel, for checking layouts from a PC.
+the ESPHome camera entity Home Assistant creates on its own, plus `http://<device>:8181/camera.jpg`
+and `/camera.mjpeg` while Camera web access is on. `/screen.png[?sheet=<tab>&theme=<name>]` on the
+same port, while Screen web access is on, is a screenshot of the panel, for checking layouts from a
+PC. With both off the port is closed.
 
 ## Updates on the slots
 

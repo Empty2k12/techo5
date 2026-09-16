@@ -13,14 +13,18 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   wake word works over music.
 - **Screen**: clock and weather, the conversation as it happens, a now-playing page with song and
   artwork, a forecast page, live views of Home Assistant cameras and of the Show's own camera, and
-  a swipe-down settings sheet with tabs (Device, Bluetooth, Cameras, Radio, Theme) and Wi-Fi
+  a swipe-down settings sheet with tabs (Device, Bluetooth, Cameras, Radio, Theme, Security) and Wi-Fi
   setup with an on-screen keyboard. A first-run card shows once.
 - **Radio**: stations from Home Assistant's lists, playing on the device's own speaker or on
   Bluetooth earbuds; song, artist and cover from iHeartRadio or TuneIn behind the page.
-- **Camera**: the front camera as a Home Assistant camera entity, plus JPEG and MJPEG over HTTP,
-  with auto-exposure. Off unless something is looking, and off while the mute button is engaged.
+- **Camera**: the front camera as a Home Assistant camera entity (plus JPEG and MJPEG over HTTP
+  when switched on), with auto-exposure. Off unless something is looking, and off while the mute button is engaged.
 - **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant (scanning
   through BlueZ on the Show), off by default.
+- **Security**: nothing is open to the network by default except Home Assistant's encrypted link
+  and the Sendspin player. SSH (keys only), the camera page and the screen page each have a switch
+  on the Security tab and in Home Assistant, all off on a new device. SSH keys come only from Home
+  Assistant (`ssh_keys` action) and live on userdata; the image carries none.
 - **Updates**: two root filesystem slots with a trial and automatic fallback; a release that
   carries a rootfs tarball installs over the air from Home Assistant's update entity.
 
@@ -43,11 +47,15 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 
 - **Build the daemon**: `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ./cmd/echod` in
   `echod/`. `-tags dot` builds the Echo Dot variant.
+- **Get in**: send your public key with the `esphome.<device>_ssh_keys` action and turn on the
+  SSH switch (Home Assistant or the Security tab). Switching it off stops the listener; open
+  sessions stay.
 - **Try a build on the bench**: copy the binary over SSH to `/usr/local/bin/techo5` (remount `/`
   read-write first) and kill the running daemon; the supervisor restarts it. `deploy-rootfs.sh`
   is the real path: it builds a rootfs and installs it into the spare slot, on trial.
-- **See the screen from the PC**: `http://<device>:8181/screen.png` with `?sheet=<tab>`,
-  `?theme=<name>`, `?radio=<station>`, `?wifi=list|keyboard` to put pages up first.
+- **See the screen from the PC**: turn on Screen web access, then `http://<device>:8181/screen.png` with `?sheet=<tab>`,
+  `?theme=<name>`, `?radio=<station>`, `?wifi=list|keyboard` to put pages up first. Turn it off
+  again: the options change what the device is doing and there is no login.
 - **Logs**: `/data/techo5-linux/techo5.log` on the device; `dmesg` for the kernel.
 - **Slots**: `slotctl status`, `slotctl install <tar.gz>`, `slotctl switch <a|b>`; a trial slot
   commits after five minutes of a healthy daemon.
@@ -58,6 +66,8 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 
 - The Bluetooth proxy on the Show only scans: BlueZ owns the controller, so there is no beacon
   and no active connections for Home Assistant. It stays off by default until it has run a while.
+- The camera and screen pages have no login: they are for a trusted network, and off until
+  switched on. The rescue environment (boot image) still trusts the key built into that image.
 - Song metadata rests on two undocumented service endpoints; when one changes shape the page
   falls back to the station logo.
 - Exposure has no scene awareness: a bright window behind a face still darkens the face.

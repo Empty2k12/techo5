@@ -29,6 +29,7 @@ mountpoint -q /store || mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /store
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
 mkdir -p /run/lock /run/techo5 $LOGDIR /data/misc/techo5/models
+mkdir -p -m 700 /data/misc/techo5/ssh
 # A fresh unit gets the wake word models the image carries.
 if [ -d /usr/share/techo5/models ] && [ -z "$(ls -A /data/misc/techo5/models 2>/dev/null)" ]; then
 	cp /usr/share/techo5/models/* /data/misc/techo5/models/ && log "wake word models installed from the image"
@@ -53,8 +54,8 @@ t5_wifi_conf $LOGDIR/wpa_supplicant.conf
 export UDHCPC_SCRIPT=/etc/techo5/udhcpc.sh
 t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
 
+# SSH is echod's (feature/security): off unless switched on, and only with a key on userdata.
 if [ -n "$IP" ]; then
-	t5_dropbear $LOGDIR/dropbear
 	t5_ntp
 	ntpd -p "${NTP_SERVER:-pool.ntp.org}" > /dev/null 2>&1
 fi
@@ -90,9 +91,6 @@ t5_bt_up /vendor/lib/modules/mt76x8_bt.ko /var/log
 		fi
 		killall udhcpc wpa_supplicant 2>/dev/null
 		t5_wifi_up /vendor/lib/modules/mt76x8_wlan.ko $LOGDIR/wpa_supplicant.conf
-		if [ -n "$IP" ]; then
-			pidof dropbear >/dev/null || t5_dropbear $LOGDIR/dropbear
-		fi
 	done
 ) &
 

@@ -22,6 +22,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 )
 
 // The palette is TECHO5's: walnut ground, amber accent, cream text.
@@ -56,6 +57,8 @@ type scene struct {
 	// sheet is the settings sheet, drawn instead of everything else while showSheet is set.
 	showSheet bool
 	sheet     settings
+	// security feeds the sheet's Security tab.
+	security security.State
 
 	// showWifi is the Wi-Fi pages, over everything but pairing.
 	showWifi bool

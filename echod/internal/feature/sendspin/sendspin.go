@@ -87,6 +87,12 @@ const (
 
 func (p *Player) Name() string { return "sendspin" }
 
+// Enabled and SetEnabled are the switch, for the settings sheet: the player holds a port open to
+// the network while it is on.
+func (p *Player) Enabled() bool { return config.Get().Sendspin.Enabled }
+
+func (p *Player) SetEnabled(on bool) { p.enabled.OnCommand(on) }
+
 func (p *Player) Entities() []esphome.Entity {
 	return []esphome.Entity{p.enabled, p.state}
 }

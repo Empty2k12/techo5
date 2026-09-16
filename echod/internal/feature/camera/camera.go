@@ -2,6 +2,9 @@
 // on the network: a JPEG snapshot and an MJPEG stream. Home Assistant's "Generic Camera" takes the
 // snapshot URL, "MJPEG IP Camera" the stream; either makes the Show a camera entity there.
 //
+// Both pages are off unless switched on (feature/security): they have no login, so the port is only
+// open while the camera or the screen page is wanted.
+//
 // The sensor runs only while a request holds it, and stops a few seconds after the last one, so
 // a device nobody is watching has its camera off — and the mute button keeps it off entirely.
 package camera
@@ -20,6 +23,8 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
 )
 
@@ -52,26 +57,69 @@ func (f *Feature) Run(ctx context.Context) error {
 		return nil
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/camera.jpg", f.snapshot)
-	mux.HandleFunc("/camera.mjpeg", f.stream)
+	mux.HandleFunc("/camera.jpg", allowed(cameraOpen, f.snapshot))
+	mux.HandleFunc("/camera.mjpeg", allowed(cameraOpen, f.stream))
 	f.registerScreen(mux)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", allowed(cameraOpen, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "TECHO5 camera: /camera.jpg (snapshot), /camera.mjpeg (stream)")
-	})
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(Port))
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		_ = srv.Close()
+	}))
+
+	changed := make(chan struct{}, 1)
+	defer security.Get().Changed.Listen(func(struct{}) {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})()
+
+	// The port is only open while one of the pages is switched on: closed, it is not there to find.
+	var srv *http.Server
+	defer func() {
+		if srv != nil {
+			_ = srv.Close()
+		}
 	}()
-	slog.Info("camera served", "port", Port)
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	for {
+		c := config.Get().Security
+		switch want := c.Camera || c.Screen; {
+		case want && srv == nil:
+			ln, err := net.Listen("tcp", ":"+strconv.Itoa(Port))
+			if err != nil {
+				slog.Error("web port", "port", Port, "err", err)
+				break
+			}
+			srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+			go func(srv *http.Server) {
+				if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					slog.Error("web port", "err", err)
+				}
+			}(srv)
+			slog.Info("web port open", "port", Port, "camera", c.Camera, "screen", c.Screen)
+		case !want && srv != nil:
+			_ = srv.Close() // streams in progress end here too
+			srv = nil
+			slog.Info("web port closed", "port", Port)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-changed:
+		case <-time.After(time.Minute): // a port that failed to open is tried again
+		}
 	}
-	return nil
+}
+
+func cameraOpen() bool { return config.Get().Security.Camera }
+
+// allowed serves a page only while its switch is on; otherwise the page is not there.
+func allowed(open func() bool, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !open() {
+			http.NotFound(w, r)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func encode(f *camera.Frame) ([]byte, error) {

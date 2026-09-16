@@ -8,15 +8,17 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/display"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 )
 
 // registerScreen adds /screen.png: what the panel shows. ?sheet= opens the settings sheet on a
-// tab first (device, bluetooth, cameras, radio; "off" closes it) and ?theme= switches the palette,
-// so the sheet and the themes can be looked at without a finger on the device.
+// tab first (device, bluetooth, cameras, radio, theme, security; "off" closes it) and ?theme= switches the palette,
+// so the sheet and the themes can be looked at without a finger on the device. Off unless the
+// Screen web access switch is on: the options change what the device is doing.
 func (f *Feature) registerScreen(mux *http.ServeMux) {
-	mux.HandleFunc("/screen.png", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/screen.png", allowed(screenOpen, func(w http.ResponseWriter, r *http.Request) {
 		if theme := r.URL.Query().Get("theme"); theme != "" {
 			display.Get().SetTheme(theme)
 		}
@@ -39,7 +41,7 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 			}
 		}
 		if tab := r.URL.Query().Get("sheet"); tab != "" {
-			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "theme": 4, "off": -1}
+			tabs := map[string]int{"device": 0, "bluetooth": 1, "cameras": 2, "radio": 3, "theme": 4, "security": 5, "off": -1}
 			if t, ok := tabs[tab]; ok {
 				display.Get().OpenSheet(t)
 				time.Sleep(700 * time.Millisecond)
@@ -55,5 +57,7 @@ func (f *Feature) registerScreen(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "no-store")
 		png.Encode(w, img)
-	})
+	}))
 }
+
+func screenOpen() bool { return config.Get().Security.Screen }

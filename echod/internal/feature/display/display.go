@@ -37,6 +37,8 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
@@ -193,6 +195,7 @@ func build() *Display {
 		d.wake()
 	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	security.Get().Changed.Listen(func(struct{}) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	return d
 }
@@ -562,6 +565,8 @@ func (d *Display) sheetTap(h hit) {
 				setRole(h.row-themeRowRole, swatch(h.row-themeRowRole, i))
 			}
 		}
+	case tabSecurity:
+		d.securityTap(h)
 	case tabRadio:
 		rows := radioList(home.Get().Radio())
 		i, ok := d.listTap(len(rows), page, h.row)
@@ -573,6 +578,26 @@ func (d *Display) sheetTap(h hit) {
 			return
 		}
 		home.Get().Play(rows[i])
+	}
+}
+
+// securityTap is a row of the Security tab. Only the On/Off buttons act; keys are not changed here.
+func (d *Display) securityTap(h hit) {
+	if h.button != 2 {
+		return
+	}
+	sec := security.Get()
+	c := config.Get().Security
+	switch h.row {
+	case secRowSSH:
+		sec.SetSSH(!c.SSH)
+	case secRowCamera:
+		sec.SetCamera(!c.Camera)
+	case secRowScreen:
+		sec.SetScreen(!c.Screen)
+	case secRowSendspin:
+		sp := sendspin.Get()
+		sp.SetEnabled(!sp.Enabled())
 	}
 }
 
@@ -1109,6 +1134,9 @@ func (d *Display) frame() time.Duration {
 		s.sheet = d.gather(s, restartArm, tab)
 		if tab == tabCameras {
 			s.cameras = home.Get().Cameras()
+		}
+		if tab == tabSecurity {
+			s.security = security.Get().State()
 		}
 	}
 	s.camera, s.showCamera = home.Get().Camera()

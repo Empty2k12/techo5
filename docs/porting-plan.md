@@ -480,6 +480,20 @@ session.
    not help. `btbridge` now fills those four octets when the firmware
    leaves them empty. On the bench: 431 advertising reports in 10 s where
    there were none, and the proxy's rate sensor at ~33 advertisements/s.
+   SECURITY TAB 2026-09-16: the images carried the maintainer's SSH public
+   key (every install of a published rootfs trusted it), SSH was always on,
+   and port 8181 served the camera and a state-changing screenshot page to
+   the whole network with no login. Now `feature/security` owns all three:
+   switches in Home Assistant (`ssh`, `camera_web_access`,
+   `screen_web_access`) and on a sixth sheet tab, all off by default; echod
+   starts and stops dropbear (`-s`, keys only) and opens 8181 only while a
+   page is on. Keys arrive only through the `ssh_keys` action (public key
+   lines, no options) into /data/misc/techo5/ssh, which /root/.ssh links to;
+   the rootfs has no key and boot.sh no longer starts dropbear. The rescue
+   init dropped its empty root password. Tested on the bench: keys action
+   (good and a `command=` line refused), SSH off from Home Assistant with a
+   session open (session kept, new logins refused), on again from the tab,
+   8181 open/404/closed per switch, password logins refused.
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

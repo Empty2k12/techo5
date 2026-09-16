@@ -13,6 +13,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 )
@@ -46,6 +47,8 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 	if !wifi.Available() {
 		st.wifi = st.address
 	}
+	st.sendspin = sendspin.Get().Enabled()
+	st.insecureTLS = c.Diag.InsecureTLS
 	st.slot = slotName()
 	st.address = address()
 
