@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/math/fixed"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 )
 
@@ -76,6 +77,9 @@ type roundScene struct {
 	btConnected, btRemembered string
 	btStatus                  string
 	forgetArmed               bool
+
+	// call is the phone: while one rings, is placed or is up, its face is over everything.
+	call phone.State
 }
 
 type roundRenderer struct {
@@ -112,6 +116,10 @@ func newRoundRenderer(dst *image.RGBA) *roundRenderer {
 func (r *roundRenderer) draw(s roundScene) {
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colBackground), image.Point{}, draw.Src)
 
+	if s.call.Phase != phone.Idle {
+		r.callFace(s)
+		return
+	}
 	r.rim(s)
 	switch {
 	case s.showCamera && !s.showVolume:

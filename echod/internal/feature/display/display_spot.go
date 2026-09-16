@@ -43,6 +43,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
@@ -182,6 +183,7 @@ func build() *Display {
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	phone.Get().Changed.Listen(d.callLights)
 	// The mute button toggles the mute on the buttons' goroutine; redraw once it has.
 	buttons.Get().Events.Listen(func(buttons.Event) {
 		go func() {
@@ -364,6 +366,9 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	if d.callGesture(g) {
+		return
+	}
 	if open {
 		d.menuGesture(g)
 		return
@@ -834,6 +839,7 @@ func (d *Display) frame() time.Duration {
 		}
 	}
 	s.timerRinging = timer.Get().Ringing()
+	s.call = phone.Get().State()
 	s.weather = home.Get().Weather()
 	s.camera, s.showCamera = home.Get().Camera()
 	s.cameraLive = camera.Get().Running()
@@ -881,7 +887,7 @@ func (d *Display) frame() time.Duration {
 	case s.showCamera:
 		// New frames wake the loop themselves; this only brings the view down when its time is up.
 		return activeFrame
-	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing:
+	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing || s.call.Phase != phone.Idle:
 		return activeFrame
 	default:
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))
