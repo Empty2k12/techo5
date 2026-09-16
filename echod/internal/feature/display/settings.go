@@ -15,6 +15,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 )
 
@@ -36,6 +37,9 @@ func (d *Display) gather(s scene, restartArm time.Time, tab int) settings {
 		st.name = "TECHO5"
 	}
 	st.wakeWord = strings.ReplaceAll(c.Wake.Slot(0).ID, "_", " ")
+	if m, ok := wake.Find(wake.Lib().Ours(), c.Wake.Slot(0).ID); ok && m.Phrase != "" {
+		st.wakeWord = m.Phrase
+	}
 	if st.wakeWord == "" {
 		st.wakeWord = "off"
 	}

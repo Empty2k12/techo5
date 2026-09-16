@@ -45,6 +45,8 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
@@ -625,6 +627,22 @@ func (d *Display) securityTap(h hit) {
 	}
 }
 
+// nextWakeWord is the installed wake word after the one in the first slot, in the order the
+// library lists them, wrapping round; empty when nothing is installed.
+func nextWakeWord() string {
+	models := wake.Lib().Ours()
+	if len(models) == 0 {
+		return ""
+	}
+	cur := config.Get().Wake.Slot(0).ID
+	for i, m := range models {
+		if m.ID == cur {
+			return models[(i+1)%len(models)].ID
+		}
+	}
+	return models[0].ID
+}
+
 // listTap maps a row of a paged list to the item it shows; the More row turns the page instead.
 func (d *Display) listTap(n, page, row int) (int, bool) {
 	start, end, more := pageOf(n, page)
@@ -673,6 +691,12 @@ func (d *Display) deviceTap(h hit) {
 			on := d.autoOn
 			d.mu.Unlock()
 			d.setAuto(!on, true)
+		}
+	case rowWake:
+		if h.button == 2 {
+			if next := nextWakeWord(); next != "" {
+				safe.Go("wake word from the sheet", func() { voice.Get().ChooseWakeWord(next) })
+			}
 		}
 	case rowMic:
 		if h.button == 2 {

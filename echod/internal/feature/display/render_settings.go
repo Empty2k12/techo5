@@ -296,7 +296,8 @@ func (r *renderer) deviceTab(s scene) {
 	r.button(top, 2, "Next", false)
 
 	top = r.row(rowWake, "Wake word", cream)
-	r.value(top, st.wakeWord, 0)
+	r.value(top, st.wakeWord, 1)
+	r.button(top, 2, "Next", false)
 
 	top = r.row(rowAbout, "About", cream)
 	r.value(top, fmt.Sprintf("%s  ·  %s  ·  slot %s", st.name, st.version, st.slot), 0)
