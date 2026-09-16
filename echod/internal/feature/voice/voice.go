@@ -19,6 +19,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
@@ -135,6 +136,11 @@ func (v *Voice) Busy() bool { return v.turn.Busy() }
 // is. Cancelling is the more useful half — it is the way out of a turn that is waiting on a pipeline
 // that is not going to answer.
 func (v *Voice) Action() {
+	// A call ringing or up is what the button is for until it is over: it answers or hangs up.
+	if phone.Get().Button() {
+		return
+	}
+
 	// Anything audible is what the press meant. Asking a question is what the button is for when the
 	// device is doing nothing; while it is talking or playing, reaching for it means make it stop.
 	if v.Stop() {

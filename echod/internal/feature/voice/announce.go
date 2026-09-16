@@ -7,6 +7,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
@@ -58,6 +59,11 @@ func (t *conversation) play(ctx context.Context, url string) error {
 		return err
 	}
 	samples = media.Normalize(samples)
+	// An announcement made while a call is up is for the call as well, which is how an automation
+	// tells whoever answered a call it placed what the call is about.
+	if phone.Get().Say(samples) {
+		slog.Info("announcement sent into the call", "samples", len(samples))
+	}
 	slog.Info("playing announcement", "samples", len(samples))
 
 	t.post(event{kind: evPlaying})
