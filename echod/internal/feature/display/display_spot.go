@@ -40,6 +40,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
@@ -126,6 +127,7 @@ type Display struct {
 	nightFrom  int
 	nightTo    int
 	restartArm time.Time
+	forgetArm  time.Time
 
 	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
 	wasNight bool
@@ -174,6 +176,7 @@ func build() *Display {
 	touch.Get().Gestures.Listen(d.gesture)
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
+	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	// The mute button toggles the mute on the buttons' goroutine; redraw once it has.
 	buttons.Get().Events.Listen(func(buttons.Event) {
 		go func() {
@@ -578,7 +581,40 @@ func (d *Display) act(id itemID) {
 			restartDevice()
 		}
 	case itemBack:
-		d.locked(func() { d.openMenu(modeMain, itemSettings) })
+		d.locked(func() {
+			if d.menuMode == modeBluetooth {
+				d.openMenu(modeSettings, itemBluetooth)
+				return
+			}
+			d.openMenu(modeMain, itemSettings)
+		})
+	case itemBluetooth:
+		d.locked(func() { d.openMenu(modeBluetooth, itemBTPair) })
+	case itemBTPair:
+		bt := btaudio.Get()
+		on := !bt.Pairing()
+		go bt.SetPairing(on)
+		if on {
+			// Pairing picks the strongest speaker it hears on its own; the rim pulses meanwhile.
+			d.locked(d.closeMenu)
+		}
+	case itemBTConnect:
+		if btaudio.Get().State().Connected != "" {
+			go btaudio.Get().Disconnect()
+		} else {
+			go btaudio.Get().Reconnect()
+		}
+	case itemBTForget:
+		d.mu.Lock()
+		armed := !d.forgetArm.IsZero() && time.Since(d.forgetArm) < restartWindow
+		d.forgetArm = time.Time{}
+		if !armed {
+			d.forgetArm = time.Now()
+		}
+		d.mu.Unlock()
+		if armed {
+			go btaudio.Get().Forget()
+		}
 	}
 }
 
@@ -738,6 +774,7 @@ func (d *Display) frame() time.Duration {
 		nightFrom:    d.nightFrom,
 		nightTo:      d.nightTo,
 		restartArmed: !d.restartArm.IsZero() && now.Sub(d.restartArm) < restartWindow,
+		forgetArmed:  !d.forgetArm.IsZero() && now.Sub(d.forgetArm) < restartWindow,
 	}
 	if !d.volAt.IsZero() && now.Sub(d.volAt) < volumeShow {
 		s.volume, s.showVolume = d.volume, true
@@ -763,6 +800,8 @@ func (d *Display) frame() time.Duration {
 	}
 	s.timerRinging = timer.Get().Ringing()
 	s.weather = home.Get().Weather()
+	bt := btaudio.Get().State()
+	s.btAvailable, s.btPairing, s.btConnected, s.btRemembered, s.btStatus = bt.Available, bt.Pairing, bt.Connected, bt.Remembered, bt.Status
 	if s.menuOpen && s.menuMode == modeWeather {
 		s.forecast = home.Get().Forecast()
 	}
@@ -791,7 +830,7 @@ func (d *Display) frame() time.Duration {
 	switch {
 	case turning || (s.menuOpen && d.isSpinning()):
 		return dialFrame
-	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen:
+	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing:
 		return activeFrame
 	default:
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))

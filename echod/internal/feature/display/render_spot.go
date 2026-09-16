@@ -67,6 +67,11 @@ type roundScene struct {
 
 	weather  home.Weather
 	forecast forecastDays
+
+	btAvailable, btPairing    bool
+	btConnected, btRemembered string
+	btStatus                  string
+	forgetArmed               bool
 }
 
 type roundRenderer struct {
@@ -132,6 +137,9 @@ func (r *roundRenderer) rim(s roundScene) {
 		r.arc(rimIn, rimOut, start, start+math.Pi/2, colThinking)
 	case s.phase == "replying":
 		r.arc(rimIn, rimOut, 0, 2*math.Pi, colReplying)
+	case s.btPairing:
+		pulse := 0.45 + 0.55*math.Abs(math.Sin(float64(s.now.UnixMilli())/500))
+		r.arc(rimIn, rimOut, 0, 2*math.Pi, fade(colBluetooth, pulse))
 	case len(s.timers) > 0 && s.timers[0].Total > 0:
 		t := s.timers[0]
 		left := float64(t.Left) / float64(t.Total)
@@ -162,6 +170,8 @@ func (r *roundRenderer) clockFace(s roundScene) {
 	switch {
 	case s.muted:
 		r.centred(r.label, "MICROPHONE OFF", 118, colMuted)
+	case s.btPairing:
+		r.centred(r.label, "BLUETOOTH PAIRING", 118, colBluetooth)
 	case s.playing:
 		r.centred(r.label, "PLAYING", 118, colDim)
 	case s.paused:

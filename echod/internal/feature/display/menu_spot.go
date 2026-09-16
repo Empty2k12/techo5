@@ -37,6 +37,7 @@ const (
 	modeNightTo
 	modeInfo
 	modeWeather
+	modeBluetooth
 )
 
 // jogging is whether the mode turns the ring into a jog wheel.
@@ -61,6 +62,10 @@ const (
 	itemInfo       itemID = "info"
 	itemRestart    itemID = "restart"
 	itemBack       itemID = "back"
+	itemBluetooth  itemID = "bluetooth"
+	itemBTPair     itemID = "bt_pair"
+	itemBTConnect  itemID = "bt_connect"
+	itemBTForget   itemID = "bt_forget"
 )
 
 type menuItem struct {
@@ -84,8 +89,19 @@ var settingsItems = []menuItem{
 	{itemBrightness, color.RGBA{255, 204, 64, 255}},
 	{itemNight, color.RGBA{150, 120, 255, 255}},
 	{itemAuto, color.RGBA{64, 214, 230, 255}},
+	{itemBluetooth, colBluetooth},
 	{itemInfo, color.RGBA{58, 160, 255, 255}},
 	{itemRestart, color.RGBA{255, 120, 80, 255}},
+	{itemBack, color.RGBA{176, 184, 196, 255}},
+}
+
+// colBluetooth is Bluetooth's blue: its dial's items and the rim while pairing.
+var colBluetooth = color.RGBA{0, 130, 252, 255}
+
+var bluetoothItems = []menuItem{
+	{itemBTPair, colBluetooth},
+	{itemBTConnect, color.RGBA{60, 203, 127, 255}},
+	{itemBTForget, color.RGBA{229, 72, 77, 255}},
 	{itemBack, color.RGBA{176, 184, 196, 255}},
 }
 
@@ -96,6 +112,8 @@ func itemsFor(m menuMode) []menuItem {
 		return mainItems
 	case modeSettings:
 		return settingsItems
+	case modeBluetooth:
+		return bluetoothItems
 	}
 	return nil
 }
@@ -205,6 +223,20 @@ func itemName(s roundScene, id itemID) string {
 		return "Restart"
 	case itemBack:
 		return "Back"
+	case itemBluetooth:
+		return "Bluetooth"
+	case itemBTPair:
+		if s.btPairing {
+			return "Stop pairing"
+		}
+		return "Pair"
+	case itemBTConnect:
+		if s.btConnected != "" {
+			return "Disconnect"
+		}
+		return "Connect"
+	case itemBTForget:
+		return "Forget"
 	}
 	return ""
 }
@@ -244,7 +276,7 @@ func itemHint(s roundScene, id itemID) string {
 		}
 		return "none running · ask to set one"
 	case itemSettings:
-		return "brightness, night, info"
+		return "brightness, Bluetooth, info"
 	case itemSleep:
 		return "tap the screen to wake"
 	case itemBrightness:
@@ -264,7 +296,48 @@ func itemHint(s roundScene, id itemID) string {
 		}
 		return "tap twice"
 	case itemBack:
+		if s.menuMode == modeBluetooth {
+			return "settings"
+		}
 		return "main menu"
+	case itemBluetooth:
+		switch {
+		case !s.btAvailable:
+			return "not available"
+		case s.btPairing:
+			return "pairing…"
+		case s.btConnected != "":
+			return s.btConnected
+		case s.btRemembered != "":
+			return "not connected"
+		}
+		return "earbuds or a speaker"
+	case itemBTPair:
+		switch {
+		case !s.btAvailable:
+			return "Bluetooth is not up"
+		case s.btPairing && s.btStatus != "":
+			return s.btStatus
+		case s.btPairing:
+			return "pairing…"
+		}
+		return "put the speaker in pairing mode"
+	case itemBTConnect:
+		switch {
+		case s.btConnected != "":
+			return s.btConnected
+		case s.btRemembered != "":
+			return s.btRemembered
+		}
+		return "nothing paired yet"
+	case itemBTForget:
+		switch {
+		case s.btRemembered == "":
+			return "nothing to forget"
+		case s.forgetArmed:
+			return "tap again to forget " + s.btRemembered
+		}
+		return s.btRemembered + " · tap twice"
 	}
 	return ""
 }
@@ -308,8 +381,11 @@ func (r *roundRenderer) dial(s roundScene) {
 		r.icon(it.id, s, x, y, 22, 3.2, it.colour)
 
 		header := s.now.Format("3:04")
-		if s.menuMode == modeSettings {
+		switch s.menuMode {
+		case modeSettings:
 			header = "SETTINGS"
+		case modeBluetooth:
+			header = "BLUETOOTH"
 		}
 		r.centred(r.label, header, 206, colDim)
 		r.centred(r.title, itemName(s, it.id), 252, colText)
@@ -416,11 +492,41 @@ func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c colo
 		ex, ey := x+0.7*u*math.Sin(1.8*math.Pi), y-0.7*u*math.Cos(1.8*math.Pi)
 		r.line(ex, ey, ex+0.42*u, ey-0.05*u, w, c)
 		r.line(ex, ey, ex+0.05*u, ey+0.42*u, w, c)
+	case itemBluetooth:
+		r.btRune(x, y, u, w, c)
+	case itemBTPair:
+		r.btRune(x-0.3*u, y, 0.85*u, w, c)
+		r.ringAt(x+0.05*u, y, 0.55*u-w/2, 0.55*u+w/2, 0.3*math.Pi, 0.7*math.Pi, c)
+		r.ringAt(x+0.05*u, y, 0.95*u-w/2, 0.95*u+w/2, 0.3*math.Pi, 0.7*math.Pi, c)
+	case itemBTConnect:
+		// Headphones: the band and two cups.
+		r.ringAt(x, y+0.1*u, 0.75*u-w/2, 0.75*u+w/2, 1.5*math.Pi, 2.5*math.Pi, c)
+		r.line(x-0.75*u, y+0.1*u, x-0.75*u, y+0.45*u, w, c)
+		r.line(x+0.75*u, y+0.1*u, x+0.75*u, y+0.45*u, w, c)
+		r.line(x-0.62*u, y+0.25*u, x-0.62*u, y+0.8*u, w*2.2, c)
+		r.line(x+0.62*u, y+0.25*u, x+0.62*u, y+0.8*u, w*2.2, c)
+		if s.btConnected != "" {
+			r.line(x-0.9*u, y-0.8*u, x+0.9*u, y+0.95*u, w, c)
+		}
+	case itemBTForget:
+		r.ringAt(x, y, 0.8*u-w/2, 0.8*u+w/2, 0, 2*math.Pi, c)
+		r.line(x-0.4*u, y-0.4*u, x+0.4*u, y+0.4*u, w, c)
+		r.line(x+0.4*u, y-0.4*u, x-0.4*u, y+0.4*u, w, c)
 	case itemBack:
 		r.line(x+0.75*u, y, x-0.7*u, y, w, c)
 		r.line(x-0.7*u, y, x-0.2*u, y-0.5*u, w, c)
 		r.line(x-0.7*u, y, x-0.2*u, y+0.5*u, w, c)
 	}
+}
+
+// btRune is the Bluetooth mark.
+func (r *roundRenderer) btRune(x, y, u, w float64, c color.RGBA) {
+	top, bot, mid := y-0.9*u, y+0.9*u, 0.45*u
+	r.line(x, top, x, bot, w, c)
+	r.line(x, top, x+0.5*u, y-mid, w, c)
+	r.line(x+0.5*u, y-mid, x-0.5*u, y+mid, w, c)
+	r.line(x, bot, x+0.5*u, y+mid, w, c)
+	r.line(x+0.5*u, y+mid, x-0.5*u, y-mid, w, c)
 }
 
 func (r *roundRenderer) micIcon(x, y, u, w float64, c color.RGBA) {

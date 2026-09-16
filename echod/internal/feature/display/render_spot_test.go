@@ -19,7 +19,7 @@ import (
 // The dials: each item's rest puts it at the top, a tap lands on the item under it or the middle, and
 // snapping always takes the short way round.
 func TestDialGeometry(t *testing.T) {
-	for _, items := range [][]menuItem{mainItems, settingsItems} {
+	for _, items := range [][]menuItem{mainItems, settingsItems, bluetoothItems} {
 		n := len(items)
 		for i := range items {
 			rot := restFor(i, n)
@@ -61,6 +61,9 @@ func TestRoundScenesDraw(t *testing.T) {
 		"weather":        {now: at, phase: "idle", weather: sky, forecast: week, menuOpen: true, menuMode: modeWeather},
 		"weather-now":    {now: at, phase: "idle", weather: home.Weather{Condition: "clear-night", Temp: "58°"}, menuOpen: true, menuMode: modeWeather},
 		"weather-none":   {now: at, phase: "idle", menuOpen: true, menuMode: modeWeather},
+		"menu-bluetooth": {now: at, phase: "idle", menuOpen: true, menuMode: modeSettings, menuSel: 3, menuRot: restFor(3, len(settingsItems)), btAvailable: true, btConnected: "Kitchen speaker"},
+		"bt-dial":        {now: at, phase: "idle", menuOpen: true, menuMode: modeBluetooth, menuSel: 1, menuRot: restFor(1, len(bluetoothItems)), btAvailable: true, btConnected: "Kitchen speaker", btRemembered: "Kitchen speaker"},
+		"bt-pairing":     {now: at, phase: "idle", btAvailable: true, btPairing: true, weather: sky},
 		"clock":          {now: at, phase: "idle", volume: 12, maxVolume: 30},
 		"clock-timer":    {now: at, phase: "idle", timers: []timer.Countdown{{Name: "pasta", Left: 4*time.Minute + 32*time.Second, Total: 10 * time.Minute, Active: true}}},
 		"muted":          {now: at, phase: "idle", muted: true},
