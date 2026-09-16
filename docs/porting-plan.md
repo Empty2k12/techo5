@@ -465,6 +465,12 @@ session.
    discovery reports nothing through the bridged controller yet, so it
    stays off by default; camprobe and camframe removed; docs/overview.md
    is the one-page state of the device.
+   RELEASE v0.2.0 (2026-09-16 06:00): the first release carrying a rootfs
+   tarball. The bench Show, asked through Home Assistant's update entity,
+   fetched the 74 MB tarball from GitHub, installed it into slot b and
+   committed after the trial — the reboot itself had to be done by hand,
+   because the updater rebooted from a goroutine the supervisor's restart
+   killed; fixed to reboot synchronously (goes out with the next release).
    SETTINGS TABS 2026-09-16: the sheet is four tabs — Device (volume and
    brightness with −/+ buttons, auto-brightness and microphone toggles, wake
    word, About, Restart), Bluetooth (connect/disconnect the remembered device,

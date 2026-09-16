@@ -63,12 +63,13 @@ func installRootfs(ctx context.Context, m Manifest, progress func(float32)) erro
 		return fmt.Errorf("update: slotctl install: %w: %s", err, out)
 	}
 	slog.Warn("update: rootfs installed, rebooting into it", "version", m.Version, "slotctl", string(out))
-	go func() {
-		time.Sleep(2 * time.Second) // let the state reach Home Assistant
-		syscall.Sync()
-		if err := syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART); err != nil {
-			slog.Error("update: reboot failed", "err", err)
-		}
-	}()
+	// Reboot here and now. Anything deferred loses: the caller asks the supervisor for a restart
+	// as soon as this returns, and a goroutine waiting to reboot dies with the process (seen on
+	// the first over-the-air install, 2026-09-16 — the slot was ready, the device sat on the old
+	// one until someone rebooted it).
+	syscall.Sync()
+	if err := syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART); err != nil {
+		return fmt.Errorf("update: rootfs installed but the reboot failed: %w", err)
+	}
 	return nil
 }
