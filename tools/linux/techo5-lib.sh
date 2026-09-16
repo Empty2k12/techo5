@@ -110,54 +110,73 @@ t5_wifi_up() {
 # t5_ip: the current IPv4 address on wlan0, empty if none.
 t5_ip() { ip -4 addr show wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1; }
 
-# t5_wifi_prefer5: move to the network's 5 GHz radio when it has one worth having.
+# t5_wifi_prefer5: keep the link on the network's strongest worthwhile radio, 5 GHz first.
 #
-# The supplicant picks a radio at connect time and often takes 2.4 GHz, sometimes on a farther access
-# point, where the Bluetooth half of the same chip shares its antenna and spectrum: on the bench that
-# was 1-4 MB/s against 3-12 MB/s on 5 GHz with earbuds connected (2026-09-16). This asks for 5 GHz only
-# on the running supplicant (nothing is saved), and only when the scan shows the same SSID on 5 GHz at
-# T5_5G_MIN dBm or better. If it does not associate there within 30 s it goes back to every band and
-# leaves it for 30 minutes. A restarted supplicant reads the saved file and has every band again, so a
-# network whose 5 GHz radio goes away is recovered by the keeper's ordinary no-address path.
-T5_5G_FREQS="5180 5200 5220 5240 5260 5280 5300 5320 5500 5520 5540 5560 5580 5600 5620 5640 5660 5680 5700 5720 5745 5765 5785 5805 5825"
+# The supplicant picks a radio at connect time and often takes 2.4 GHz, where the Bluetooth half of the
+# same chip shares its antenna and spectrum: on the bench that was 1-4 MB/s against 3-12 MB/s on 5 GHz
+# with earbuds connected (2026-09-16). It can also take a far 5 GHz radio: the bench once booted onto one
+# at -70 dBm, took 70 s to get a lease and ran at 20-40 Mbit/s, next to a -34 dBm 2.4 GHz radio.
+#
+# Called by the keeper every minute. A 5 GHz radio at T5_5G_MIN dBm or better is strong: the link moves
+# to the strongest one when it is on 2.4 GHz or on a weak 5 GHz radio. With no strong 5 GHz radio, a
+# weak 5 GHz link moves to 2.4 GHz when that is T5_2G_GAIN dB stronger and at T5_2G_MIN or better. Until
+# the link is on a strong 5 GHz radio it keeps scanning, every five minutes, so a 5 GHz radio that comes
+# back (or was never listed: a connected supplicant stops scanning) is found. A move pins the running
+# supplicant to the chosen channel, nothing is saved; if it does not associate there within 30 s it
+# goes back to every band and leaves it for 30 minutes.
 t5_wifi_prefer5() {
 	w="wpa_cli -p /run/wpa -i wlan0"
-	freq=$(iw dev wlan0 link 2>/dev/null | sed -n 's/.*freq: \([0-9]*\).*/\1/p')
-	[ -n "$freq" ] && [ "$freq" -lt 4000 ] || return 0
+	link=$(iw dev wlan0 link 2>/dev/null)
+	freq=$(echo "$link" | sed -n 's/.*freq: \([0-9]*\).*/\1/p'); freq=${freq%%.*}
+	sig=$(echo "$link" | sed -n 's/.*signal: \(-*[0-9]*\).*/\1/p')
+	[ -n "$freq" ] && [ -n "$sig" ] || return 0
+	strong=${T5_5G_MIN:--65}
+	# On a strong 5 GHz radio already: nothing to look for.
+	[ "$freq" -gt 4000 ] && [ "$sig" -ge "$strong" ] && return 0
 	now=$(cut -d. -f1 /proc/uptime)
+	mkdir -p /run/techo5
 	[ "$now" -ge "$(cat /run/techo5/prefer5-after 2>/dev/null || echo 0)" ] || return 0
 	id=$($w list_networks 2>/dev/null | awk -F'\t' 'NR>1 && $4 ~ /CURRENT/ {print $1}')
 	ssid=$($w status 2>/dev/null | sed -n 's/^ssid=//p')
 	[ -n "$id" ] && [ -n "$ssid" ] || return 0
-	best=$($w scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" 'NR>1 && $5 == s && $2 > 4000 {print $3}' | sort -n | tail -1)
-	if [ -z "$best" ]; then
-		# A connected supplicant stops scanning, and its list ages out to the radio it is on: the
-		# bench sat on 2.4 GHz for good with a -33 dBm 5 GHz radio unlisted (2026-09-16). Ask for a
-		# scan now and then; the keeper's next call reads it.
-		mkdir -p /run/techo5
-		if [ "$now" -ge "$(cat /run/techo5/prefer5-scan 2>/dev/null || echo 0)" ]; then
-			$w scan >/dev/null 2>&1
-			echo $((now + 300)) > /run/techo5/prefer5-scan
-		fi
-		return 0
+
+	# The strongest radio of this network on each band, as "signal freq".
+	best5=$($w scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" 'NR>1 && $5 == s && $2 > 4000 {print $3, $2}' | sort -n | tail -1)
+	best2=$($w scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" 'NR>1 && $5 == s && $2 < 4000 {print $3, $2}' | sort -n | tail -1)
+	sig5=${best5%% *}; f5=${best5##* }
+	sig2=${best2%% *}; f2=${best2##* }
+
+	# Keep looking: the list ages out, and radios come and go.
+	if [ "$now" -ge "$(cat /run/techo5/prefer5-scan 2>/dev/null || echo 0)" ]; then
+		$w scan >/dev/null 2>&1
+		echo $((now + 300)) > /run/techo5/prefer5-scan
 	fi
-	[ "$best" -ge "${T5_5G_MIN:--70}" ] || return 0
-	log "wifi: on $freq MHz while '$ssid' is on 5 GHz at $best dBm; moving"
-	$w set_network "$id" freq_list "$T5_5G_FREQS" >/dev/null 2>&1
+
+	target=
+	if [ -n "$sig5" ] && [ "$sig5" -ge "$strong" ] && [ "$f5" != "$freq" ]; then
+		target=$f5
+		log "wifi: on $freq MHz at $sig dBm while '$ssid' has 5 GHz at $sig5 dBm; moving to $f5 MHz"
+	elif [ "$freq" -gt 4000 ] && [ -n "$sig2" ] && [ "$sig2" -ge "${T5_2G_MIN:--60}" ] &&
+		[ $((sig2 - sig)) -ge "${T5_2G_GAIN:-20}" ]; then
+		target=$f2
+		log "wifi: on a weak 5 GHz radio ($sig dBm) while '$ssid' has 2.4 GHz at $sig2 dBm; moving to $f2 MHz"
+	fi
+	[ -n "$target" ] || return 0
+
+	$w set_network "$id" freq_list "$target" >/dev/null 2>&1
 	$w reassociate >/dev/null 2>&1
 	n=0
 	while [ $n -lt 30 ]; do
 		sleep 2; n=$((n+2))
 		f=$(iw dev wlan0 link 2>/dev/null | sed -n 's/.*freq: \([0-9]*\).*/\1/p')
-		if [ "${f:-0}" -gt 4000 ] && $w status 2>/dev/null | grep -q '^wpa_state=COMPLETED'; then
-			log "wifi: on $f MHz"
+		if [ "${f%%.*}" = "$target" ] && $w status 2>/dev/null | grep -q '^wpa_state=COMPLETED'; then
+			log "wifi: on $target MHz"
 			return 0
 		fi
 	done
-	log "wifi: no 5 GHz association in 30 s; back to every band for 30 minutes"
+	log "wifi: no association on $target MHz in 30 s; back to every band for 30 minutes"
 	$w set_network "$id" freq_list "" >/dev/null 2>&1
 	$w reassociate >/dev/null 2>&1
-	mkdir -p /run/techo5
 	echo $((now + 1800)) > /run/techo5/prefer5-after
 }
 
