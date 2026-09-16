@@ -126,3 +126,53 @@ or `/dev/camera-sysram`; the driver tracks it in a ring per DMA and reports `bFi
    CMOS_EN, then TG_VF_CON.VFDATA_EN=1; wait `IMGO_DONE`; VFDATA_EN=0.
 5. Dump the RAW10 buffer, unpack, nearest-neighbour demosaic, PNG. Then the daemon's
    "take a picture" action and a page.
+
+## Sensor alive (2026-09-16)
+
+The OV02B10 answers from Linux. The blocker was the sensor master clock: the SENINF timing
+generator (TG1) that divides the 48 MHz camtg clock down to the CMMCLK pad is programmed by
+nobody in the kernel unless the board's device tree says "cmmclk-always-on" (cronos does not),
+and Android's libcamdrv writes those registers from userspace through ISP_WRITE_REGISTER. The
+kd_camera_hw power-on only flips the MCLK1_EN bit (SENINF_TG1_PH_CNT bit 29); with the divider
+unset the pad is silent and an OmniVision sensor NACKs every I2C transfer. Neither the "Mute on
+will not init sensor" line (it just means the chip ID did not match) nor the "unbalanced
+disables for vcama" warning (a double power-down when open fails) was the cause.
+
+camprobe now mirrors camera_isp.c's ISP_set_mclk1(clkcnt) + ISP_MCLK1_EN(1) before T_OPEN, as
+CAMINF-relative offsets through the ISP register ioctls (magic 'k', READ_REG = 2, WRITE_REG = 3,
+compat ISP_REG_IO_STRUCT {u32 pData; u32 Count}, ISP_REG_STRUCT {u32 Addr; u32 Val}, Addr is
+an offset from 0x15000000 and must lie in 0x4000..0xFFFF):
+
+| offset | register | value set |
+|---|---|---|
+| 0x8000 | SENINF_TOP_CTRL | clear 0xc00, or 0x300 |
+| 0x8100 | SENINF1_CTRL | bit 0 (kernel writes SENINF1_EN this way) |
+| 0x8120 | SENINF1_MUX_CTRL | bit 31 MUX_EN |
+| 0x8200 | SENINF_TG1_PH_CNT | bit 31 PCEN, bits 0-1 TGCLK_SEL = 1, bit 2 CLKFL_POL = !(clkcnt&1), bit 6 PADCLK_INV = 0, bit 28 CLK_POL = 0, bit 29 MCLK1_EN |
+| 0x8204 | SENINF_TG1_SEN_CK | bits 0-5 CLKFL = clkcnt>1 ? (clkcnt+1)/2 : 1, bits 8-13 CLKRS = 0, bits 16-21 CLKCNT = clkcnt |
+
+clkcnt 1 with the 48 MHz group gives 24 MHz, what the driver's imgsensor_info.mclk asks for.
+Result of `camprobe`: "i2c write id: 0x78, sensor id: 0x2b", "Sensor init" (the whole init
+table went over I2C), GETINFO2 with SensorId = 1 (main socket; it is an input) reports mclk 24,
+interface 1 (MIPI), output format 3, MIPI lane count field 0 (= 1 lane), and 1600 x 1200 for
+preview/capture/video/high-speed/slim.
+
+Corrections to the notes above: the cronos SET_MCLK_PLL struct is the *default* 12-byte layout
+{u8 on; u32 freq; u8 TG}, not the checkers one (the 8-byte command is also accepted through the
+AMZN alias). Two ioctls are unusable from our 32-bit daemon: CHECK_IS_ALIVE power-cycles the
+sensor on its own (it undoes T_OPEN), and GETRESOLUTION2's compat path allocates
+sizeof(pointer) bytes for a 16-byte struct and corrupts the caller's stack (camprobe crashed at
+PC 0). GETINFO2 returns the resolutions anyway.
+
+Power/pins that are fine as they are: regulators vcama/vcamio are real mt6323 consumers of
+15008000.camera1 and enable on T_OPEN; CMRST is GPIO 22, CMPDN GPIO 23 (pinctrl states
+cam0_rst0/1, cam0_pnd0/1); the privacy (mute) driver's state is 0 = off; CMMCLK is pin 119 and
+its mode is left as the bootloader set it (the "cam_mclk" pinctrl state is never selected by
+the driver, and the sensor works without it).
+
+Next: the receiver. To get a frame we must program from userspace, in this order, SENINF1
+CSI-2 receiver (1 lane, RAW10) + MIPI RX analog (0x10217000) + SENINF1 mux to TG1/CAM, the ISP
+TG (TG_SEN_MODE/TG_VF_CON at +0x410/+0x414 in isp_reg.h terms), the RAW path enable (CAM_CTL_EN1
++0x4 etc.), IMGO DMA (base +0x300, xsize/ysize/stride) with an ION buffer, then SensorControl /
+FEATURE_SET_SCENARIO to start streaming and wait for IMGO_DONE. The SENINF/CSI2/MIPI-RX
+offsets are the outstanding research item (seninf_reg.h for the MT6582/MT6592/MT8127 family).
