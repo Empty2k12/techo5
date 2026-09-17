@@ -1,9 +1,37 @@
 TECHO5 includes code derived from other open-source projects.
 
-internal/alsa
+echod
   Derived from EchoLocal, https://github.com/ygelfand/echolocal
   Copyright (c) 2026 Yuri Gelfand — MIT License
-  Files: alsa.go, playback.go, mixer.go (raw /dev/snd ioctl ALSA client).
+  echod/ began as EchoLocal's daemon, vendored whole (commit 80228c1, "vendor the EchoLocal daemon as
+  echod/ and port it to cronos") and developed from there. Much of it is still EchoLocal's code: the wake
+  word engine (internal/lib/wake), the ALSA client (internal/lib/alsa) and the service framework
+  (internal/service) almost unchanged, the voice satellite, media player, wake word selection and
+  component registry grown from EchoLocal's own, and many other files unchanged apart from the module
+  path.
+  EchoLocal's license applies to that code:
+
+  MIT License
+
+  Copyright (c) 2026 Yuri Gelfand
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
 
 echod (dependency)
   github.com/emiago/diago — Mozilla Public License 2.0
