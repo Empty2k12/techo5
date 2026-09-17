@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"strings"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 )
 
 // The ring menu is a dial: the items sit on a circle, the one at the top is chosen, drawn larger in
 // its own colour, and named in the middle. While it is open a finger dragged round the ring turns it;
-// letting go snaps it to the nearest item; a tap in the middle (or on the chosen item) does it, a tap
-// on another item turns that one to the top.
+// letting go snaps it to the nearest item; a tap on an item does it, and a tap in the middle does the
+// one at the top.
 //
 // Some items turn the whole ring into a jog wheel for a value (volume, brightness, the night hours):
 // turning it clockwise raises the value a step per jogStep, a tap finishes.
@@ -120,8 +124,51 @@ func itemsFor(m menuMode) []menuItem {
 		return settingsItems
 	case modeBluetooth:
 		return bluetoothItems
+	case modeCameras:
+		return cameraItems(home.Get().Cameras())
 	}
 	return nil
+}
+
+// cameraItems is the cameras dial: one item per camera, in the list's order.
+func cameraItems(cams []config.Camera) []menuItem {
+	hues := []color.RGBA{{60, 203, 127, 255}, {58, 160, 255, 255}, {255, 196, 64, 255}, {240, 98, 146, 255}, {176, 150, 255, 255}, {64, 214, 230, 255}, {255, 120, 80, 255}}
+	out := make([]menuItem, len(cams))
+	for i := range cams {
+		out[i] = menuItem{cameraItem(i), hues[i%len(hues)]}
+	}
+	return out
+}
+
+// initials is up to two capitals from a name: "Front door" is FD, "Deck" is D.
+func initials(name string) string {
+	out := ""
+	for _, w := range strings.Fields(name) {
+		if r := []rune(w); len(r) > 0 && len(out) < 2 {
+			out += strings.ToUpper(string(r[0]))
+		}
+	}
+	return out
+}
+
+// cameraItem is camera i's item, and cameraOf the camera an item is, or -1.
+func cameraItem(i int) itemID { return itemID(fmt.Sprintf("cam:%d", i)) }
+
+func cameraOf(id itemID) int {
+	var i int
+	if _, err := fmt.Sscanf(string(id), "cam:%d", &i); err != nil {
+		return -1
+	}
+	return i
+}
+
+// dialItems is the dial a scene shows: the cameras dial from the scene's own list, so a preview can
+// draw one.
+func dialItems(s roundScene) []menuItem {
+	if s.menuMode == modeCameras {
+		return cameraItems(s.cameras)
+	}
+	return itemsFor(s.menuMode)
 }
 
 func indexOf(items []menuItem, id itemID) int {
@@ -194,6 +241,12 @@ func wrapAngle(a float64) float64 {
 func nearestRest(rot float64, i, n int) float64 { return rot + wrapAngle(restFor(i, n)-rot) }
 
 func itemName(s roundScene, id itemID) string {
+	if i := cameraOf(id); i >= 0 {
+		if i < len(s.cameras) {
+			return s.cameras[i].Name
+		}
+		return "Camera"
+	}
 	switch id {
 	case itemTalk:
 		return "Talk"
@@ -249,6 +302,12 @@ func itemName(s roundScene, id itemID) string {
 }
 
 func itemHint(s roundScene, id itemID) string {
+	if i := cameraOf(id); i >= 0 {
+		if i < len(s.cameras) && s.cameras[i].Entity == s.camera.Entity {
+			return "showing now"
+		}
+		return "tap to show"
+	}
 	switch id {
 	case itemTalk:
 		return "tap to ask"
@@ -378,8 +437,6 @@ func (r *roundRenderer) menu(s roundScene) {
 		r.weatherFace(s)
 	case s.menuMode == modeRadio:
 		r.radioList(s)
-	case s.menuMode == modeCameras:
-		r.cameraList(s)
 	case s.menuMode == modeContacts:
 		r.contactList(s)
 	default:
@@ -389,7 +446,7 @@ func (r *roundRenderer) menu(s roundScene) {
 
 // dial draws the ring menu over a dimmed face.
 func (r *roundRenderer) dial(s roundScene) {
-	items := itemsFor(s.menuMode)
+	items := dialItems(s)
 	n := len(items)
 	r.dim(244)
 	r.ringAt(centre, centre, dialR-1, dialR+1, 0, 2*math.Pi, color.RGBA{62, 68, 78, 255})
@@ -417,6 +474,8 @@ func (r *roundRenderer) dial(s roundScene) {
 			header = "SETTINGS"
 		case modeBluetooth:
 			header = "BLUETOOTH"
+		case modeCameras:
+			header = "CAMERAS"
 		}
 		r.centred(r.label, header, 206, colDim)
 		r.centred(r.title, itemName(s, it.id), 252, colText)
@@ -506,6 +565,24 @@ func (r *roundRenderer) info(s roundScene) {
 
 // icon draws one item's line icon, centred at x, y, u half its size, w the stroke width.
 func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c color.RGBA) {
+	if i := cameraOf(id); i >= 0 {
+		// A camera is its initials, so the ring says which is where before one is chosen.
+		name := ""
+		if i < len(s.cameras) {
+			name = initials(s.cameras[i].Name)
+		}
+		if name == "" {
+			id = itemCamera
+		} else {
+			face := r.label
+			if u > 20 {
+				face = r.title
+			}
+			r.ringAt(x, y, u-w/2, u+w/2, 0, 2*math.Pi, c)
+			r.text(face, name, int(x)-r.width(face, name)/2, int(y)+int(u*0.38), c)
+			return
+		}
+	}
 	switch id {
 	case itemTalk:
 		r.micIcon(x, y, u, w, c)

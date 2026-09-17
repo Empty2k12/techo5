@@ -426,8 +426,7 @@ func (d *Display) gesture(g touch.Gesture) {
 			return
 		case touch.Hold:
 			d.mu.Lock()
-			d.openMenu(modeCameras, "")
-			d.cameraSel = cameraIndex(v.Entity)
+			d.openMenu(modeCameras, cameraItem(cameraIndex(v.Entity)))
 			d.mu.Unlock()
 			d.wake()
 			return
@@ -473,7 +472,7 @@ func (d *Display) openMenu(mode menuMode, id itemID) {
 	}
 	// The finger follows (every move a turn of the ring) wherever there is a ring to turn. The weather
 	// face and the lists have none, and need their swipes and taps as they are.
-	touch.Get().SetFollow(mode != modeWeather && mode != modeCameras && mode != modeContacts)
+	touch.Get().SetFollow(mode != modeWeather && mode != modeContacts)
 }
 
 // closeMenu takes the menu off the screen. Called with d.mu held.
@@ -584,23 +583,17 @@ func (d *Display) menuGesture(g touch.Gesture) {
 			go home.Get().NextRadioSource()
 		}
 
-	case mode == modeCameras || mode == modeContacts:
+	case mode == modeContacts:
 		if g.Kind != touch.Tap {
 			break
 		}
-		n := len(home.Get().Cameras())
-		if mode == modeContacts {
-			n = len(phone.Get().Contacts())
-		}
-		row := listRowAt(g.Y, n)
+		row := listRowAt(g.Y, len(phone.Get().Contacts()))
 		d.closeMenu() // a tap off the list puts it away
 		if row < 0 {
 			break
 		}
 		d.mu.Unlock()
-		if mode == modeCameras {
-			go pickCamera(row)
-		} else if cs := phone.Get().Contacts(); row < len(cs) {
+		if cs := phone.Get().Contacts(); row < len(cs) {
 			go func() {
 				if err := phone.Get().Call(cs[row].Number); err != nil {
 					slog.Warn("screen: call", "err", err)
@@ -701,6 +694,11 @@ func (d *Display) finishJog(mode menuMode) {
 // act does what a dial item says.
 func (d *Display) act(id itemID) {
 	slog.Info("ring menu", "item", id)
+	if i := cameraOf(id); i >= 0 {
+		d.locked(d.closeMenu)
+		go pickCamera(i)
+		return
+	}
 	switch id {
 	case itemTalk:
 		d.locked(d.closeMenu)
@@ -943,7 +941,7 @@ func (d *Display) frame() time.Duration {
 			if now.Sub(d.menuAt) > radioIdle {
 				d.closeMenu()
 			}
-		case d.menuMode == modeCameras || d.menuMode == modeContacts:
+		case d.menuMode == modeContacts:
 			if now.Sub(d.menuAt) > cameraListIdle {
 				d.closeMenu()
 			}
