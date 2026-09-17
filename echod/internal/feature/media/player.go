@@ -408,8 +408,12 @@ func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 // Pause leaves the track where it is, so it can be picked up again.
 func (p *Player) Pause() { p.stream.Pause() }
 
-// Resume picks a paused track up again.
-func (p *Player) Resume() { p.stream.Resume() }
+// Resume picks a paused track up again. (Stream.Resume is something else: it gives the speaker back
+// after a turn, and leaves a track the listener paused where it is.)
+func (p *Player) Resume() { p.stream.Unpause() }
+
+// Stop ends the track, as Home Assistant's stop does.
+func (p *Player) Stop() { p.stream.Stop() }
 
 // PlayReceived plays audio a remote is sending (a phone using the device as a Bluetooth speaker) as a
 // track: it replaces what was playing, and a turn ducks or pauses it like anything else.

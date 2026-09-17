@@ -1,0 +1,319 @@
+//go:build spot
+
+package display
+
+import (
+	"fmt"
+	"image/color"
+	"math"
+	"strings"
+	"time"
+
+	"golang.org/x/image/font"
+
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+)
+
+// Music on the round screen. While something plays or sits paused the idle face is now playing:
+// the cover (or the station's logo) fills the circle behind the song, the artist and the station, a
+// tap plays or pauses and a sideways swipe steps to the next station on the list. Music on the dial
+// opens the station list, a ring you turn to scroll: a tap plays the one in the middle, a sideways
+// swipe changes list (favorites, stations near you, popular worldwide), and while anything plays the
+// first row stops it.
+//
+// The rain map is the weather face's other side: a sideways swipe there turns between the forecast
+// and the radar, and "radar" by voice opens it.
+
+const (
+	// radioIdle is how long the station list stays up untouched; radioCueFor how long Home
+	// Assistant naming a station holds the now-playing face before its stream arrives.
+	radioIdle   = 15 * time.Second
+	radioCueFor = 20 * time.Second
+
+	// radarStep is how long each frame of the rain map's loop shows; the newest holds for three.
+	radarStep = 600 * time.Millisecond
+)
+
+var (
+	colMusic = color.RGBA{60, 203, 127, 255}
+	colRadar = color.RGBA{64, 214, 230, 255}
+)
+
+// aboutRadar is whether what was heard asked for the rain map rather than the forecast.
+func aboutRadar(heard string) bool {
+	h := strings.ToLower(heard)
+	return strings.Contains(h, "radar") || strings.Contains(h, "rain map") || strings.Contains(h, "weather map")
+}
+
+// radioRows is the station list as the ring shows it: a stop row first while anything plays.
+func radioRows(rd home.Radio, active bool) []string {
+	if !active {
+		return rd.Stations
+	}
+	return append([]string{stopRow}, rd.Stations...)
+}
+
+const stopRow = "\x00stop"
+
+// currentStation is the station playing, or the one tapped last until Home Assistant says.
+func currentStation(rd home.Radio) string {
+	if rd.Now != "" {
+		return rd.Now
+	}
+	return rd.Chosen
+}
+
+// togglePlay is a tap on now playing.
+func togglePlay() {
+	if playing, _ := media.Get().Playing(); playing {
+		media.Get().Pause()
+	} else {
+		media.Get().Resume()
+	}
+}
+
+// stepStation plays the station after (or before) the one playing, round the current list.
+func stepStation(by int) {
+	rd := home.Get().Radio()
+	if len(rd.Stations) == 0 {
+		return
+	}
+	i := -1
+	cur := currentStation(rd)
+	for k, s := range rd.Stations {
+		if strings.EqualFold(s, cur) {
+			i = k
+		}
+	}
+	i = ((i+by)%len(rd.Stations) + len(rd.Stations)) % len(rd.Stations)
+	home.Get().Play(rd.Stations[i])
+}
+
+// showsNowPlaying is whether the idle face belongs to music: something playing or paused, or a
+// station Home Assistant just named that is still on its way.
+func (d *Display) showsNowPlaying() bool {
+	if playing, paused := media.Get().Playing(); playing || paused {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return time.Since(d.radioCue) < radioCueFor
+}
+
+// pickStation is a tap on the station list: stop, or play the row.
+func pickStation(sel int) {
+	rd := home.Get().Radio()
+	playing, paused := media.Get().Playing()
+	rows := radioRows(rd, playing || paused)
+	if sel < 0 || sel >= len(rows) {
+		return
+	}
+	if rows[sel] == stopRow {
+		home.Get().Stop()
+		media.Get().Stop()
+		return
+	}
+	home.Get().Play(rows[sel])
+}
+
+// nowPlayingFace is the idle face while music plays or waits paused.
+func (r *roundRenderer) nowPlayingFace(s roundScene) {
+	rd := s.radio
+	if rd.Art != nil {
+		r.coverCircle(rd.Art, false)
+		shade := uint8(150)
+		if rd.Logo {
+			shade = 185
+		}
+		r.shadeCircle(shade)
+	} else {
+		r.notesMark(centre, 250, 70, color.RGBA{34, 40, 48, 255})
+	}
+
+	station := currentStation(rd)
+	if station == "" {
+		station = "Music"
+	}
+	label := "PLAYING"
+	if s.paused {
+		label = "PAUSED"
+	}
+	r.centred(r.label, s.now.Format("3:04"), 70, colDim)
+
+	headline, sub := station, ""
+	if rd.Title != "" {
+		label += " · " + strings.ToUpper(station)
+		headline, sub = rd.Title, rd.Artist
+	}
+	label = clip(r.label, r, label, 320)
+	r.centred(r.label, label, 132, colMusic)
+	y := r.paragraph(r.title, headline, 205, colText, 2)
+	if sub != "" {
+		r.paragraph(r.body, sub, y+8, colDim, 2)
+	}
+
+	// Play or pause, with what a tap does.
+	cx, cy := float64(centre), 372.0
+	r.discAt(cx, cy, 30, color.RGBA{0, 0, 0, 120})
+	if s.paused {
+		r.triangle(cx-9, cy-16, cx-9, cy+16, cx+17, cy, colText)
+	} else {
+		r.line(cx-8, cy-14, cx-8, cy+14, 7, colText)
+		r.line(cx+8, cy-14, cx+8, cy+14, 7, colText)
+	}
+	hint := "tap to pause"
+	if s.paused {
+		hint = "tap to play"
+	}
+	r.centred(r.small, hint, 432, colDim)
+}
+
+// shadeCircle darkens the inside of the rim, so text reads over a picture.
+func (r *roundRenderer) shadeCircle(alpha uint8) {
+	rr := float64(rimIn) * float64(rimIn)
+	k := 255 - uint32(alpha)
+	for y := 0; y < side; y++ {
+		dy := float64(y) + 0.5 - centre
+		for x := 0; x < side; x++ {
+			dx := float64(x) + 0.5 - centre
+			if dx*dx+dy*dy > rr {
+				continue
+			}
+			j := (y*side + x) * 4
+			for c := 0; c < 3; c++ {
+				r.dst.Pix[j+c] = uint8(uint32(r.dst.Pix[j+c]) * k / 255)
+			}
+		}
+	}
+}
+
+// notesMark is two beamed notes, centred at x, y, u half their size.
+func (r *roundRenderer) notesMark(x, y, u float64, c color.RGBA) {
+	w := math.Max(u*0.12, 2.5)
+	r.discAt(x-0.55*u, y+0.55*u, 0.28*u, c)
+	r.discAt(x+0.45*u, y+0.4*u, 0.28*u, c)
+	r.line(x-0.3*u, y+0.5*u, x-0.3*u, y-0.6*u, w, c)
+	r.line(x+0.7*u, y+0.35*u, x+0.7*u, y-0.75*u, w, c)
+	r.line(x-0.3*u, y-0.6*u, x+0.7*u, y-0.75*u, w*2, c)
+}
+
+// radioList is the station list's ring.
+func (r *roundRenderer) radioList(s roundScene) {
+	r.clear()
+	rd := s.radio
+	rows := radioRows(rd, s.playing || s.paused)
+	r.centred(r.label, strings.ToUpper(home.SourceLabel(rd.Source)), 118, colMusic)
+
+	switch {
+	case len(rows) == 0 && rd.Loading:
+		r.centred(r.title, "Loading…", 250, colDim)
+		return
+	case len(rows) == 0:
+		msg := "No stations"
+		if rd.Problem != "" {
+			msg = rd.Problem
+		} else if !rd.Configured {
+			msg = "Radio needs a Home Assistant token"
+		}
+		r.paragraph(r.body, msg, 230, colDim, 3)
+		if rd.Sources > 1 {
+			r.centred(r.small, "swipe for other lists", 400, colDim)
+		}
+		return
+	}
+
+	sel := min(max(s.radioSel, 0), len(rows)-1)
+	name := func(i int) string {
+		if rows[i] == stopRow {
+			return "Stop the music"
+		}
+		return rows[i]
+	}
+	cur := currentStation(rd)
+	r.centred(r.small, fmt.Sprintf("%d of %d", sel+1, len(rows)), 150, colDim)
+	if sel > 0 {
+		r.centred(r.body, clip(r.body, r, name(sel-1), 300), 200, colDim)
+	}
+	col := colText
+	if rows[sel] == stopRow {
+		col = colMuted
+	} else if strings.EqualFold(rows[sel], cur) {
+		col = colMusic
+	}
+	y := r.paragraph(r.title, name(sel), 262, col, 2)
+	if sel+1 < len(rows) {
+		r.centred(r.body, clip(r.body, r, name(sel+1), 300), max(y+14, 318), colDim)
+	}
+	hint := "turn · tap to play"
+	if rows[sel] == stopRow {
+		hint = "turn · tap to stop"
+	}
+	r.centred(r.small, hint, 392, colDim)
+	if rd.Sources > 1 {
+		r.centred(r.small, "swipe for other lists", 420, colDim)
+	}
+
+	// Where in the list, round the ring.
+	const from, span = 1.25 * math.Pi, 1.5 * math.Pi
+	frac := 0.0
+	if len(rows) > 1 {
+		frac = float64(sel) / float64(len(rows)-1)
+	}
+	r.ringAt(centre, centre, 196, 202, from, from+span, color.RGBA{44, 50, 60, 255})
+	kx, ky := centre+199*math.Sin(from+span*frac), centre-199*math.Cos(from+span*frac)
+	r.discAt(kx, ky, 11, colMusic)
+}
+
+// clip shortens a line to fit width pixels in face.
+func clip(face font.Face, r *roundRenderer, s string, width int) string {
+	if r.width(face, s) <= width {
+		return s
+	}
+	rs := []rune(s)
+	for len(rs) > 1 && r.width(face, string(rs)+"…") > width {
+		rs = rs[:len(rs)-1]
+	}
+	return string(rs) + "…"
+}
+
+// radarFace is the rain map filling the circle, home marked in the middle, the loop's time on top
+// and the credits the map's sources ask for at the bottom.
+func (r *roundRenderer) radarFace(s roundScene) {
+	r.clear()
+	v := s.radar
+	if len(v.Frames) == 0 {
+		r.centred(r.label, "RADAR", 150, colRadar)
+		msg := "Loading the rain map…"
+		if !v.Loading && v.Problem != "" {
+			msg = "No rain map: " + v.Problem
+		}
+		r.paragraph(r.body, msg, 240, colDim, 3)
+		r.centred(r.small, "swipe for the forecast", 400, colDim)
+		return
+	}
+	n := len(v.Frames)
+	cycle := int64(n+2) * radarStep.Milliseconds()
+	i := int(s.now.UnixMilli() % cycle / radarStep.Milliseconds())
+	if i >= n {
+		i = n - 1
+	}
+	f := v.Frames[i]
+	r.coverCircle(f.Image, false)
+
+	// Home: the frame is centred on it, and the circle crops round the middle.
+	r.ringAt(centre, centre, 6, 10, 0, 2*math.Pi, color.RGBA{0, 0, 0, 200})
+	r.ringAt(centre, centre, 7, 9, 0, 2*math.Pi, colRadar)
+
+	label := "Radar " + f.At.Local().Format("3:04")
+	if i == n-1 {
+		label += " (latest)"
+	}
+	w := r.width(r.label, label)
+	r.line(float64(centre-w/2-10), 62, float64(centre+w/2+10), 62, 32, color.RGBA{0, 0, 0, 160})
+	r.centred(r.label, label, 69, colText)
+	credit := "RainViewer · © OpenStreetMap"
+	cw := r.width(r.tiny, credit)
+	r.line(float64(centre-cw/2-8), 420, float64(centre+cw/2+8), 420, 24, color.RGBA{0, 0, 0, 160})
+	r.centred(r.tiny, credit, 425, colDim)
+}

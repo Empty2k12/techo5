@@ -69,6 +69,14 @@ type roundScene struct {
 	weather  home.Weather
 	forecast forecastDays
 
+	// nowPlaying is the idle face given to music; radio what it and the station list show;
+	// radioSel the list's row in the middle; radar the rain map, radarOn the weather face turned to it.
+	nowPlaying bool
+	radio      home.Radio
+	radioSel   int
+	radar      home.RadarView
+	radarOn    bool
+
 	camera     home.CameraView
 	showCamera bool
 	cameraLive bool // the sensor is running
@@ -85,6 +93,7 @@ type roundScene struct {
 type roundRenderer struct {
 	dst                              *image.RGBA
 	clock, title, body, small, label font.Face
+	tiny                             font.Face
 }
 
 func newRoundRenderer(dst *image.RGBA) *roundRenderer {
@@ -110,6 +119,7 @@ func newRoundRenderer(dst *image.RGBA) *roundRenderer {
 		body:  face(regular, 26),
 		small: face(regular, 24),
 		label: face(bold, 20),
+		tiny:  face(regular, 16),
 	}
 }
 
@@ -129,6 +139,8 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.volume(s)
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering":
 		r.conversation(s)
+	case s.nowPlaying:
+		r.nowPlayingFace(s)
 	default:
 		r.clockFace(s)
 	}

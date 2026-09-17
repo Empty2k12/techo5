@@ -38,6 +38,7 @@ const (
 	modeInfo
 	modeWeather
 	modeBluetooth
+	modeRadio
 )
 
 // jogging is whether the mode turns the ring into a jog wheel.
@@ -50,7 +51,7 @@ type itemID string
 const (
 	itemTalk       itemID = "talk"
 	itemMute       itemID = "mute"
-	itemMedia      itemID = "media"
+	itemMusic      itemID = "music"
 	itemVolume     itemID = "volume"
 	itemWeather    itemID = "weather"
 	itemCamera     itemID = "camera"
@@ -78,7 +79,7 @@ type menuItem struct {
 var mainItems = []menuItem{
 	{itemTalk, color.RGBA{240, 98, 146, 255}},
 	{itemMute, color.RGBA{229, 72, 77, 255}},
-	{itemMedia, color.RGBA{60, 203, 127, 255}},
+	{itemMusic, color.RGBA{60, 203, 127, 255}},
 	{itemVolume, color.RGBA{58, 160, 255, 255}},
 	{itemWeather, color.RGBA{255, 196, 64, 255}},
 	{itemCamera, color.RGBA{60, 203, 127, 255}},
@@ -198,11 +199,8 @@ func itemName(s roundScene, id itemID) string {
 			return "Unmute"
 		}
 		return "Mute"
-	case itemMedia:
-		if s.playing {
-			return "Pause"
-		}
-		return "Play"
+	case itemMusic:
+		return "Music"
 	case itemVolume:
 		return "Volume"
 	case itemWeather:
@@ -254,14 +252,14 @@ func itemHint(s roundScene, id itemID) string {
 			return "microphone is off"
 		}
 		return "microphone is on"
-	case itemMedia:
+	case itemMusic:
 		switch {
 		case s.playing:
-			return "playing"
+			return "playing · pick a station"
 		case s.paused:
-			return "paused"
+			return "paused · pick a station"
 		}
-		return "nothing playing"
+		return "radio stations"
 	case itemVolume:
 		return fmt.Sprintf("%d · tap, then turn", s.volume)
 	case itemCamera:
@@ -358,8 +356,12 @@ func (r *roundRenderer) menu(s roundScene) {
 		r.jog(s)
 	case s.menuMode == modeInfo:
 		r.info(s)
+	case s.menuMode == modeWeather && s.radarOn:
+		r.radarFace(s)
 	case s.menuMode == modeWeather:
 		r.weatherFace(s)
+	case s.menuMode == modeRadio:
+		r.radioList(s)
 	default:
 		r.dial(s)
 	}
@@ -456,13 +458,8 @@ func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c colo
 	case itemMute:
 		r.micIcon(x, y, u, w, c)
 		r.line(x-0.85*u, y-0.85*u, x+0.85*u, y+0.85*u, w, c)
-	case itemMedia:
-		if s.playing {
-			r.line(x-0.32*u, y-0.6*u, x-0.32*u, y+0.6*u, w*1.5, c)
-			r.line(x+0.32*u, y-0.6*u, x+0.32*u, y+0.6*u, w*1.5, c)
-		} else {
-			r.triangle(x-0.4*u, y-0.7*u, x-0.4*u, y+0.7*u, x+0.75*u, y, c)
-		}
+	case itemMusic:
+		r.notesMark(x, y, u, c)
 	case itemVolume:
 		r.speakerIcon(x-0.2*u, y, u*0.9, w, c)
 		r.ringAt(x+0.05*u, y, 0.45*u-w/2, 0.45*u+w/2, 0.25*math.Pi, 0.75*math.Pi, c)

@@ -41,10 +41,11 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
@@ -138,6 +139,15 @@ type Display struct {
 	weatherArmed bool
 	weatherUntil time.Time
 
+	// quiet is a turn that was a screen command ("go home", "show the deck"): its words and reply are
+	// not shown, so the screen moves at once, as on the Show. radioCue is when Home Assistant last
+	// named a station as playing, which comes seconds before the stream. radar turns the weather face
+	// to the rain map; radioSel is the station list's middle row.
+	quiet    bool
+	radioCue time.Time
+	radar    bool
+	radioSel int
+
 	poke chan struct{}
 
 	// shots are screenshot requests, answered with a copy of the next frame once it is drawn whole.
@@ -182,6 +192,19 @@ func build() *Display {
 	touch.Get().Gestures.Listen(d.gesture)
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
+	hastate.Get().Changed.Listen(func(u hastate.Update) {
+		// Only a change means a station is starting; the first value is the one that played last.
+		if u.First || u.Attribute != "" || u.Entity == "" || u.Entity != config.Get().Home.Radio.Now {
+			return
+		}
+		if u.Value == "" || u.Value == "unknown" || u.Value == "unavailable" {
+			return
+		}
+		d.mu.Lock()
+		d.radioCue = time.Now()
+		d.mu.Unlock()
+		d.wake()
+	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	phone.Get().Changed.Listen(d.callLights)
 	// The mute button toggles the mute on the buttons' goroutine; redraw once it has.
@@ -313,24 +336,32 @@ func (d *Display) lux(float64) {
 func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
 	newHeard := s.Heard != "" && s.Heard != d.view.Heard
+	if s.Phase == "listening" && d.view.Phase != "listening" {
+		d.quiet = false
+	}
 	d.view = s
 	d.viewAt = time.Now()
 	// A question about the weather brings the weather face up once the answer is done.
 	if newHeard && aboutWeather(s.Heard) {
 		d.weatherArmed = true
+		d.radar = aboutRadar(s.Heard)
 	}
 	// "Show the front door" goes up at once, while the assistant answers; "go home" takes it down.
 	if newHeard {
 		if entity := home.Get().MatchCamera(s.Heard); entity != "" {
-			d.weatherArmed = false
+			d.weatherArmed, d.quiet = false, true
+			if d.menuOpen {
+				d.closeMenu()
+			}
 			go home.Get().ShowCamera(entity, cameraShow)
 		}
 		if aboutGoingHome(s.Heard) {
-			d.weatherArmed = false
+			d.weatherArmed, d.quiet = false, true
 			if d.menuOpen {
 				d.closeMenu()
 			}
 			go home.Get().HideCamera()
+			slog.Info("screen: home by voice")
 		}
 	}
 	if s.Phase == "idle" && d.weatherArmed {
@@ -383,6 +414,20 @@ func (d *Display) gesture(g touch.Gesture) {
 			return
 		case touch.SwipeRight:
 			go stepCamera(v.Entity, -1)
+			return
+		}
+	}
+	if d.showsNowPlaying() {
+		switch g.Kind {
+		case touch.Tap:
+			togglePlay()
+			d.wake()
+			return
+		case touch.SwipeLeft:
+			go stepStation(+1)
+			return
+		case touch.SwipeRight:
+			go stepStation(-1)
 			return
 		}
 	}
@@ -463,10 +508,47 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		}
 
 	case mode == modeWeather:
-		if g.Kind == touch.Tap {
+		switch g.Kind {
+		case touch.Tap:
 			d.closeMenu()
-		} else {
+		case touch.SwipeLeft, touch.SwipeRight:
+			d.radar = !d.radar
 			d.weatherUntil = time.Now().Add(weatherIdle)
+		default:
+			d.weatherUntil = time.Now().Add(weatherIdle)
+		}
+
+	case mode == modeRadio:
+		switch g.Kind {
+		case touch.Hold:
+			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
+		case touch.Drag:
+			if !d.spinning {
+				break
+			}
+			a := fingerAngle(g.X, g.Y)
+			d.jogTurn += wrapAngle(a - d.spinAngle)
+			d.spinAngle = a
+			for d.jogTurn >= jogStep {
+				d.jogTurn -= jogStep
+				d.radioSel++
+			}
+			for d.jogTurn <= -jogStep {
+				d.jogTurn += jogStep
+				d.radioSel--
+			}
+		case touch.Release:
+			d.spinning, d.jogTurn = false, 0
+		case touch.Tap:
+			sel := d.radioSel
+			d.closeMenu()
+			d.mu.Unlock()
+			go pickStation(sel)
+			d.wake()
+			return
+		case touch.SwipeLeft, touch.SwipeRight:
+			d.radioSel = 0
+			go home.Get().NextRadioSource()
 		}
 
 	default:
@@ -564,13 +646,20 @@ func (d *Display) act(id itemID) {
 		voice.Get().Action()
 	case itemMute:
 		mute.Get().Toggle()
-	case itemMedia:
-		switch playing, paused := media.Get().Playing(); {
-		case playing:
-			media.Get().Pause()
-		case paused:
-			media.Get().Resume()
+	case itemMusic:
+		rd := home.Get().Radio()
+		playing, paused := media.Get().Playing()
+		rows := radioRows(rd, playing || paused)
+		sel := 0
+		for i, row := range rows {
+			if strings.EqualFold(row, currentStation(rd)) {
+				sel = i
+			}
 		}
+		d.locked(func() {
+			d.openMenu(modeRadio, "")
+			d.radioSel = sel
+		})
 	case itemVolume:
 		d.locked(func() { d.openMenu(modeVolume, "") })
 	case itemCamera:
@@ -785,6 +874,11 @@ func (d *Display) frame() time.Duration {
 		case d.menuMode == modeWeather:
 			if now.After(d.weatherUntil) {
 				d.closeMenu()
+				d.radar = false
+			}
+		case d.menuMode == modeRadio:
+			if now.Sub(d.menuAt) > radioIdle {
+				d.closeMenu()
 			}
 		case !d.menuMode.jogging() && now.Sub(d.menuAt) > menuIdle:
 			d.closeMenu()
@@ -815,7 +909,10 @@ func (d *Display) frame() time.Duration {
 		nightTo:      d.nightTo,
 		restartArmed: !d.restartArm.IsZero() && now.Sub(d.restartArm) < restartWindow,
 		forgetArmed:  !d.forgetArm.IsZero() && now.Sub(d.forgetArm) < restartWindow,
+		radioSel:     d.radioSel,
+		radarOn:      d.radar,
 	}
+	quiet := d.quiet
 	if !d.volAt.IsZero() && now.Sub(d.volAt) < volumeShow {
 		s.volume, s.showVolume = d.volume, true
 	}
@@ -826,6 +923,10 @@ func (d *Display) frame() time.Duration {
 	}
 	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger {
 		s.phase = "lingering"
+	}
+	if quiet && (s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
+		// A screen command: the screen it asked for is the answer, not the words.
+		s.phase, s.heard, s.reply = "idle", "", ""
 	}
 	s.muted, _ = mute.Get().Muted()
 	s.playing, s.paused = media.Get().Playing()
@@ -847,6 +948,19 @@ func (d *Display) frame() time.Duration {
 	s.btAvailable, s.btPairing, s.btConnected, s.btRemembered, s.btStatus = bt.Available, bt.Pairing, bt.Connected, bt.Remembered, bt.Status
 	if s.menuOpen && s.menuMode == modeWeather {
 		s.forecast = home.Get().Forecast()
+		if s.radarOn {
+			s.radar = home.Get().Radar()
+		}
+	}
+	s.nowPlaying = s.phase == "idle" && d.showsNowPlaying()
+	if s.nowPlaying || (s.menuOpen && s.menuMode == modeRadio) {
+		s.radio = home.Get().Radio()
+		if rows := radioRows(s.radio, s.playing || s.paused); s.radioSel >= len(rows) || s.radioSel < 0 {
+			s.radioSel = min(max(s.radioSel, 0), max(len(rows)-1, 0))
+			d.mu.Lock()
+			d.radioSel = s.radioSel
+			d.mu.Unlock()
+		}
 	}
 	if s.menuOpen {
 		if s.menuMode != modeNightFrom && s.menuMode != modeNightTo {
@@ -887,6 +1001,8 @@ func (d *Display) frame() time.Duration {
 	case s.showCamera:
 		// New frames wake the loop themselves; this only brings the view down when its time is up.
 		return activeFrame
+	case s.menuOpen && s.menuMode == modeWeather && s.radarOn:
+		return radarStep
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing || s.call.Phase != phone.Idle:
 		return activeFrame
 	default:
