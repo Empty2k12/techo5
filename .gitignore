@@ -11,3 +11,6 @@ __pycache__/
 /fbprobe
 /rebootto
 /btbridge
+
+# Build inputs (docs/building.md): never committed.
+inputs/

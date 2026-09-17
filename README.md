@@ -105,7 +105,7 @@ You need a Show 5 2nd gen **unlocked with
 [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/)
 and running
 [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/)**,
-a USB cable, a Windows PC, and Home Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest)
+a USB cable, a computer (Windows, Linux or macOS), and Home Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest)
 carries everything else: the boot image and the root filesystem.
 
 1. Copy the root filesystem to the Show with `adb` and flash the boot image with `fastboot`.
@@ -131,7 +131,9 @@ The whole walk-through, with every command and the fixes for what can go wrong, 
 - [docs/porting-plan.md](docs/porting-plan.md): how it was built, step by step, dead ends included.
 - [docs/hardware.md](docs/hardware.md): the `cronos` hardware and the unlock path.
 - [docs/camera-research.md](docs/camera-research.md): driving the camera's ISP from userspace.
-- [tools/linux/README.md](tools/linux/README.md): building the kernel, boot image and root filesystem.
+- [docs/building.md](docs/building.md): building it yourself: where every input comes from
+  (`tools/fetch-inputs.ps1`), and the daemon, kernel, boot image and root filesystem builds.
+- [tools/linux/README.md](tools/linux/README.md): the image tooling in detail.
 
 ## Sister project
 
@@ -149,6 +151,9 @@ TECHO5 exists because of these projects and the people behind them.
   [go-esphome-device](https://github.com/ygelfand/go-esphome-device), the ESPHome device API it speaks.
 - **amonet-cronos and kaeru** (k4y0z, [R0rt1z2](https://github.com/R0rt1z2)): the bootloader unlock
   and recovery that make any of this possible.
+- [proffalken](https://github.com/proffalken): the
+  [step-by-step install from Linux](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
+  that [Getting started](docs/getting-started.md) and the cross-platform installers are based on.
 - **LineageOS 18.1 for `cronos`** (unofficial, R0rt1z2), built on
   [Amazon's GPL kernel source](https://github.com/amazon-oss/android_kernel_amazon_mt8163): the
   kernel TECHO5 rebuilds and the vendor drivers it keeps. [TWRP](https://twrp.me/) stays as the way back.

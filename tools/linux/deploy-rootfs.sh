@@ -11,19 +11,19 @@
 # Alpine's static apk at ~/apk/apk.static; mkrootfs.sh runs inside a user
 # namespace so files can be owned by root without sudo.
 #
-# Environment: HOST (the device, required), KEY (the SSH key), TECHO5_INPUTS (the
-# directory with the Alpine minirootfs, vendor.tar.gz and apks312/; kept out
-# of the repo), TZ_NAME (a new unit's zone until Home Assistant sets it; UTC), GO (go binary),
+# Environment: HOST (the device, required), KEY (the SSH key the unit accepts; default
+# TECHO5_SSH_KEY, else ~/.ssh/id_ed25519), TECHO5_INPUTS (the directory with the Alpine minirootfs, vendor.tar.gz and
+# apks312/; default inputs/ in this repository, kept out of git; docs/building.md), TZ_NAME (a new unit's zone until Home Assistant sets it; UTC), GO (go binary),
 # WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
 set -euo pipefail
 
 HOST=${HOST:-}
-KEY=${KEY:-D:/platform-tools/echoshow/linux-image/techo5_ed25519}
-INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
+KEY=${KEY:-${TECHO5_SSH_KEY:-$HOME/.ssh/id_ed25519}}
+INPUTS=${TECHO5_INPUTS:-$(cd "$(dirname "$0")/../.." && pwd)/inputs}
 # The zone a unit starts on before Home Assistant tells it its own (feature/timezone); images meant
 # for anyone keep UTC.
 TZ_NAME=${TZ_NAME:-UTC}
-GO=${GO:-/c/Program Files/Go/bin/go.exe}
+GO=${GO:-go}
 VERSION=${VERSION:-}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
 # Another device: BUILD_TAGS (the daemon's, e.g. spot), VENDOR_TGZ (its LineageOS vendor/ tarball) and

@@ -23,14 +23,14 @@ param(
     # slots is offered a release only when it carries this; the Dot binary is built every time.
     [string]$DotRootfs = '',
     # The release signing key (ed25519 seed, base64). Devices take a manifest only with its signature, so
-    # a release cannot be published without it. Keep it off every repository and backed up.
-    [string]$SignKey = 'D:\platform-tools\keys\techo5-release.key',
+    # a release cannot be published without it. Keep it off every repository and backed up: $env:TECHO5_SIGN_KEY.
+    [string]$SignKey = $env:TECHO5_SIGN_KEY,
     # A boot image built with build-image.sh --no-key, published as techo5-boot-<version>.img for new
     # units (docs/install.md). Refused if it carries an SSH key.
     [string]$Boot = ''
 )
 $ErrorActionPreference = 'Stop'
-if (-not (Test-Path $SignKey)) { throw "no release signing key at $SignKey" }
+if (-not $SignKey -or -not (Test-Path $SignKey)) { throw "no release signing key: set TECHO5_SIGN_KEY or pass -SignKey" }
 $repo = 'HuskerMinion/techo5'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $bin = Join-Path $root 'bin'

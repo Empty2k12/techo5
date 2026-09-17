@@ -67,7 +67,7 @@ Kernel/initramfs updates are separate: they are a `fastboot flash boot`
 
 ## Build
 
-Inputs (kept out of the repo, `D:\platform-tools\echoshow\linux-image`):
+Inputs (kept out of the repo, in `inputs/` or `$TECHO5_INPUTS`; [docs/building.md](../../docs/building.md) says where each comes from):
 
 - `boot-lineage-18.1-20260904-cronos.img` — LineageOS boot image (kernel + header)
 - `alpine-minirootfs-3.24.1-armv7.tar.gz`, `busybox.static` (from `busybox-static-1.37.0-r31.apk`)
@@ -103,7 +103,7 @@ toolchain (Arm's GCC 8.3 tarball, no root needed) and the config; then:
 
 ```
 # in WSL
-bash tools/linux/build-kernel.sh -o /mnt/d/platform-tools/echoshow/linux-image/Image.gz-dtb-bt
+bash tools/linux/build-kernel.sh -o inputs/Image.gz-dtb-bt
 # on Windows
 python tools/linux/patch-dtb.py Image.gz-dtb-bt Image.gz-dtb-bt-nodownmix --delete /soc/spi@1100a000/spi@0 amzn,mic-downmix
 KERNEL=.../Image.gz-dtb-bt-nodownmix KERNEL_IMAGE=.../boot-lineage-18.1-20260904-cronos-nodownmix.img \

@@ -4,7 +4,7 @@
 #
 #   tools/linux/build-image.sh [-o out.img] [--no-key]
 #
-# Inputs come from TECHO5_INPUTS (D:/platform-tools/echoshow/linux-image):
+# Inputs come from TECHO5_INPUTS (default: inputs/ in this repository; docs/building.md):
 # the LineageOS boot image, the Alpine minirootfs, busybox.static, the apks
 # listed in packages.txt (apks/ and apks312/), and the SSH public key. The Go
 # tools are built here. Git Bash on Windows is the expected shell.
@@ -14,12 +14,14 @@
 # unit is set up from the USB serial console.
 set -euo pipefail
 
-INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
-KERNEL_IMAGE=${KERNEL_IMAGE:-D:/platform-tools/echoshow/boot-lineage-18.1-20260904-cronos.img}
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+INPUTS=${TECHO5_INPUTS:-$ROOT/inputs}
+# The unit's own LineageOS boot image (its kernel and header); never published.
+KERNEL_IMAGE=${KERNEL_IMAGE:-$INPUTS/boot-lineage-18.1-20260904-cronos.img}
 # KERNEL=Image.gz-dtb: a kernel built from source replaces the one in KERNEL_IMAGE
 # (its header, load addresses and command line still come from KERNEL_IMAGE).
 KERNEL=${KERNEL:-}
-GO=${GO:-/c/Program Files/Go/bin/go.exe}
+GO=${GO:-go}
 OUT=techo5-linux-boot.img
 NOKEY=
 while [ $# -gt 0 ]; do

@@ -16,8 +16,8 @@ The model number is on the bottom of the device, or in the Alexa app under the d
 | Device | Codename | Model | Supported by | Difficulty today |
 |---|---|---|---|---|
 | **Echo Show 5, 2nd gen** (2021) | `cronos` | AEOCN | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: prebuilt images, a guided manual install |
-| **Echo Dot, 2nd gen** (2016) | `biscuit` | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | Advanced: a one-command installer, but it builds the image on your PC |
-| **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Advanced: a one-command installer, but it builds the image on your PC |
+| **Echo Dot, 2nd gen** (2016) | `biscuit` | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | Moderate: the unlock and Fire OS steps by hand, then a one-command installer |
+| **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 
 Other Echos (the Show 5 1st gen, the Dot 3rd gen and later, the Show 8, and so on) are **not**
 supported.
@@ -29,6 +29,11 @@ supported.
 - **Home Assistant** with the ESPHome integration (built in).
 - A computer. Which one depends on the device and the step; see [Windows, Linux or macOS](#windows-linux-or-macos)
   below.
+- For the Dot and Spot installers: [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+  (`pwsh`), the Android platform tools (`adb`, `fastboot`), Python 3, and `git` to fetch the repository.
+  Nothing is compiled: the installers download the signed release (root filesystem, Bluetooth kernel
+  and rescue packages), check every file against its checksum, and build the boot image from your own
+  unit's backup.
 - The unlock threads on XDA need a (free) XDA account to download attachments.
 
 ## Echo Show 5 (2nd gen)
@@ -55,23 +60,70 @@ supported.
 
 ## Echo Dot (2nd gen)
 
-1. **Update Fire OS first.** The unlock expects the last Fire OS 6 release (6.5.7.0). Set the Dot up
-   with the Alexa app, join it to Wi-Fi, and let it update; the XDA thread says how to check the
-   version.
-2. **Unlock it with amonet-biscuit.** Follow
+These steps follow [proffalken's write-up](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
+of installing TECHO5 Dot from Linux, which found the exact Fire OS build that avoids SELinux boot
+loops. Every command runs the same on Windows, Linux and macOS once the Dot is unlocked.
+
+1. **Unlock it with amonet-biscuit.** Follow
    [[UNLOCK][ROOT][TWRP][UNBRICK] Echo Dot 2nd Gen / 2016 (biscuit)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
    (source: [R0rt1z2/amonet, branch mt8163-biscuit](https://github.com/R0rt1z2/amonet/tree/mt8163-biscuit)).
-   It needs a **Linux** computer or live USB (Ubuntu is what the thread uses), changes the partition
-   table and **wipes the Dot's data**.
-   *Check:* the Dot boots into TWRP (a cyan light), and `adb devices` lists it.
-3. **Install TECHO5 Dot.** Follow the
-   [TECHO5 Dot README's Installing section](https://github.com/HuskerMinion/techo5-dot#installing):
-   `tools/install-dot.ps1 -Serial <serial> -DryRun`, then without `-DryRun`. It backs up every
-   partition that boots the Dot before writing anything, builds this Dot's boot image from its own
-   backup, and waits for the first boot to report healthy. If the Dot never joined Wi-Fi, it asks
-   for a network.
+   Use the release ZIP attached to the thread, not the bare git repository: it has `fastbrick.sh`,
+   `boot-root.zip` and the files they need. The unlock needs a **Linux** computer or live USB.
+   - Hold the **Action** button while plugging in power; the light turns **green** (Amazon's factory
+     fastboot mode). Connect USB.
+   - Run `./fastbrick.sh`, check the device it found, and type `YES`. It ends with
+     `Exploit most likely successful!` and reboots into TWRP (a **white** light).
+   - To get back into TWRP later: unplug power, hold **Volume Up**, plug power back in, and wait for the
+     white light.
+
+   *Check:* `adb devices` lists the Dot as `recovery`.
+2. **Flash Fire OS 6574.1 into both slots.** TECHO5 Dot's Bluetooth kernel is built from this exact
+   build's source (NS6574, build 7623), and its Wi-Fi driver is loaded from Fire OS's system partition,
+   so other builds don't match. The file is
+   `update-kindle-biscuit_puffin-NS6574_user_7623_0013121734532.bin` (the XDA thread links Amazon's
+   update files). From TWRP:
+   ```
+   adb shell twrp wipe cache
+   adb shell twrp wipe data
+   adb push update-kindle-biscuit_puffin-NS6574_user_7623_0013121734532.bin /sdcard/update.zip
+   adb shell twrp install /sdcard/update.zip
+   adb reboot recovery
+   adb shell twrp install /sdcard/update.zip
+   ```
+   Installing twice puts it in both A/B slots. A "no selinux policy bundled" warning in the install log
+   means the build doesn't match; stop and get the right file.
+3. **Root it.** Still in TWRP:
+   ```
+   adb push boot-root.zip /sdcard/
+   adb shell twrp install /sdcard/boot-root.zip
+   ```
+4. **Trust this computer's adb key**, so Fire OS never needs to show an authorization prompt (the Dot
+   has no screen to show it on):
+   ```
+   adb push ~/.android/adbkey.pub /sdcard/adbkey.pub
+   adb shell "mkdir -p /data/misc/adb && cp /sdcard/adbkey.pub /data/misc/adb/adb_keys && chown 1000:2000 /data/misc/adb/adb_keys && chmod 640 /data/misc/adb/adb_keys"
+   adb shell restorecon -v /data/misc/adb/adb_keys
+   adb reboot
+   ```
+   On Windows the key is `%USERPROFILE%\.android\adbkey.pub`. (Run `adb devices` once first if the
+   file doesn't exist yet.)
+5. **Join Wi-Fi once in Fire OS.** Complete the Alexa app's Wi-Fi step; skipping the rest of the Alexa
+   setup is fine. The installer reads the saved network. (Skip this and it asks for a network instead.)
+   *Check:* `adb devices` lists the Dot as `device`, and `adb shell id` says `uid=0`.
+6. **Install TECHO5 Dot.**
+   ```
+   git clone https://github.com/HuskerMinion/techo5-dot
+   cd techo5-dot
+   pwsh ./tools/install-dot.ps1 -Serial <serial> -DryRun
+   pwsh ./tools/install-dot.ps1 -Serial <serial> -Name "Kitchen"
+   ```
+   `<serial>` is what `adb devices` shows. The dry run checks the Dot, backs up every partition that
+   boots it into `backups/<serial>/` (keep that folder: it's the way back), downloads and checks the
+   release, and builds this Dot's boot image, writing nothing to the Dot. The second run installs, with
+   Bluetooth, and waits for the first boot to report healthy. (The installer also works straight from
+   TWRP after step 2, without steps 3 to 5.)
    *Check:* the installer ends with the Dot healthy and its Home Assistant port answering.
-4. **Add it to Home Assistant**: see [After installing](#after-installing-every-device).
+7. **Add it to Home Assistant**: see [After installing](#after-installing-every-device).
 
 Prefer to keep Fire OS? [EchoLocal](https://github.com/ygelfand/echolocal), the project TECHO5's daemon
 is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is the gentler path.
@@ -95,13 +147,24 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    show them) turn on **USB debugging** and **Rooted debugging**; the installer needs adb as root.
    If the on-screen keyboard won't type digits in the Wi-Fi password, add the network from the
    computer with `adb shell cmd wifi connect-network "<network>" wpa2 "<password>"`.
-5. **Back it up and install TECHO5 Spot.** From the
-   [TECHO5 Spot repository](https://github.com/HuskerMinion/techo5-spot): `tools/backup-spot.ps1`
-   first, then `tools/install-spot-linux.ps1 -Serial <serial> -Name <room> -Techo5 <TECHO5 checkout>`.
-   It builds the kernel with Bluetooth, the boot image and the root filesystem, then replaces
-   LineageOS with TECHO5 (it asks before erasing).
+5. **Back it up** from TWRP (`adb reboot recovery` from LineageOS), with the Spot connected by USB:
+   ```
+   git clone https://github.com/HuskerMinion/techo5-spot
+   cd techo5-spot
+   pwsh ./tools/backup-spot.ps1 -Serial <serial> -IncludeSystem
+   ```
+   Keep `backups/<serial>/`: it's the way back to LineageOS and Fire OS.
+6. **Install TECHO5 Spot**, booted back into LineageOS with rooted debugging on:
+   ```
+   pwsh ./tools/install-spot-linux.ps1 -Serial <serial> -Name "Kitchen" -BuildOnly
+   pwsh ./tools/install-spot-linux.ps1 -Serial <serial> -Name "Kitchen"
+   ```
+   The first run captures what it needs from this Spot, downloads and checks the release, and builds
+   the boot image, touching nothing else. The second replaces LineageOS with TECHO5 (it asks before
+   erasing), with Bluetooth, and waits for the first boot. `-Logo` also replaces the bootloader's
+   Amazon picture (needs `pip install pillow`).
    *Check:* the round screen shows the TECHO5 clock.
-6. **Add it to Home Assistant**: see below.
+7. **Add it to Home Assistant**: see below.
 
 ## After installing (every device)
 
@@ -130,8 +193,9 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 | Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | Use a Linux live USB |
 | LineageOS (Show 5, Spot) | Yes | Yes | Yes (TWRP and `adb` only) |
 | Install TECHO5 on the Show 5 ([install.md](install.md)) | Yes (Git Bash, PuTTY) | **Yes** | **Yes** |
-| Install TECHO5 Dot (`install-dot.ps1`) | **Yes** (PowerShell, WSL) | Not yet | Not yet |
-| Install TECHO5 Spot (`install-spot-linux.ps1`) | **Yes** (PowerShell, WSL, Git Bash) | Not yet | Not yet |
+| Fire OS 6574.1, root, adb key (Dot) | Yes | Yes | Yes |
+| Install TECHO5 Dot (`install-dot.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
+| Install TECHO5 Spot (`install-spot-linux.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
 | Updates after that | Home Assistant | Home Assistant | Home Assistant |
 
 **On Linux:**
@@ -151,10 +215,10 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
   the exploit re-enumerates USB mid-way, and VM USB passthrough often loses the device.
 - The Show 5's install.md works from Terminal once the device is unlocked and on LineageOS.
 
-**The Dot and Spot installers** are PowerShell scripts that also drive WSL and Git Bash, so today they
-are Windows-only. What they do is written out step by step in each repository's
-`docs/porting-plan.md` (the Dot's M6 and "The way back", the Spot's M2, M3 and M7) for anyone wanting
-to follow it by hand on Linux; ports of the installers are welcome.
+**The Dot and Spot installers** run in PowerShell 7 on all three (`sudo snap install powershell --classic`
+on Ubuntu, `brew install powershell` on macOS, `winget install Microsoft.PowerShell` on Windows) and
+find the device's USB serial console on each. Nothing is built on your computer. Building the images
+yourself instead is described in each repository's `docs/building.md`.
 
 ## If something goes wrong
 
@@ -170,4 +234,7 @@ to follow it by hand on Linux; ports of the installers are welcome.
 The unlocks are the work of [R0rt1z2](https://github.com/R0rt1z2) and k4y0z (amonet, kaeru and the
 Echo TWRP builds); LineageOS for these devices is R0rt1z2's and
 [amazon-oss](https://github.com/amazon-oss)'s. TECHO5's daemon is built on
-[EchoLocal](https://github.com/ygelfand/echolocal) by Yuri Gelfand.
+[EchoLocal](https://github.com/ygelfand/echolocal) by Yuri Gelfand. The Echo Dot steps come from
+[proffalken](https://github.com/proffalken)'s
+[write-up](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b) of installing TECHO5
+Dot from Linux, whose fixes also made the installers cross-platform.
