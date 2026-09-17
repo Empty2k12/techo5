@@ -73,6 +73,11 @@ type Filter struct {
 // reference uses five, on the assumption that a stream opens on the room rather than on a word.
 const openingFrames = 5
 
+// silentPower is a frame's total power, summed over its bins, below which it is digital silence rather
+// than a quiet room: less than one sample step's worth per bin. A hardware mute and a suspended codec
+// both produce it, for as long as they last.
+const silentPower = 1.0
+
 // New makes a filter for audio at rate, with a transform long enough for a 20 ms window.
 func New(rate int) *Filter {
 	frame := 20 * rate / 1000
@@ -158,6 +163,16 @@ func (f *Filter) apply() {
 		signal += m * m
 		held += f.noise[k]
 	}
+	// Digital silence says nothing about the room, so the estimates are left as they stood and the frame
+	// goes out silent. Followed instead, the noise estimate decays toward zero for as long as the silence
+	// lasts: after minutes the returning room reads as speech and is never learned again, and after an
+	// hour the estimate underflows and every bin turns non-finite for good (the mute on a Show, 2026-09).
+	if signal < silentPower*float64(f.size) {
+		for k := range f.size {
+			f.spectrum[k] = 0
+		}
+		return
+	}
 	speech := held > 0 && 10*math.Log10(signal/held) >= vad
 
 	for k := range f.size {
@@ -196,6 +211,12 @@ func (f *Filter) apply() {
 
 		estimate := g * float64(m)
 		f.clean[k] = estimate * estimate
+		// Whatever else ever produces a non-finite value, it must not stay: this bin starts again from
+		// what it hears now.
+		if math.IsNaN(f.clean[k]) || math.IsInf(f.clean[k], 0) || math.IsNaN(f.noise[k]) || math.IsInf(f.noise[k], 0) {
+			f.clean[k], f.noise[k] = 0, power
+			continue
+		}
 
 		if m > 0 {
 			f.spectrum[k] *= complex(float32(estimate/float64(m)), 0)
