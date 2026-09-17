@@ -97,6 +97,10 @@ Straight from the device's own screen.
 
 ## Install
 
+**New to this? Start with [Getting started](docs/getting-started.md)**: every step from a stock Echo
+Show 5, Dot or Spot, with the unlock guides linked, what to check after each step, and notes for
+Windows, Linux and macOS.
+
 You need a Show 5 2nd gen **unlocked with
 [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/)
 and running
