@@ -128,7 +128,7 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 	r.centred(r.title, s.now.Format("3:04 PM"), 84, colText)
 	r.centred(r.small, s.now.Format("Monday, January 2"), 114, colDim)
 
-	const artY, artR = 205.0, 76.0
+	const artY, artR = 200.0, 72.0
 	r.discAt(centre, artY, artR+3, color.RGBA{44, 50, 60, 255})
 	if rd.Thumb != nil {
 		if rd.Logo {
@@ -154,20 +154,24 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 		label = "PAUSED"
 	}
 	label = clip(r.label, r, label+" · "+strings.ToUpper(station), 330)
-	r.centred(r.label, label, 314, colMusic)
+	r.centred(r.label, label, 304, colMusic)
 	if rd.Title != "" {
-		r.centred(r.title, clip(r.title, r, rd.Title, 350), 354, colText)
+		r.centred(r.title, clip(r.title, r, rd.Title, 350), 340, colText)
 		if rd.Artist != "" {
-			r.centred(r.body, clip(r.body, r, rd.Artist, 320), 388, colDim)
+			r.centred(r.body, clip(r.body, r, rd.Artist, 330), 370, colDim)
 		}
 	} else {
-		r.centred(r.title, clip(r.title, r, station, 350), 358, colText)
+		r.centred(r.title, clip(r.title, r, station, 350), 344, colText)
 	}
-	hint := "tap to pause · swipe for next"
+	// Play or pause at the bottom; a tap anywhere does the same.
+	const by = 420.0
+	r.discAt(centre, by, 25, color.RGBA{36, 42, 52, 255})
 	if s.paused {
-		hint = "tap to play · swipe for next"
+		r.triangle(centre-8, by-13, centre-8, by+13, centre+14, by, colText)
+	} else {
+		r.line(centre-7, by-11, centre-7, by+11, 6, colText)
+		r.line(centre+7, by-11, centre+7, by+11, 6, colText)
 	}
-	r.centred(r.tiny, hint, 424, colDim)
 }
 
 // shadeCircle darkens the inside of the rim, so text reads over a picture.
@@ -204,7 +208,7 @@ func (r *roundRenderer) radioList(s roundScene) {
 	r.clear()
 	rd := s.radio
 	rows := radioRows(rd, s.playing || s.paused)
-	r.centred(r.label, strings.ToUpper(home.SourceLabel(rd.Source)), 118, colMusic)
+	r.sourceButtons(rd)
 
 	switch {
 	case len(rows) == 0 && rd.Loading:
@@ -218,9 +222,6 @@ func (r *roundRenderer) radioList(s roundScene) {
 			msg = "Radio needs a Home Assistant token"
 		}
 		r.paragraph(r.body, msg, 230, colDim, 3)
-		if rd.Sources > 1 {
-			r.centred(r.small, "tap the title for other lists", 400, colDim)
-		}
 		return
 	}
 
@@ -251,9 +252,6 @@ func (r *roundRenderer) radioList(s roundScene) {
 		hint = "turn · tap to stop"
 	}
 	r.centred(r.small, hint, 392, colDim)
-	if rd.Sources > 1 {
-		r.centred(r.small, "tap the title for other lists", 420, colDim)
-	}
 
 	// Where in the list, round the ring.
 	const from, span = 1.25 * math.Pi, 1.5 * math.Pi
@@ -264,6 +262,62 @@ func (r *roundRenderer) radioList(s roundScene) {
 	r.ringAt(centre, centre, 196, 202, from, from+span, color.RGBA{44, 50, 60, 255})
 	kx, ky := centre+199*math.Sin(from+span*frac), centre-199*math.Cos(from+span*frac)
 	r.discAt(kx, ky, 11, colMusic)
+}
+
+// sourceButtons are the lists along the top of the station list, the one shown lit: a tap on one
+// shows it.
+func (r *roundRenderer) sourceButtons(rd home.Radio) {
+	sources := home.RadioSources()
+	if len(sources) < 2 {
+		r.centred(r.label, strings.ToUpper(home.SourceLabel(rd.Source)), 118, colMusic)
+		return
+	}
+	for i, src := range sources {
+		x0, x1 := sourceButton(i, len(sources))
+		name := shortSource(src)
+		cx := (x0 + x1) / 2
+		if src == rd.Source {
+			r.line(float64(x0+14), sourceY, float64(x1-14), sourceY, 30, colMusic)
+			r.centred2(r.label, name, cx, sourceY+7, colBackground)
+		} else {
+			r.line(float64(x0+14), sourceY, float64(x1-14), sourceY, 30, color.RGBA{36, 42, 52, 255})
+			r.centred2(r.label, name, cx, sourceY+7, colText)
+		}
+	}
+}
+
+// sourceY is the source buttons' row; sourceButton the x span of button i of n.
+const sourceY = 120
+
+func sourceButton(i, n int) (x0, x1 int) {
+	const width = 360
+	w := width / n
+	x0 = centre - width/2 + i*w
+	return x0, x0 + w
+}
+
+// sourceAt is which list button a tap at x, y is on, or "".
+func sourceAt(x, y int) string {
+	sources := home.RadioSources()
+	if len(sources) < 2 || y < sourceY-26 || y > sourceY+26 {
+		return ""
+	}
+	for i, src := range sources {
+		if x0, x1 := sourceButton(i, len(sources)); x >= x0 && x < x1 {
+			return src
+		}
+	}
+	return ""
+}
+
+func shortSource(src string) string {
+	switch src {
+	case "local":
+		return "Local"
+	case "popular":
+		return "Popular"
+	}
+	return "Favorites"
 }
 
 // clip shortens a line to fit width pixels in face.

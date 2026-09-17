@@ -37,6 +37,9 @@ const VolumeSteps = speaker.VolumeSteps
 // volumeFlash is how long the ring shows the level after a change.
 const volumeFlash = 2 * time.Second
 
+// stoppedFor is how long a stopped track stays paused before it is ended.
+const stoppedFor = 30 * time.Minute
+
 type Player struct {
 	mp     *esphome.MediaPlayer
 	jack   *esphome.BinarySensor
@@ -66,6 +69,10 @@ type Player struct {
 	speaking atomic.Bool
 
 	external atomic.Bool
+
+	// stoppedAt counts stops, so the timer that ends a stopped track knows whether a later stop or a
+	// play has come since.
+	stoppedAt atomic.Uint64
 
 	step int
 
@@ -348,10 +355,20 @@ func (p *Player) command(c esphome.MediaCommand) {
 	case esphome.MediaPlayerUnmute:
 		p.Mute(false)
 	case esphome.MediaPlayerStop:
-		p.stream.Stop()
+		// Stop is what people say to a speaker to make it quiet, and what Home Assistant sends for it:
+		// kept as a pause, so the screen still shows what was playing and play picks it up again. A
+		// track left stopped that long is really over.
+		p.stream.Pause()
+		n := p.stoppedAt.Add(1)
+		time.AfterFunc(stoppedFor, func() {
+			if _, paused := p.stream.Playing(); paused && p.stoppedAt.Load() == n {
+				p.stream.Stop()
+			}
+		})
 	case esphome.MediaPlayerPause:
 		p.stream.Pause()
 	case esphome.MediaPlayerPlay:
+		p.stoppedAt.Add(1)
 		p.stream.Unpause()
 	case esphome.MediaPlayerToggle:
 		if playing, _ := p.stream.Playing(); playing {

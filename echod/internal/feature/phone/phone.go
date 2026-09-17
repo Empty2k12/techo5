@@ -501,7 +501,8 @@ func (p *Phone) Hangup() {
 }
 
 // Actions: phone_account signs the device in (an empty username signs it out); phone_call places a
-// call; phone_answer and phone_hangup act on the call that is up.
+// call; phone_contacts sets who a screen offers to call; phone_answer and phone_hangup act on the call
+// that is up.
 func (p *Phone) Actions() []*esphome.Action {
 	return []*esphome.Action{
 		{
@@ -531,6 +532,22 @@ func (p *Phone) Actions() []*esphome.Action {
 			Name: "phone_call",
 			Args: []esphome.Arg{{Name: "number", Type: esphome.ArgString}},
 			Run:  func(c esphome.Call) (any, error) { return nil, p.Call(c.String("number")) },
+		},
+		{
+			Name: "phone_contacts",
+			Args: []esphome.Arg{{Name: "contacts", Type: esphome.ArgString}},
+			Run: func(c esphome.Call) (any, error) {
+				list, err := parseContacts(c.String("contacts"))
+				if err != nil {
+					return nil, err
+				}
+				if err := saveContacts(list); err != nil {
+					return nil, err
+				}
+				slog.Info("phone: contacts replaced", "count", len(list))
+				p.Changed.Emit(p.State())
+				return nil, nil
+			},
 		},
 		{Name: "phone_answer", Run: func(esphome.Call) (any, error) { p.Answer(); return nil, nil }},
 		{Name: "phone_hangup", Run: func(esphome.Call) (any, error) { p.Hangup(); return nil, nil }},

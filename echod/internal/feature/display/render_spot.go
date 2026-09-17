@@ -96,6 +96,12 @@ type roundScene struct {
 	// cameras is the camera list and cameraSel its row in the middle, while the list is open.
 	cameras   []config.Camera
 	cameraSel int
+
+	// phoneReady is whether the phone is signed in; contacts are who Call lists (while it is open),
+	// contactCount how many there are.
+	phoneReady   bool
+	contacts     []phone.Contact
+	contactCount int
 }
 
 type roundRenderer struct {
@@ -385,6 +391,11 @@ func (r *roundRenderer) text(face font.Face, s string, x, baseline int, c color.
 
 func (r *roundRenderer) width(face font.Face, s string) int {
 	return font.MeasureString(face, s).Round()
+}
+
+// centred2 is centred about x rather than the middle of the panel.
+func (r *roundRenderer) centred2(face font.Face, s string, x, baseline int, c color.Color) {
+	r.text(face, s, x-r.width(face, s)/2, baseline, c)
 }
 
 func (r *roundRenderer) centred(face font.Face, s string, baseline int, c color.Color) {

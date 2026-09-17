@@ -95,3 +95,16 @@ func (r *roundRenderer) callFace(s roundScene) {
 		r.centred(r.small, "Tap to hang up", 370, colDim)
 	}
 }
+
+// contactList is who the Call item offers: a tap calls them.
+func (r *roundRenderer) contactList(s roundScene) {
+	names := make([]string, len(s.contacts))
+	for i, c := range s.contacts {
+		names[i] = c.Name
+	}
+	empty := "No contacts yet: Home Assistant's phone_contacts action sets them"
+	if !s.phoneReady {
+		empty = "The phone is not set up"
+	}
+	r.pickList("CALL", names, -1, colCall, empty)
+}

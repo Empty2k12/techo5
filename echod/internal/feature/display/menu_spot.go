@@ -40,6 +40,7 @@ const (
 	modeBluetooth
 	modeRadio
 	modeCameras
+	modeContacts
 )
 
 // jogging is whether the mode turns the ring into a jog wheel.
@@ -51,6 +52,7 @@ type itemID string
 
 const (
 	itemTalk       itemID = "talk"
+	itemCall       itemID = "call"
 	itemMute       itemID = "mute"
 	itemMusic      itemID = "music"
 	itemVolume     itemID = "volume"
@@ -79,6 +81,7 @@ type menuItem struct {
 // mainItems and settingsItems go clockwise from the top.
 var mainItems = []menuItem{
 	{itemTalk, color.RGBA{240, 98, 146, 255}},
+	{itemCall, color.RGBA{46, 204, 113, 255}},
 	{itemMute, color.RGBA{229, 72, 77, 255}},
 	{itemMusic, color.RGBA{60, 203, 127, 255}},
 	{itemVolume, color.RGBA{58, 160, 255, 255}},
@@ -92,7 +95,6 @@ var mainItems = []menuItem{
 var settingsItems = []menuItem{
 	{itemBrightness, color.RGBA{255, 204, 64, 255}},
 	{itemNight, color.RGBA{150, 120, 255, 255}},
-	{itemAuto, color.RGBA{64, 214, 230, 255}},
 	{itemBluetooth, colBluetooth},
 	{itemInfo, color.RGBA{58, 160, 255, 255}},
 	{itemRestart, color.RGBA{255, 120, 80, 255}},
@@ -195,6 +197,8 @@ func itemName(s roundScene, id itemID) string {
 	switch id {
 	case itemTalk:
 		return "Talk"
+	case itemCall:
+		return "Call"
 	case itemMute:
 		if s.muted {
 			return "Unmute"
@@ -248,6 +252,14 @@ func itemHint(s roundScene, id itemID) string {
 	switch id {
 	case itemTalk:
 		return "tap to ask"
+	case itemCall:
+		switch {
+		case !s.phoneReady:
+			return "phone not set up"
+		case s.contactCount == 0:
+			return "no contacts yet"
+		}
+		return fmt.Sprintf("%d contacts", s.contactCount)
 	case itemMute:
 		if s.muted {
 			return "microphone is off"
@@ -267,7 +279,7 @@ func itemHint(s roundScene, id itemID) string {
 		if s.muted {
 			return "off while muted"
 		}
-		return "this Spot · swipe for others"
+		return "this Spot · hold for the list"
 	case itemWeather:
 		if l := weatherLine(s.weather); l != "" {
 			return l
@@ -288,6 +300,9 @@ func itemHint(s roundScene, id itemID) string {
 	case itemSleep:
 		return "tap the screen to wake"
 	case itemBrightness:
+		if s.autoOn {
+			return fmt.Sprintf("auto, up to %d%%", s.brightness)
+		}
 		return fmt.Sprintf("%d%% · tap, then turn", s.brightness)
 	case itemNight:
 		return fmt.Sprintf("%d:00 to %d:00", s.nightFrom, s.nightTo)
@@ -365,6 +380,8 @@ func (r *roundRenderer) menu(s roundScene) {
 		r.radioList(s)
 	case s.menuMode == modeCameras:
 		r.cameraList(s)
+	case s.menuMode == modeContacts:
+		r.contactList(s)
 	default:
 		r.dial(s)
 	}
@@ -420,7 +437,10 @@ func (r *roundRenderer) jog(s roundScene) {
 			frac = float64(s.volume) / float64(s.maxVolume)
 		}
 	case modeBrightness:
-		title, value, hint = "BRIGHTNESS", fmt.Sprintf("%d%%", s.brightness), "turn the ring · tap when done"
+		title, value, hint = "BRIGHTNESS", fmt.Sprintf("%d%%", s.brightness), "turn · tap the middle when done"
+		if s.autoOn {
+			title = "BRIGHTNESS · AUTO UP TO"
+		}
 		frac, col = float64(s.brightness)/100, color.RGBA{255, 204, 64, 255}
 	case modeNightFrom:
 		title, value, hint = "NIGHT STARTS", fmt.Sprintf("%d:00", s.nightFrom), "turn the ring · tap for the end"
@@ -441,7 +461,38 @@ func (r *roundRenderer) jog(s roundScene) {
 	r.centred(r.label, title, 190, colDim)
 	r.centred(r.clock, value, 282, colText)
 	r.centred(r.small, hint, 330, colDim)
+	if s.menuMode == modeBrightness {
+		r.autoBox(s.autoOn)
+	}
 }
+
+// autoBox is the brightness wheel's Auto check box: on, the screen follows the room up to the
+// brightness set on the wheel.
+func (r *roundRenderer) autoBox(on bool) {
+	const label = "Auto"
+	lw := r.width(r.title, label)
+	box := 30.0
+	x0 := float64(centre) - (box+14+float64(lw))/2
+	y0 := float64(autoBoxY) - box/2
+	col := color.RGBA{64, 214, 230, 255}
+	if on {
+		r.line(x0, y0+box/2, x0+box, y0+box/2, box, col)
+		r.line(x0+7, y0+16, x0+13, y0+23, 4, colBackground)
+		r.line(x0+13, y0+23, x0+24, y0+8, 4, colBackground)
+	} else {
+		r.line(x0, y0+1.5, x0+box, y0+1.5, 3, colDim)
+		r.line(x0, y0+box-1.5, x0+box, y0+box-1.5, 3, colDim)
+		r.line(x0+1.5, y0, x0+1.5, y0+box, 3, colDim)
+		r.line(x0+box-1.5, y0, x0+box-1.5, y0+box, 3, colDim)
+	}
+	r.text(r.title, label, int(x0+box+14), autoBoxY+12, colText)
+}
+
+// autoBoxY is where the Auto check box sits on the brightness wheel; a tap near it toggles it.
+const autoBoxY = 392
+
+// onAutoBox is whether a tap at x, y is on the Auto check box.
+func onAutoBox(x, y int) bool { return y > autoBoxY-40 && y < autoBoxY+40 && x > centre-110 && x < centre+110 }
 
 // info names the device and says where it is on the network.
 func (r *roundRenderer) info(s roundScene) {
@@ -458,6 +509,11 @@ func (r *roundRenderer) icon(id itemID, s roundScene, x, y, u, w float64, c colo
 	switch id {
 	case itemTalk:
 		r.micIcon(x, y, u, w, c)
+	case itemCall:
+		// A handset: its two ends joined by a curve.
+		r.ringAt(x+0.25*u, y+0.25*u, 0.85*u-w/2, 0.85*u+w/2, 1.1*math.Pi, 1.9*math.Pi, c)
+		r.line(x-0.75*u, y-0.05*u, x-0.35*u, y+0.45*u, w*2.4, c)
+		r.line(x-0.05*u, y-0.75*u, x+0.45*u, y-0.35*u, w*2.4, c)
 	case itemMute:
 		r.micIcon(x, y, u, w, c)
 		r.line(x-0.85*u, y-0.85*u, x+0.85*u, y+0.85*u, w, c)

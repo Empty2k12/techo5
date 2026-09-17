@@ -3,7 +3,6 @@
 package display
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -142,38 +141,63 @@ func pickCamera(sel int) {
 	home.Get().ShowCamera(cams[sel].Entity, cameraStep)
 }
 
-// cameraList is the list of cameras as a ring: the one in the middle is shown on a tap.
+// cameraList is every camera by name, all at once: a tap on one shows it, and the one showing is
+// green. No turning, so what is chosen is never under the finger.
 func (r *roundRenderer) cameraList(s roundScene) {
+	names := make([]string, len(s.cameras))
+	current := -1
+	for i, c := range s.cameras {
+		names[i] = c.Name
+		if c.Entity == s.camera.Entity {
+			current = i
+		}
+	}
+	r.pickList("CAMERAS", names, current, colCameraOn, "No cameras")
+}
+
+// listTop and listRow place n rows of a pick list in the circle: as tall as fits, centred.
+func listGeometry(n int) (top, row int) {
+	row = 40
+	if n > 8 {
+		row = 300 / n
+	}
+	top = centre - n*row/2 + 18
+	return top, row
+}
+
+// listRowAt is which row of n a tap at y is on, or -1.
+func listRowAt(y, n int) int {
+	top, row := listGeometry(n)
+	i := (y - (top - row/2 - 8)) / row
+	if y < top-row/2-8 || i < 0 || i >= n {
+		return -1
+	}
+	return i
+}
+
+// pickList draws a title and rows to tap.
+func (r *roundRenderer) pickList(title string, names []string, current int, col color.RGBA, empty string) {
 	r.clear()
-	cams := s.cameras
-	r.centred(r.label, "CAMERAS", 118, colCameraOn)
-	if len(cams) == 0 {
-		r.paragraph(r.body, "No cameras", 240, colDim, 2)
+	top, row := listGeometry(len(names))
+	r.centred(r.label, title, top-row/2-18, col)
+	if len(names) == 0 {
+		r.paragraph(r.body, empty, 240, colDim, 3)
 		return
 	}
-	sel := min(max(s.cameraSel, 0), len(cams)-1)
-	r.centred(r.small, fmt.Sprintf("%d of %d", sel+1, len(cams)), 150, colDim)
-	if sel > 0 {
-		r.centred(r.body, clip(r.body, r, cams[sel-1].Name, 300), 200, colDim)
+	face := r.body
+	if row < 34 {
+		face = r.small
 	}
-	col := colText
-	if cams[sel].Entity == s.camera.Entity {
-		col = colCameraOn
+	for i, n := range names {
+		y := top + i*row
+		c := colText
+		if i == current {
+			c = col
+			w := r.width(face, n)
+			r.line(float64(centre-w/2-16), float64(y-8), float64(centre+w/2+16), float64(y-8), float64(row-6), color.RGBA{30, 36, 44, 255})
+		}
+		r.centred(face, clip(face, r, n, 330), y, c)
 	}
-	y := r.paragraph(r.title, cams[sel].Name, 262, col, 2)
-	if sel+1 < len(cams) {
-		r.centred(r.body, clip(r.body, r, cams[sel+1].Name, 300), max(y+14, 318), colDim)
-	}
-	r.centred(r.small, "turn · tap to show", 400, colDim)
-
-	const from, span = 1.25 * math.Pi, 1.5 * math.Pi
-	frac := 0.0
-	if len(cams) > 1 {
-		frac = float64(sel) / float64(len(cams)-1)
-	}
-	r.ringAt(centre, centre, 196, 202, from, from+span, color.RGBA{44, 50, 60, 255})
-	kx, ky := centre+199*math.Sin(from+span*frac), centre-199*math.Cos(from+span*frac)
-	r.discAt(kx, ky, 11, colCameraOn)
 }
 
 // discImage draws img inside a circle of radius rad at (cx, cy), scaled to cover it.

@@ -159,6 +159,16 @@ func (v *Voice) Action() {
 // would be worse than not listening for it at all. Nothing is playing then, so there is nothing the word
 // could sensibly mean.
 func (v *Voice) Interrupt() {
+	// "<wake word>, stop" over music: the stop word hears "stop" while the turn the wake word opened is
+	// still listening, and it is the music that was meant, not the question that has not been asked.
+	if v.turn.Phase() == phaseListening && !timer.Get().Ringing() && !alarm.Get().Ringing() {
+		if playing, _ := media.Get().Playing(); playing {
+			slog.Info("stop word after the wake word: pausing the music")
+			v.turn.Cancel()
+			media.Get().Pause()
+			return
+		}
+	}
 	if !speaker.Sound().Busy() && !timer.Get().Ringing() && !alarm.Get().Ringing() {
 		if playing, _ := media.Get().Playing(); !playing {
 			slog.Debug("stop word ignored, nothing to stop")

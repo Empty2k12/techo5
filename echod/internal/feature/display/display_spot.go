@@ -84,6 +84,9 @@ const (
 	idleFrame   = time.Second
 	activeFrame = 120 * time.Millisecond
 
+	// slowFrame is a frame long enough to notice, logged once a minute at most.
+	slowFrame = 80 * time.Millisecond
+
 	// backlightMin is where this panel starts to be readable: 0 % of brightness lands here. Measured
 	// by eye 2026-09-16: 120 looks almost off in a lit room, 191 is fine, 255 is too bright.
 	backlightMin = 120
@@ -150,6 +153,8 @@ type Display struct {
 	radioSel int
 	// cameraSel is the camera list's middle row.
 	cameraSel int
+	// slowSaid is when a slow frame was last logged.
+	slowSaid time.Time
 
 	poke chan struct{}
 
@@ -423,7 +428,6 @@ func (d *Display) gesture(g touch.Gesture) {
 			d.mu.Lock()
 			d.openMenu(modeCameras, "")
 			d.cameraSel = cameraIndex(v.Entity)
-			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
 			d.mu.Unlock()
 			d.wake()
 			return
@@ -468,8 +472,8 @@ func (d *Display) openMenu(mode menuMode, id itemID) {
 		d.menuRest = d.menuRot
 	}
 	// The finger follows (every move a turn of the ring) wherever there is a ring to turn. The weather
-	// face has none, and needs its sideways swipe between the forecast and the radar.
-	touch.Get().SetFollow(mode != modeWeather)
+	// face and the lists have none, and need their swipes and taps as they are.
+	touch.Get().SetFollow(mode != modeWeather && mode != modeCameras && mode != modeContacts)
 }
 
 // closeMenu takes the menu off the screen. Called with d.mu held.
@@ -513,6 +517,13 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		case touch.Release:
 			d.spinning, d.jogTurn = false, 0
 		case touch.Tap:
+			if mode == modeBrightness && onAutoBox(g.X, g.Y) {
+				on := !d.autoOn
+				d.mu.Unlock()
+				d.setAuto(on, true)
+				d.wake()
+				return
+			}
 			d.finishJog(mode)
 		}
 
@@ -554,14 +565,16 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		case touch.Release:
 			d.spinning, d.jogTurn = false, 0
 		case touch.Tap:
-			if g.Y < radioTitleBelow {
-				// The list's name at the top: the next list.
+			if src := sourceAt(g.X, g.Y); src != "" {
 				d.radioSel = 0
-				go home.Get().NextRadioSource()
+				go home.Get().SetRadioSource(src)
 				break
 			}
 			sel := d.radioSel
 			d.closeMenu()
+			// Now playing comes up at once, saying the station is starting, rather than the clock until the
+			// stream arrives.
+			d.radioCue = time.Now()
 			d.mu.Unlock()
 			go pickStation(sel)
 			d.wake()
@@ -571,36 +584,31 @@ func (d *Display) menuGesture(g touch.Gesture) {
 			go home.Get().NextRadioSource()
 		}
 
-	case mode == modeCameras:
-		switch g.Kind {
-		case touch.Hold:
-			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
-		case touch.Drag:
-			if !d.spinning {
-				break
-			}
-			a := fingerAngle(g.X, g.Y)
-			d.jogTurn += wrapAngle(a - d.spinAngle)
-			d.spinAngle = a
-			n := len(home.Get().Cameras())
-			for d.jogTurn >= jogStep {
-				d.jogTurn -= jogStep
-				d.cameraSel = min(d.cameraSel+1, max(n-1, 0))
-			}
-			for d.jogTurn <= -jogStep {
-				d.jogTurn += jogStep
-				d.cameraSel = max(d.cameraSel-1, 0)
-			}
-		case touch.Release:
-			d.spinning, d.jogTurn = false, 0
-		case touch.Tap:
-			sel := d.cameraSel
-			d.closeMenu()
-			d.mu.Unlock()
-			go pickCamera(sel)
-			d.wake()
-			return
+	case mode == modeCameras || mode == modeContacts:
+		if g.Kind != touch.Tap {
+			break
 		}
+		n := len(home.Get().Cameras())
+		if mode == modeContacts {
+			n = len(phone.Get().Contacts())
+		}
+		row := listRowAt(g.Y, n)
+		d.closeMenu() // a tap off the list puts it away
+		if row < 0 {
+			break
+		}
+		d.mu.Unlock()
+		if mode == modeCameras {
+			go pickCamera(row)
+		} else if cs := phone.Get().Contacts(); row < len(cs) {
+			go func() {
+				if err := phone.Get().Call(cs[row].Number); err != nil {
+					slog.Warn("screen: call", "err", err)
+				}
+			}()
+		}
+		d.wake()
+		return
 
 	default:
 		items := itemsFor(mode)
@@ -622,15 +630,17 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		case touch.Tap:
 			item, middle := dialHitAt(g.X, g.Y, d.menuRot, n)
 			switch {
-			case middle || item == d.menuSel:
+			case middle || item >= 0:
+				// A tap on an item is going there, wherever it is on the ring; the middle is the one at the
+				// top. Turning is for looking round the ring, not a step before choosing.
+				if item >= 0 {
+					d.menuSel = item
+				}
 				id := items[d.menuSel].id
 				d.mu.Unlock()
 				d.act(id)
 				d.wake()
 				return
-			case item >= 0:
-				d.menuSel = item
-				d.menuRest = nearestRest(d.menuRot, item, n)
 			}
 		case touch.SwipeLeft:
 			d.menuSel = (d.menuSel + 1) % n
@@ -695,6 +705,8 @@ func (d *Display) act(id itemID) {
 	case itemTalk:
 		d.locked(d.closeMenu)
 		voice.Get().Action()
+	case itemCall:
+		d.locked(func() { d.openMenu(modeContacts, "") })
 	case itemMute:
 		mute.Get().Toggle()
 	case itemMusic:
@@ -931,7 +943,7 @@ func (d *Display) frame() time.Duration {
 			if now.Sub(d.menuAt) > radioIdle {
 				d.closeMenu()
 			}
-		case d.menuMode == modeCameras:
+		case d.menuMode == modeCameras || d.menuMode == modeContacts:
 			if now.Sub(d.menuAt) > cameraListIdle {
 				d.closeMenu()
 			}
@@ -1000,6 +1012,14 @@ func (d *Display) frame() time.Duration {
 	if s.menuOpen && s.menuMode == modeCameras {
 		s.cameras = home.Get().Cameras()
 	}
+	if s.menuOpen {
+		s.phoneReady = phone.Get().State().Registered
+		contacts := phone.Get().Contacts()
+		s.contactCount = len(contacts)
+		if s.menuMode == modeContacts {
+			s.contacts = contacts
+		}
+	}
 	s.call = phone.Get().State()
 	s.weather = home.Get().Weather()
 	s.camera, s.showCamera = home.Get().Camera()
@@ -1039,9 +1059,14 @@ func (d *Display) frame() time.Duration {
 		}
 	}
 
+	drawn := time.Now()
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
+	}
+	if took := time.Since(drawn); took > slowFrame && time.Since(d.slowSaid) > time.Minute {
+		d.slowSaid = time.Now()
+		slog.Info("screen: slow frame", "took", took.Round(time.Millisecond), "menu", s.menuOpen, "mode", s.menuMode, "now_playing", s.nowPlaying, "camera", s.showCamera)
 	}
 	for pending := true; pending; {
 		select {

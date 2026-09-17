@@ -71,6 +71,21 @@ func radioSource() string {
 	return sources[0]
 }
 
+// SetRadioSource shows one list by name, if this device has it.
+func (f *Feature) SetRadioSource(source string) {
+	for _, s := range RadioSources() {
+		if s != source {
+			continue
+		}
+		if err := config.Set().Home().RadioSource(source); err != nil {
+			slog.Warn("home: saving the radio list failed", "err", err)
+		}
+		f.fetchList(source)
+		f.Changed.Emit(struct{}{})
+		return
+	}
+}
+
 // NextRadioSource steps the radio page to the next list.
 func (f *Feature) NextRadioSource() {
 	sources := RadioSources()
