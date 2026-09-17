@@ -31,10 +31,13 @@ while [ $# -gt 0 ]; do
 	*) echo "unknown argument: $1" >&2; exit 1;;
 	esac
 done
+mkdir -p "$(dirname "$OUT")"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 # Windows python wants Windows paths, and MSYS_NO_PATHCONV (needed so the
 # x=/bin/y arguments survive) turns the automatic conversion off.
 W() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
+# python3 where it is (Linux, macOS), else python (Windows).
+PY=${PYTHON:-$( (python3 -c 1) >/dev/null 2>&1 && echo python3 || echo python )}
 
 echo "== building tools for armv7"
 export GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0
@@ -58,7 +61,7 @@ R=$(W "$ROOT"); I=$(W "$INPUTS")
 mini=$(ls "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz | head -1)
 kern=(); [ -n "$KERNEL" ] && kern=(--kernel "$(W "$KERNEL")")
 key=(--copy "$I/techo5_ed25519.pub=/root/.ssh/authorized_keys"); [ -n "$NOKEY" ] && key=()
-python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" "${kern[@]}" \
+"$PY" "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" "${kern[@]}" \
 	--rootfs "$(W "$mini")" \
 	"${apks[@]}" \
 	--init "$R/tools/linux/init" \

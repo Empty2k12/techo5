@@ -133,3 +133,7 @@ const AmpSwitch = ""
 // limiter. Unity: the quiet output that once seemed to need it was the amplifier's safe mode
 // (see initSequence), and speech has its own normaliser.
 const OutputBoost = 1.0
+
+// DriverTuning is off: lib/asp reads the Dot's tuning files. The Echo Show 5's vendor partition holds a
+// different set, so it plays as it always has, without that stage.
+const DriverTuning = false

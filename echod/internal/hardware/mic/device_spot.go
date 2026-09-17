@@ -33,3 +33,7 @@ var adcs = []string{"A", "B"}
 // MediaService is the init service that holds the capture device when the daemon is not: on
 // LineageOS, the vendor audio HAL.
 const MediaService = "vendor.audio-hal"
+
+// VendorBeamformer is off: the coefficient sets the daemon reads (lib/subband) are the Dot's, and
+// the Echo Spot's vendor partition holds a different one.
+const VendorBeamformer = false

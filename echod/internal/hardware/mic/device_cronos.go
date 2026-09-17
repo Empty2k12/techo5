@@ -33,3 +33,7 @@ var adcs = []string{"A"}
 // MediaService is the init service that holds the capture device when the daemon is not: on
 // LineageOS that is the vendor audio HAL, which opens the microphone path at its own start.
 const MediaService = "vendor.audio-hal"
+
+// VendorBeamformer is off: the coefficient sets the daemon reads (lib/subband) are the Dot's, and
+// the Echo Show 5's vendor partition holds a different one.
+const VendorBeamformer = false

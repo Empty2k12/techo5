@@ -105,14 +105,14 @@ You need a Show 5 2nd gen **unlocked with
 [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/)
 and running
 [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/)**,
-a USB cable, a computer (Windows, Linux or macOS) with PowerShell 7, `adb` and `fastboot`, and Home
+a USB cable, a computer (Windows, Linux or macOS) with Python 3, `adb` and `fastboot`, and Home
 Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest) carries everything
 else: the boot image (with Bluetooth) and the root filesystem. Nothing is built.
 
 ```
 git clone https://github.com/HuskerMinion/techo5
 cd techo5
-pwsh ./tools/install-show.ps1 -Serial <adb serial> -Name "Kitchen"
+python3 tools/install-show.py --serial <adb serial> --name "Kitchen"
 ```
 
 It downloads and checks the release, flashes the boot image, creates the slot store and installs over
@@ -136,7 +136,7 @@ Assistant. Every step by hand, and the fixes for what can go wrong: **[docs/inst
 - [docs/hardware.md](docs/hardware.md): the `cronos` hardware and the unlock path.
 - [docs/camera-research.md](docs/camera-research.md): driving the camera's ISP from userspace.
 - [docs/building.md](docs/building.md): building it yourself: where every input comes from
-  (`tools/fetch-inputs.ps1`), and the daemon, kernel, boot image and root filesystem builds.
+  (`tools/fetch-inputs.py`), and the daemon, kernel, boot image and root filesystem builds, for each OS.
 - [tools/linux/README.md](tools/linux/README.md): the image tooling in detail.
 
 ## Sister project
@@ -193,7 +193,7 @@ TECHO5 exists because of these projects and the people behind them.
 See [NOTICE](NOTICE) for licenses of code carried in this repository.
 
 <details>
-<summary>The older route: the daemon beside LineageOS</summary>
+<summary>The older route: the daemon beside LineageOS (Windows, PowerShell)</summary>
 
 Before the Linux image, the daemon ran as an init service on LineageOS 18.1. That still works, on a
 unit with USB debugging and rooted debugging enabled:

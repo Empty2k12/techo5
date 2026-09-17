@@ -29,3 +29,7 @@ var adcs = []string{"A", "B", "C", "D"}
 
 // MediaService is the init service that holds the capture device on a fresh boot.
 const MediaService = "media"
+
+// VendorBeamformer offers the vendor's own beamformer when its coefficients are on the vendor
+// partition: the sets the daemon reads (lib/subband) are the Dot's.
+const VendorBeamformer = true

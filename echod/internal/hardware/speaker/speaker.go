@@ -138,6 +138,9 @@ func New() *Player {
 	p.SetVolume(VolumeSteps)
 	p.on.Store(config.DefaultASP)
 
+	if !DriverTuning {
+		return p
+	}
 	t, err := asp.Load(asp.VendorDir)
 	if err != nil {
 		slog.Error("the driver tuning is not available, playing untuned", "err", err)

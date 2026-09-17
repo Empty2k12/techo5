@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# deploy-rootfs.sh — build the daemon and tools on the host, ship everything
-# the device needs to build a root filesystem, build it there
-# (tools/linux/mkrootfs.sh), and optionally install it into the inactive slot.
+# deploy-rootfs.sh — build the daemon and tools, then the root filesystem (tools/linux/mkrootfs.sh), and
+# either keep the tarball (--out) or send it to a unit and optionally install it into the inactive slot.
 #
-#   tools/linux/deploy-rootfs.sh [--install] [--reboot] [--version vX.Y.Z] [--on-device]
+#   tools/linux/deploy-rootfs.sh --out rootfs.tar.gz [--version vX.Y.Z]            build here, keep the file
+#   HOST=<unit> tools/linux/deploy-rootfs.sh [--install] [--reboot] [--version vX.Y.Z] [--on-device]
 #
-# The rootfs is built in WSL when it is there (fast: the host's CPU and disk,
-# only the tarball crosses the Wi-Fi) and on the device otherwise or with
-# --on-device. The WSL side needs qemu-user-static + binfmt-support (apt) and
-# Alpine's static apk at ~/apk/apk.static; mkrootfs.sh runs inside a user
-# namespace so files can be owned by root without sudo.
+# Where the root filesystem is built:
+#   Linux (x86_64)   here, when qemu-user-static and binfmt-support are installed and Alpine's static apk
+#                    is at ~/apk/apk.static (tools/fetch-inputs.py fetches it)
+#   Windows          in WSL (Ubuntu) with the same packages, driven from Git Bash
+#   otherwise        on the unit itself over SSH (macOS, or --on-device), which needs HOST
+# mkrootfs.sh runs inside a user namespace so files can be owned by root without sudo.
 #
-# Environment: HOST (the device, required), KEY (the SSH key the unit accepts; default
-# TECHO5_SSH_KEY, else ~/.ssh/id_ed25519), TECHO5_INPUTS (the directory with the Alpine minirootfs, vendor.tar.gz and
-# apks312/; default inputs/ in this repository, kept out of git; docs/building.md), TZ_NAME (a new unit's zone until Home Assistant sets it; UTC), GO (go binary),
-# WSL_DISTRO (Ubuntu). Git Bash on Windows is the expected shell.
+# Environment: HOST (the unit; needed unless --out), KEY (the SSH key the unit accepts; default
+# TECHO5_SSH_KEY, else ~/.ssh/id_ed25519), TECHO5_INPUTS (the Alpine minirootfs, apks312/ and models/;
+# default inputs/ in this repository; tools/fetch-inputs.py), TZ_NAME (a new unit's zone until Home
+# Assistant sets it; UTC), GO (go binary), WSL_DISTRO (Ubuntu).
 set -euo pipefail
 
 HOST=${HOST:-}
@@ -32,9 +33,10 @@ WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
 BUILD_TAGS=${BUILD_TAGS:-}
 VENDOR_TGZ=${VENDOR_TGZ:-}
 DEVICE_OVERLAY=${DEVICE_OVERLAY:-}
-INSTALL=; REBOOT=; ONDEVICE=
+INSTALL=; REBOOT=; ONDEVICE=; KEEP=
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--out) KEEP=$2; shift 2;;
 	--install) INSTALL=1; shift;;
 	--reboot) REBOOT=1; shift;;
 	--version) VERSION=$2; shift 2;;
@@ -43,7 +45,8 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-[ -n "$HOST" ] || { echo "HOST is not set: HOST=<the device's address> $0 ..." >&2; exit 1; }
+[ -n "$HOST" ] || [ -n "$KEEP" ] || { echo "HOST is not set: HOST=<the device's address> $0 ..., or $0 --out rootfs.tar.gz" >&2; exit 1; }
+[ -z "$KEEP" ] || [ -z "$ONDEVICE" ] || { echo "--out builds on this computer; it does not go with --on-device" >&2; exit 1; }
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "$VERSION" ] || VERSION="dev-$(git -C "$ROOT" rev-parse --short HEAD)-$(date +%Y%m%d%H%M)"
 STAGE=$ROOT/bin/rootfs-stage
@@ -74,8 +77,9 @@ cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
 [ -n "$VENDOR_TGZ" ] && cp "$VENDOR_TGZ" "$STAGE/inputs/vendor.tar.gz"
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
 # scripts must reach the device with LF endings whatever the checkout did
-for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do sed -i 's/\r$//' "$f"; done
-find "$STAGE/overlay" -type f -exec sed -i 's/\r$//' {} +
+# (perl rather than sed -i, which macOS's sed spells differently)
+for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do perl -pi -e 's/\r$//' "$f"; done
+find "$STAGE/overlay" -type f -exec perl -pi -e 's/\r$//' {} +
 # Wake word models ship in the image so a fresh unit answers to its default word; boot.sh copies
 # them into the state directory when it is empty. They go in after the line endings are fixed:
 # the models are binary, and stripping a CR before every LF byte corrupted three of four (v0.2.5).
@@ -90,12 +94,33 @@ fi
 OUT=/data/techo5-linux/techo5-rootfs-$VERSION.tar.gz
 REMOTE=/data/techo5-linux/build
 host_build=
-if [ -z "$ONDEVICE" ] && command -v wsl.exe >/dev/null 2>&1 \
-	&& wsl.exe -d "$WSL_DISTRO" -- bash -c 'test -e /proc/sys/fs/binfmt_misc/qemu-arm -a -x "$HOME/apk/apk.static"' 2>/dev/null; then
-	host_build=1
+case "$(uname -s)" in
+Linux)
+	[ -z "$ONDEVICE" ] && [ -e /proc/sys/fs/binfmt_misc/qemu-arm ] && [ -x "$HOME/apk/apk.static" ] && host_build=linux;;
+MINGW*|MSYS*|CYGWIN*)
+	# Git Bash on Windows: the build runs in WSL.
+	[ -z "$ONDEVICE" ] && command -v wsl.exe >/dev/null 2>&1 \
+		&& wsl.exe -d "$WSL_DISTRO" -- bash -c 'test -e /proc/sys/fs/binfmt_misc/qemu-arm -a -x "$HOME/apk/apk.static"' 2>/dev/null \
+		&& host_build=wsl;;
+esac
+if [ -n "$KEEP" ] && [ -z "$host_build" ]; then
+	echo "--out needs a local build: on Linux install qemu-user-static and binfmt-support and put apk.static at ~/apk/apk.static;" >&2
+	echo "on Windows the same inside WSL. Elsewhere set HOST and build on the unit instead." >&2
+	exit 1
 fi
 
-if [ -n "$host_build" ]; then
+if [ "$host_build" = linux ]; then
+	echo "== building the rootfs here"
+	bash "$ROOT/tools/linux/wsl-build.sh" "$STAGE" "$VERSION" "$TZ_NAME" >/dev/null
+	tarball=$HOME/techo5-build/rootfs.tar.gz
+	[ -s "$tarball" ] || { echo "the build failed" >&2; exit 1; }
+	if [ -n "$KEEP" ]; then
+		mkdir -p "$(dirname "$KEEP")"; cp "$tarball" "$KEEP"; echo "built: $KEEP"; exit 0
+	fi
+	echo "== shipping the rootfs to $HOST"
+	"${SSH[@]}" "mkdir -p /data/techo5-linux"
+	scp -O -i "$KEY" -o StrictHostKeyChecking=no "$tarball" "root@$HOST:$OUT"
+elif [ -n "$host_build" ]; then
 	echo "== building the rootfs in WSL ($WSL_DISTRO)"
 	# Git Bash's /e/... is WSL's /mnt/e/...; no Windows path crosses over (wsl.exe eats backslashes).
 	stage_wsl=$(cygpath -u "$STAGE" | sed 's|^/\([a-zA-Z]\)/|/mnt/\L\1/|')
@@ -103,6 +128,9 @@ if [ -n "$host_build" ]; then
 	helper=$(cygpath -u "$ROOT/tools/linux/wsl-build.sh" | sed 's|^/\([a-zA-Z]\)/|/mnt/\L\1/|')
 	tarball=$(MSYS_NO_PATHCONV=1 wsl.exe -d "$WSL_DISTRO" -- bash "$helper" "$stage_wsl" "$VERSION" "$TZ_NAME" | tr -d '\r' | tail -1)
 	[ -n "$tarball" ] || { echo "WSL build failed" >&2; exit 1; }
+	if [ -n "$KEEP" ]; then
+		mkdir -p "$(dirname "$KEEP")"; cp "$(printf '%s' "$tarball" | tr '\\' '/')" "$KEEP"; echo "built: $KEEP"; exit 0
+	fi
 	echo "== shipping the rootfs to $HOST"
 	"${SSH[@]}" "mkdir -p /data/techo5-linux"
 	scp -O -i "$KEY" -o StrictHostKeyChecking=no "$tarball" "root@$HOST:$OUT"

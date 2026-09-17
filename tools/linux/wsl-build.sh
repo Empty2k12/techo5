@@ -26,4 +26,5 @@ map=--map-auto
 command -v newuidmap >/dev/null || map=
 unshare -Ur $map sh "$W/in/tools/mkrootfs.sh" -i "$W/in" -o "$W/rootfs.tar.gz" -w "$W" \
 	-V "$VERSION" -z "$TZNAME" -a armv7 -A "$APK"
-wslpath -w "$W/rootfs.tar.gz"
+# The path the caller copies from: a Windows path under WSL, a plain one on Linux.
+wslpath -w "$W/rootfs.tar.gz" 2>/dev/null || echo "$W/rootfs.tar.gz"

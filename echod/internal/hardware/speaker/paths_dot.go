@@ -143,3 +143,7 @@ const AmpSwitch = "Ext_Speaker_Amp_Switch"
 
 // OutputBoost is make-up gain on the output; the Dot's vendor tuning already carries its own.
 const OutputBoost = 1.0
+
+// DriverTuning applies the vendor driver's volume-dependent EQ and limiter (lib/asp), read from the
+// vendor partition: the files it reads are the Dot's.
+const DriverTuning = true

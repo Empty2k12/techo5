@@ -64,6 +64,7 @@ func open(ctx context.Context, acct Account, incoming func(*diago.DialogServerSe
 		sipgo.WithUserAgent(acct.Username),
 		sipgo.WithUserAgentHostname(host),
 		sipgo.WithUserAgenTLSConfig(&tls.Config{ServerName: acct.Server, CipherSuites: providerCiphers, MinVersion: tls.VersionTLS12}),
+		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(sipLogger())),
 	}
 	ua, err := sipgo.NewUA(opts...)
 	if err != nil {

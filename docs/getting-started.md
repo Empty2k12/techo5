@@ -27,14 +27,29 @@ supported.
 - A **USB data cable** for the device's USB port (micro-USB on the Dot and the Spot). A charge-only
   cable won't work.
 - **Home Assistant** with the ESPHome integration (built in).
-- A computer. Which one depends on the device and the step; see [Windows, Linux or macOS](#windows-linux-or-macos)
-  below.
-- For the installers: [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
-  (`pwsh`), the Android platform tools (`adb`, `fastboot`), Python 3, and `git` to fetch the repository.
-  Nothing is compiled: the installers download the signed release (root filesystem, Bluetooth kernel
-  and boot image or rescue packages) and check every file against its checksum; the Dot and Spot boot
-  images are built from your own unit's backup.
-- The unlock threads on XDA need a (free) XDA account to download attachments.
+- A Windows, Linux or macOS computer, set up as below. The unlock steps differ by system; see
+  [Windows, Linux or macOS](#windows-linux-or-macos).
+
+## Set up your computer (once)
+
+The installers are Python 3 scripts that work the same on Windows, Linux and macOS. Nothing is compiled:
+they download the signed release, check every file against its checksum, and build the Dot and Spot boot
+images from your own unit's backup. You need Python 3, the Android platform tools (`adb` and
+`fastboot`) and `git`:
+
+- **Windows:** install [Python 3](https://www.python.org/downloads/) (tick "Add python.exe to PATH"),
+  [Git for Windows](https://git-scm.com/download/win), and the
+  [platform tools](https://developer.android.com/tools/releases/platform-tools) (unzip them and add the
+  folder to PATH). In PowerShell or Command Prompt, type `python` where this guide says `python3`.
+- **Linux** (Ubuntu or Debian): `sudo apt install python3 git adb fastboot`, then
+  `sudo usermod -aG dialout $USER` and log in again, so the installers can open the device's USB serial
+  console. If ModemManager is installed, stop it while installing (`sudo systemctl stop ModemManager`);
+  it grabs new USB serial ports.
+- **macOS:** `xcode-select --install` (Python 3 and git), then
+  `brew install android-platform-tools` ([Homebrew](https://brew.sh)).
+
+Check with `python3 --version` and `adb version`. The unlock threads on XDA also need a (free) XDA
+account to download attachments.
 
 ## Echo Show 5 (2nd gen)
 
@@ -56,8 +71,8 @@ supported.
    ```
    git clone https://github.com/HuskerMinion/techo5
    cd techo5
-   pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen" -DryRun
-   pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen"
+   python3 tools/install-show.py --serial <serial> --name "Kitchen" --dry-run
+   python3 tools/install-show.py --serial <serial> --name "Kitchen"
    ```
    `<serial>` is what `adb devices` shows. The dry run downloads and checks the
    [latest release](https://github.com/HuskerMinion/techo5/releases/latest) (boot image with Bluetooth,
@@ -123,8 +138,8 @@ loops. Every command runs the same on Windows, Linux and macOS once the Dot is u
    ```
    git clone https://github.com/HuskerMinion/techo5-dot
    cd techo5-dot
-   pwsh ./tools/install-dot.ps1 -Serial <serial> -DryRun
-   pwsh ./tools/install-dot.ps1 -Serial <serial> -Name "Kitchen"
+   python3 tools/install-dot.py --serial <serial> --dry-run
+   python3 tools/install-dot.py --serial <serial> --name "Kitchen"
    ```
    `<serial>` is what `adb devices` shows. The dry run checks the Dot, backs up every partition that
    boots it into `backups/<serial>/` (keep that folder: it's the way back), downloads and checks the
@@ -160,18 +175,18 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    ```
    git clone https://github.com/HuskerMinion/techo5-spot
    cd techo5-spot
-   pwsh ./tools/backup-spot.ps1 -Serial <serial> -IncludeSystem
+   python3 tools/backup-spot.py --serial <serial> --include-system
    ```
    Keep `backups/<serial>/`: it's the way back to LineageOS and Fire OS.
 6. **Install TECHO5 Spot**, booted back into LineageOS with rooted debugging on:
    ```
-   pwsh ./tools/install-spot-linux.ps1 -Serial <serial> -Name "Kitchen" -BuildOnly
-   pwsh ./tools/install-spot-linux.ps1 -Serial <serial> -Name "Kitchen"
+   python3 tools/install-spot.py --serial <serial> --name "Kitchen" --build-only
+   python3 tools/install-spot.py --serial <serial> --name "Kitchen"
    ```
    The first run captures what it needs from this Spot, downloads and checks the release, and builds
    the boot image, touching nothing else. The second replaces LineageOS with TECHO5 (it asks before
-   erasing), with Bluetooth, and waits for the first boot. `-Logo` also replaces the bootloader's
-   Amazon picture (needs `pip install pillow`).
+   erasing), with Bluetooth, and waits for the first boot. `--logo` also replaces the bootloader's
+   Amazon picture (needs `python3 -m pip install pillow`).
    *Check:* the round screen shows the TECHO5 clock.
 7. **Add it to Home Assistant**: see below.
 
@@ -201,32 +216,26 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 | Unlock: Dot (amonet-biscuit) | Use a Linux live USB | **Yes** (what the thread uses) | Use a Linux live USB |
 | Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | Use a Linux live USB |
 | LineageOS (Show 5, Spot) | Yes | Yes | Yes (TWRP and `adb` only) |
-| Install TECHO5 on the Show 5 (`install-show.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
+| Install TECHO5 on the Show 5 (`install-show.py`) | **Yes** | **Yes** | **Yes** |
 | Fire OS 6574.1, root, adb key (Dot) | Yes | Yes | Yes |
-| Install TECHO5 Dot (`install-dot.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
-| Install TECHO5 Spot (`install-spot-linux.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
+| Install TECHO5 Dot (`install-dot.py`) | **Yes** | **Yes** | **Yes** |
+| Install TECHO5 Spot (`install-spot.py`) | **Yes** | **Yes** | **Yes** |
 | Updates after that | Home Assistant | Home Assistant | Home Assistant |
 
 **On Linux:**
-- Install the Android platform tools (`adb` and `fastboot`, e.g. `sudo apt install adb fastboot`)
-  and a serial terminal (`screen` or `picocom`).
-- For the USB serial console the installers use, you may need to be in the `dialout` group
-  (`sudo usermod -aG dialout $USER`, then log in again). By hand: `screen /dev/ttyACM0 115200`.
+- A serial terminal for working on a unit by hand: `screen /dev/ttyACM0 115200` (or `picocom`).
 - If ModemManager is installed, stop it while working with serial consoles and the BootROM
   (`sudo systemctl stop ModemManager`); it grabs new USB serial ports.
 
 **On macOS:**
-- Install the platform tools with Homebrew (`brew install android-platform-tools`); `screen` is
-  built in: `screen /dev/tty.usbmodem* 115200`.
+- `screen` is built in, for working on a unit by hand: `screen /dev/cu.usbmodem* 115200`.
 - The amonet BootROM steps need Linux. A live USB (Ubuntu) is more reliable than a virtual machine:
   the exploit re-enumerates USB mid-way, and VM USB passthrough often loses the device.
 - The installers work from Terminal once the device is unlocked (and, for the Show 5 and the Spot,
   on LineageOS).
 
-**The Show 5, Dot and Spot installers** run in PowerShell 7 on all three (`sudo snap install powershell --classic`
-on Ubuntu, `brew install powershell` on macOS, `winget install Microsoft.PowerShell` on Windows) and
-find the device's USB serial console on each. Nothing is built on your computer. Building the images
-yourself instead is described in each repository's `docs/building.md`.
+**On Windows:** type `python` for `python3`. Git Bash is only needed for building images yourself
+(each repository's `docs/building.md`).
 
 ## If something goes wrong
 

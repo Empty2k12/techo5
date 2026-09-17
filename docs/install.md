@@ -24,21 +24,23 @@ firmware): releases don't carry it, so it is copied into the store before the pa
 
 ## The quick way: one command
 
-With [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
-(`pwsh`) on any of the three:
+With Python 3, `adb`, `fastboot` and `git` (setup for each system:
+[getting started](getting-started.md#set-up-your-computer-once)):
 
 ```
 git clone https://github.com/HuskerMinion/techo5
 cd techo5
-pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen" -DryRun   # download and check the release only
-pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen"
+python3 tools/install-show.py --serial <serial> --name "Kitchen" --dry-run   # download and check the release only
+python3 tools/install-show.py --serial <serial> --name "Kitchen"
 ```
+
+On Windows, type `python` instead of `python3`.
 
 It does steps 1 to 6 below: downloads the latest release and checks the boot image and root filesystem
 against their checksums, keeps LineageOS's boot image in `backups/<serial>/` when adb is root, flashes,
 creates the slot store over the USB serial console (it asks before erasing), provisions the name and
 the Home Assistant key (kept in `backups/<serial>/api.psk`), and waits for the first boot.
-`-SshKey ~/.ssh/id_ed25519.pub` also turns SSH on with your key. Then go to
+`--ssh-key ~/.ssh/id_ed25519.pub` also turns SSH on with your key. Then go to
 [step 7](#7-add-it-to-home-assistant).
 
 On Linux you may need to be in the `dialout` group for the serial console

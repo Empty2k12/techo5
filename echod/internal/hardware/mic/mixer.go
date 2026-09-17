@@ -90,6 +90,9 @@ var mixes = sync.OnceValue(func() []mix {
 		out = append(out, mix{config.MixDelaySum, func() Mixer { return NewBeamformer() }})
 	}
 
+	if !VendorBeamformer {
+		return out
+	}
 	w, err := subband.Load(subband.VendorDir)
 	if err != nil {
 		slog.Error("vendor beamformer unavailable", "err", err)

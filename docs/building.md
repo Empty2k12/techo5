@@ -1,130 +1,157 @@
 # Building TECHO5 yourself
 
-You don't need any of this to install or update a device. The installers and Home Assistant's update
-card use the signed releases. This page is for changing the daemon or the images: what each build
-needs, where every input comes from, and which script builds what.
+You don't need any of this to install or update a Show 5. `tools/install-show.py` and Home
+Assistant's update card use the signed releases. This page is for changing the daemon or the images.
 
-The Echo Dot and Echo Spot have their own pages that build on this one:
+The Echo Dot and Echo Spot have their own pages:
 [techo5-dot docs/building.md](https://github.com/HuskerMinion/techo5-dot/blob/main/docs/building.md) and
 [techo5-spot docs/building.md](https://github.com/HuskerMinion/techo5-spot/blob/main/docs/building.md).
 
-## What you need
+## 1. Set up your computer
 
-| | Windows | Linux | macOS |
-|---|---|---|---|
-| The daemon (`echod`) and Go tools | [Go](https://go.dev/dl/) | Go | Go |
-| Scripts in `tools/linux/*.sh` | Git Bash (from [Git for Windows](https://git-scm.com/download/win)) | bash | bash |
-| Scripts in `tools/*.ps1` | [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (`pwsh`) | pwsh | pwsh |
-| Image tools (`mkimage.py`, `patch-dtb.py`) | Python 3 (`pip install fdt` for `patch-dtb.py`) | Python 3 | Python 3 |
-| Root filesystem | WSL (Ubuntu) with `qemu-user-static binfmt-support uidmap` | the same packages, or build on the device | build on the device |
-| Kernel | WSL (Ubuntu) | Linux | a Linux VM or container |
+Everything is Go, Python 3 and bash. Two builds need Linux: the root filesystem (it runs Alpine's
+package manager under QEMU) and the kernel.
 
-The Go toolchain cross-compiles everything for the devices (`GOOS=linux GOARCH=arm GOARM=7`); no C
-compiler is needed except for the kernel, bluez-alsa (Dot) and the optional echo canceller.
-
-## Layout and environment
-
-Nothing machine-specific is built in. Everything defaults to folders inside the checkout, all
-git-ignored, and each can be moved with an environment variable:
-
-| Variable | Default | What |
-|---|---|---|
-| `TECHO5_INPUTS` | `inputs/` | build inputs (below) |
-| `KERNEL_IMAGE` | `inputs/boot-lineage-18.1-20260904-cronos.img` | your unit's LineageOS boot image |
-| `KERNEL` | none | a rebuilt `Image.gz-dtb` to use instead of the one in `KERNEL_IMAGE` |
-| `KEY` / `TECHO5_SSH_KEY` | `~/.ssh/id_ed25519` | the SSH key `deploy-rootfs.sh` uses to reach a unit |
-| `GO` | `go` | the Go binary |
-| `TECHO5_SIGN_KEY` | none | the release signing key (maintainer only) |
-
-In WSL, pass Windows variables through with `WSLENV`, e.g. `setx WSLENV TECHO5_INPUTS/p`.
-
-## Inputs
-
-Everything public is fetched by one script, checked where a checksum exists:
+**Linux** (Ubuntu or Debian; other distributions have the same packages under similar names):
 
 ```
-pwsh ./tools/fetch-inputs.ps1 -Device show     # or -Device spot, or -Device dot -Dot ../techo5-dot
+sudo apt install git python3 qemu-user-static binfmt-support uidmap \
+    build-essential bc bison flex libssl-dev curl xz-utils bzip2
 ```
 
-It fills `inputs/` with:
+and Go 1.26 or later from [go.dev/dl](https://go.dev/dl/) (distribution packages are often older).
 
-- `alpine-minirootfs-3.24.1-armv7.tar.gz`: Alpine's base image (pinned sha256);
-- `busybox.static` (from Alpine's `busybox-static`) and `apk.static` (x86_64 `apk-tools-static` 2.14,
-  for the root filesystem build; in WSL copy it to `~/apk/apk.static`);
-- `apks/` and `apks312/`: the packages in [tools/linux/packages.txt](../tools/linux/packages.txt) for
-  the rescue initramfs; the Wi-Fi drivers need wpa_supplicant 2.9 and its libraries, from Alpine 3.12;
-- `models/`: the wake word models from
-  [esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models) (`models/v2`).
+**Windows:** install [Git for Windows](https://git-scm.com/download/win) (its Git Bash runs the
+`.sh` scripts), [Go](https://go.dev/dl/) and [Python 3](https://www.python.org/downloads/). Then
+install WSL with Ubuntu (`wsl --install -d Ubuntu`) and, inside Ubuntu, the Linux packages above. The
+root filesystem build runs in WSL on its own when you start it from Git Bash; the kernel build is run
+inside Ubuntu. On Windows, type `python` where this page says `python3`.
 
-One input comes from **your own unit** and is never published: **the LineageOS boot image**
-(`inputs/boot-lineage-18.1-20260904-cronos.img`), for building a boot image yourself. With LineageOS
-running and adb as root, `adb pull /dev/block/mmcblk0p9`, or keep the `boot.img` from the LineageOS
-zip you installed. Its kernel and header are used as they are.
+**macOS:** `xcode-select --install` (git, bash, Python 3), then `brew install go`. The daemon and the
+boot image build on macOS. The root filesystem is built on a running Show instead (step 4 does that
+over SSH), and the kernel needs a Linux machine or virtual machine.
 
-**The vendor tree** (the Wi-Fi and Bluetooth drivers, firmware and audio tuning from LineageOS's
-system partition) is not an input at all. It belongs to Amazon and the chip makers, so no image
-carries it: the installer copies each unit's own into the slot store before LineageOS is erased,
-`slotctl install` copies it into every new slot, and `boot.sh` mounts it at `/vendor`. A unit that
-came from an older image, which did carry one, keeps the copy it already has. For a development
-image that has to boot on a unit without a store copy, `VENDOR_TGZ=<tarball>` puts one in; such an
-image is never published, and the release scripts refuse one.
+Get the code (the three repositories side by side, if you build for more than one device):
 
-## The daemon
+```
+git clone https://github.com/HuskerMinion/techo5
+cd techo5
+```
+
+## 2. Fetch the inputs
+
+```
+python3 tools/fetch-inputs.py --device show
+```
+
+That fills `inputs/` (git-ignored) with Alpine's base image, `busybox.static`, `apk.static`, the rescue
+environment's packages and the wake word models, each from its public source. The root filesystem
+build looks for `apk.static` in your home directory, so on Linux (or inside WSL's Ubuntu) also run:
+
+```
+mkdir -p ~/apk && cp inputs/apk.static ~/apk/apk.static
+```
+
+(From WSL the repository is under `/mnt/c/...` or wherever you cloned it.)
+
+**From your own Show, for a boot image only:** its LineageOS boot image, as
+`inputs/boot-lineage-18.1-20260904-cronos.img`. The installer keeps one in `backups/<serial>/`, or with
+LineageOS running and Rooted debugging on: `adb pull /dev/block/mmcblk0p9 inputs/boot-lineage-18.1-20260904-cronos.img`.
+
+No vendor tree (LineageOS's Wi-Fi and Bluetooth drivers and firmware) is needed or published: each
+Show keeps its own in the slot store.
+
+## 3. The daemon
 
 ```
 cd echod
 go test ./...
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -tags "" -o ../bin/echod-arm ./cmd/echod
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o ../bin/echod-arm ./cmd/echod
+cd ..
 ```
 
-Build tags pick the device: none for the Show 5, `dot` for the Echo Dot, `spot` for the Echo Spot.
-To try a build on a running unit, turn on its SSH switch in Home Assistant (with a key sent through
-the `ssh_keys` action), copy the binary over `/usr/local/bin/techo5` and restart the service; the
-next update or a reboot into the other slot puts the release back.
-
-## The root filesystem
-
-[tools/linux/deploy-rootfs.sh](../tools/linux/deploy-rootfs.sh) builds the daemon and tools, stages
-them with the inputs and [tools/linux/rootfs](../tools/linux/rootfs) (no vendor tree), and builds the tarball with
-[mkrootfs.sh](../tools/linux/mkrootfs.sh) (Alpine packages from
-[packages-rootfs.txt](../tools/linux/packages-rootfs.txt), installed by `apk.static` under QEMU):
+(`go test` runs everywhere; a few hardware packages only build for Linux.) To try a daemon on a Show
+already running TECHO5: turn on its SSH switch in Home Assistant with a key sent through the
+`ssh_keys` action, copy the binary over, and bind it in place until the next reboot:
 
 ```
-HOST=<unit address> bash tools/linux/deploy-rootfs.sh --version v0.0.0-test            # build and copy it to the unit
-HOST=<unit address> bash tools/linux/deploy-rootfs.sh --version v0.0.0-test --install   # and install it in the spare slot
+scp bin/echod-arm root@<address>:/tmp/echod-test
+ssh root@<address> 'mount --bind /tmp/echod-test /usr/local/bin/techo5 && killall techo5'
 ```
 
-On Windows it builds in WSL when WSL has `qemu-arm` binfmt and `~/apk/apk.static`, which is fast.
-Anywhere else (Linux, macOS, or `--on-device`) it copies the stage to the unit over SSH and builds
-there, which is slower but needs nothing on the computer beyond bash and Go.
+## 4. The root filesystem
 
-## The kernel (Bluetooth)
+[tools/linux/deploy-rootfs.sh](../tools/linux/deploy-rootfs.sh) builds the daemon and tools and then the
+root filesystem ([mkrootfs.sh](../tools/linux/mkrootfs.sh), with the packages in
+[packages-rootfs.txt](../tools/linux/packages-rootfs.txt)):
+
+```
+bash tools/linux/deploy-rootfs.sh --out build/rootfs.tar.gz --version v0.0.0-test                  # Linux, or Git Bash on Windows
+HOST=<address> bash tools/linux/deploy-rootfs.sh --version v0.0.0-test --install                      # build and install on a running Show
+```
+
+The first keeps the tarball. The second sends it to a Show (SSH on, as above) and installs it into the
+spare slot, where it boots on trial and falls back if it doesn't settle. On macOS only the second
+works: the build then runs on the Show itself, which takes a few minutes longer.
+
+## 5. The kernel (Bluetooth)
 
 LineageOS's kernel has no Bluetooth stack. [tools/linux/build-kernel.sh](../tools/linux/build-kernel.sh)
-rebuilds it in WSL or Linux at the exact commit the LineageOS image came from, so the vendor modules
-still load, with Bluetooth added; its header lists the source, the toolchain (Arm's GCC 8.3, no root
-needed) and every variable. [tools/linux/README.md](../tools/linux/README.md) has the device tree edit
-the Show needs (both microphones instead of their average).
-
-## The boot image
+rebuilds it at the exact commit the LineageOS image came from, so the vendor modules still load, with
+Bluetooth added. On Linux, or inside WSL's Ubuntu:
 
 ```
-bash tools/linux/build-image.sh -o bin/techo5-linux-boot.img            # with inputs/techo5_ed25519.pub for rescue SSH
-bash tools/linux/build-image.sh -o bin/techo5-linux-boot.img --no-key   # as releases are built
+bash tools/linux/build-kernel.sh -o inputs/Image.gz-dtb-bt
 ```
 
-`KERNEL=inputs/Image.gz-dtb-bt` uses the Bluetooth kernel. Flashing and the rest of the install are in
-[install.md](install.md).
+Its header lists the source checkout and the toolchain (Arm's GCC 8.3, downloaded without root).
+[tools/linux/README.md](../tools/linux/README.md) has the device tree edit that gives the daemon both
+microphones instead of their average (`patch-dtb.py`, which needs `python3 -m pip install fdt`).
 
-## The echo canceller (optional)
+## 6. The boot image
+
+```
+KERNEL=inputs/Image.gz-dtb-bt bash tools/linux/build-image.sh -o build/techo5-boot.img --no-key
+```
+
+`--no-key` is how releases are built: the rescue environment then accepts only SSH keys already on the
+unit. Put your public key at `inputs/techo5_ed25519.pub` and leave `--no-key` out to have it built in.
+
+## 7. Install your build
+
+On a Show still running LineageOS, the installer takes your files in place of the release's:
+
+```
+python3 tools/install-show.py --serial <serial> --name Kitchen --boot build/techo5-boot.img --rootfs build/rootfs.tar.gz
+```
+
+On a Show already running TECHO5, step 4's `--install` puts a root filesystem in the spare slot. A boot
+image goes on with `fastboot flash boot` (with the Show in fastboot, docs/install.md step 3).
+
+## Optional: the echo canceller
 
 [tools/linux/build-aec.sh](../tools/linux/build-aec.sh) compiles the WebRTC echo canceller helper for
-armv7 inside an Alpine root under QEMU (WSL or Linux). `deploy-rootfs.sh` includes `bin/techo5-aec-arm`
-when it exists.
+armv7 (Linux or WSL). `deploy-rootfs.sh` includes `bin/techo5-aec-arm` when it exists.
 
-## Releases
+## Package versions
 
-[tools/release.ps1](../tools/release.ps1) (Show 5), `tools/release-dot.ps1` (Dot) and
-`tools/release-spot.ps1` (Spot) sign a manifest with the key in `TECHO5_SIGN_KEY` and publish with
-`gh`. Devices only take a manifest signed by the project's key, so a fork publishing its own releases
-needs its own key and a daemon built with its public key.
+`tools/linux/packages.txt` and `packages-rootfs.txt` name exact Alpine package versions. Alpine keeps
+only the newest build of each package, so an old version eventually disappears from its mirror:
+`fetch-inputs.py` then takes the newest and says so, and a root filesystem build installs whatever
+Alpine 3.24 serves that day. Releases don't depend on this: everything a unit or the installer needs
+is published with the release, and the lists are brought up to date (and tested) before a release.
+
+## Releases (maintainer)
+
+`tools/release.ps1` (Show 5), techo5-dot's `tools/release-dot.ps1` and techo5-spot's
+`tools/release-spot.ps1` sign a manifest with the key in `TECHO5_SIGN_KEY` and publish with `gh`. They
+are PowerShell scripts for the maintainer's Windows machine. Devices only take a manifest signed by the
+project's key, so a fork publishing its own releases needs its own key and a daemon built with its
+public key (`echod/internal/update/trust.go`).
+
+## Where things default
+
+Everything goes into git-ignored folders in the checkout, and each can be moved with an environment
+variable: `inputs/` (`TECHO5_INPUTS`), `build/` (`TECHO5_WORK`), `backups/` (`TECHO5_BACKUPS`).
+`KERNEL_IMAGE` and `KERNEL` pick the boot image's kernel; `KEY` or `TECHO5_SSH_KEY` the SSH key
+`deploy-rootfs.sh` uses (default `~/.ssh/id_ed25519`); `GO` and `PYTHON` the tools.
