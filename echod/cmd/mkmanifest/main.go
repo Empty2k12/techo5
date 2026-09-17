@@ -30,6 +30,9 @@ func main() {
 		// apart ("arm-dot", see internal/update/arch_dot.go) and a device only ever sees its own.
 		armDot    = flag.String("arm-dot", "", "the Echo Dot build (-tags dot), hashed and measured")
 		rootfsDot = flag.String("rootfs-arm-dot", "", "the Echo Dot rootfs tarball, hashed and measured")
+		// The Echo Spot likewise ("arm-spot", internal/update/arch_spot.go).
+		armSpot    = flag.String("arm-spot", "", "the Echo Spot build (-tags spot), hashed and measured")
+		rootfsSpot = flag.String("rootfs-arm-spot", "", "the Echo Spot rootfs tarball, hashed and measured")
 		out       = flag.String("out", "", "where to write the manifest, or stdout")
 		// Devices believe a manifest only with the release key's signature beside it
 		// (internal/update/trust.go), so a release without one offers nothing.
@@ -41,8 +44,8 @@ func main() {
 	flag.StringVar(&m.ReleaseURL, "release-url", "", "what the card's link points at")
 	flag.Parse()
 
-	builds := map[string]string{"arm64": *arm64, "arm": *arm, "arm-dot": *armDot}
-	rootfses := map[string]string{"arm": *rootfs, "arm-dot": *rootfsDot}
+	builds := map[string]string{"arm64": *arm64, "arm": *arm, "arm-dot": *armDot, "arm-spot": *armSpot}
+	rootfses := map[string]string{"arm": *rootfs, "arm-dot": *rootfsDot, "arm-spot": *rootfsSpot}
 	if err := run(m, *from, builds, rootfses, *out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -76,8 +79,8 @@ func sign(out, keyFile string) error {
 }
 
 func run(m update.Manifest, from string, builds map[string]string, rootfses map[string]string, out string) error {
-	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "" && builds["arm-dot"] == "") {
-		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm/-arm-dot are required")
+	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "" && builds["arm-dot"] == "" && builds["arm-spot"] == "") {
+		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm/-arm-dot/-arm-spot are required")
 	}
 
 	m.Binaries = make(map[string]update.Binary, len(builds))
