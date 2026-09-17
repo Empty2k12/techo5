@@ -6,5 +6,31 @@ internal/alsa
   Files: alsa.go, playback.go, mixer.go (raw /dev/snd ioctl ALSA client).
 
 echod (dependency)
+  github.com/emiago/diago — Mozilla Public License 2.0
+  SIP calls and their media (feature/phone). Used unmodified; its source is at
+  https://github.com/emiago/diago, as the licence requires for the binaries that include it.
+
+echod (dependency)
+  github.com/emiago/sipgo — BSD 2-Clause License
+  Copyright (c) 2022, Emir Aganovic. All rights reserved.
+  The SIP stack under diago.
+
+echod (dependency)
+  github.com/zaf/g711 — BSD 2-Clause License
+  Copyright (c) 2016-2024, Eleftherios (Lefteris) Zafiris. All rights reserved.
+  G.711 encoding and decoding for calls.
+
+  Both BSD 2-Clause licences: redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the copyright notice, this list of conditions and the
+  following disclaimer are retained. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+  CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT OF THE USE OF
+  THIS SOFTWARE.
+
+echod (dependency)
+  github.com/go-audio/riff — Apache License 2.0
+  Pulled in by diago for WAV files; not used for calls.
+
+echod (dependency)
   github.com/hajimehoshi/go-mp3 — Apache License 2.0
   MP3 decoding for announcements Home Assistant serves unconverted.

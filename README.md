@@ -43,6 +43,7 @@ the Show into a fast, private Home Assistant voice satellite with a touch screen
 | 📻 **Weather and radio with no setup** | A new Show uses the forecast every Home Assistant has, and lists the radio stations near home from Home Assistant's Radio Browser. Pick another weather entity (your own station, say) on the screen, and keep your own favorite stations too. |
 | ⏰ **Alarms that ring on their own** | Set on the screen, by Home Assistant, or followed from its helpers; they ring from the Show's own clock even when Home Assistant is down. Snooze included. |
 | 🎧 **Bluetooth, rebuilt** | Earbuds and speakers over A2DP, plus a Home Assistant Bluetooth proxy, on a kernel rebuilt with Bluetooth from the LineageOS source. |
+| 📞 **A speakerphone again** | Calls through your own SIP provider: "call Alex" by voice, calls that ring on the screen, calls between your own devices, and a help call that alerts your phones and dials people in turn. Encrypted end to end to the provider, and off until you sign it in. [docs/phone.md](docs/phone.md) |
 | 📷 **A camera you control** | The front camera becomes a Home Assistant camera entity, off unless something is watching, and physically off while the mute button is engaged. |
 | 🛟 **Always recoverable** | A rescue environment with a USB serial console, and TWRP left in place: LineageOS is one flash away. |
 
@@ -77,8 +78,9 @@ Straight from the device's own screen.
 | Smart home | Alexa routines | Everything Home Assistant does |
 | Updates | Amazon, automatic, whenever | From this repo's releases, when you press Install; A/B slots with automatic fallback |
 | Remote access | None | SSH with keys, off by default |
-| Listening on your network | Amazon's services | Home Assistant's encrypted API and the Sendspin player; SSH and web pages only when switched on |
-| Calling, Drop In, shopping, skills | Yes | **No.** Those are Alexa cloud services |
+| Listening on your network | Amazon's services | Home Assistant's encrypted API and the Sendspin player; SSH and web pages only when switched on. A signed-in phone keeps its own connection out to the provider |
+| Calling | Alexa calling and Drop In | Phone calls through your own SIP provider (TLS and SRTP), placed from Home Assistant or by voice, answered on the screen; device to device calls in the house |
+| Shopping, skills | Yes | **No.** Those are Alexa cloud services |
 
 ## Install
 
@@ -158,7 +160,9 @@ TECHO5 exists because of these projects and the people behind them.
   [bluez-alsa](https://github.com/arkq/bluez-alsa) (arkq), and
   [webrtc-audio-processing](https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing).
 - Go libraries: go-mp3 (Hajime Hoshi), godbus, gorilla/websocket, zeroconf, mewkiz/flac, pion/opus,
-  cobra, viper, protobuf and the Go fonts.
+  cobra, viper, protobuf and the Go fonts; for calls, [diago](https://github.com/emiago/diago) and
+  [sipgo](https://github.com/emiago/sipgo) (Emir Aganovic), [Pion](https://github.com/pion) SRTP and
+  RTP, and zaf/g711.
 
 See [NOTICE](NOTICE) for licenses of code carried in this repository.
 

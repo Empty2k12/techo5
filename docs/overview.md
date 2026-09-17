@@ -36,6 +36,10 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   when switched on). Auto-exposure meters a centre-weighted zone grid, so a window behind somebody
   no longer sets it, and the tone curve finds black and lifts the middle of a backlit frame. Off
   unless something is looking, and off while the mute button is engaged.
+- **Phone calls** through a SIP provider (TLS and SRTP): placed from Home Assistant (`phone_call`) or
+  by voice through an automation, answered on the call page, device to device calls, an
+  `esphome.techo5_phone` event per step. Off until `phone_account` signs the device in. See
+  [phone.md](phone.md).
 - **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant (scanning
   through BlueZ on the Show), off by default.
 - **Security**: nothing is open to the network by default except Home Assistant's encrypted link
