@@ -208,10 +208,18 @@ if (-not $Force) {
     if ((Read-Host '   Type ERASE to go on') -ne 'ERASE') { throw 'stopped before erasing; the unit stays in rescue (flash the LineageOS boot image to go back)' }
 }
 $tar = "/data/media/0/Download/$rootfsName"
+# The vendor tree (Wi-Fi and Bluetooth drivers, firmware) is this unit's own, from LineageOS: releases
+# don't carry it. Kept on userdata before the system partition is erased, then in the store.
+$vmod = 'vendor/lib/modules/mt76x8_wlan.ko'
+$o = Show "mkdir -p /data/techo5-linux && tar -cf /data/techo5-linux/vendor.tar -C /android/system vendor && tar -tf /data/techo5-linux/vendor.tar $vmod >/dev/null && echo VENDOR-SAVED" 180000
+if ($o -notmatch 'VENDOR-SAVED') { throw "saving LineageOS's vendor tree failed (nothing was erased):`n$o" }
 $o = Show "umount /android 2>/dev/null; slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it >/tmp/mkstore.log 2>&1 && echo MKSTORE-OK; tail -3 /tmp/mkstore.log" 300000
 if ($o -notmatch 'MKSTORE-OK') { throw "mkstore failed:`n$o" }
-$o = Show "STORE=/store slotctl install $tar >/tmp/install.log 2>&1 && echo INSTALL-OK; tail -2 /tmp/install.log; STORE=/store slotctl status" 900000
+$o = Show "tar -xf /data/techo5-linux/vendor.tar -C /store && [ -e /store/$vmod ] && echo VENDOR-OK" 180000
+if ($o -notmatch 'VENDOR-OK') { throw "putting the vendor tree into the store failed (it is kept in /data/techo5-linux/vendor.tar):`n$o" }
+$o = Show "STORE=/store slotctl install $tar >/tmp/install.log 2>&1 && echo INSTALL-OK; tail -2 /tmp/install.log; [ -e /store/slots/a/$vmod ] || { mkdir -p /store/slots/a/vendor && cp -a /store/vendor/. /store/slots/a/vendor/; }; [ -e /store/slots/a/$vmod ] && rm -f /data/techo5-linux/vendor.tar && echo SLOT-VENDOR-OK; STORE=/store slotctl status" 900000
 if ($o -notmatch 'INSTALL-OK') { throw "slot install failed:`n$o" }
+if ($o -notmatch 'SLOT-VENDOR-OK') { throw "the vendor tree did not reach slot a:`n$o" }
 Note ($o -split "`n" | Where-Object { $_ -match '^slot a' })
 
 $prov = "mkdir -p /data/misc/techo5 && printf '%s\n' $(Quote $Name) > /data/misc/techo5/name && (umask 077; printf '%s\n' $(Quote $psk) > /data/misc/techo5/psk)"

@@ -17,7 +17,9 @@
 #   tools/slotctl tools/techo5-lib.sh tools/packages-rootfs.txt
 #   overlay/                                               tools/linux/rootfs from the repo
 #   inputs/alpine-minirootfs-*-armv7.tar.gz
-#   inputs/vendor.tar.gz                                   LineageOS system: vendor/ (modules, firmware, audio tuning)
+#   inputs/vendor.tar.gz                                   optional, development only: LineageOS's vendor/.
+#                                                          Published images never carry it: each unit keeps
+#                                                          its own in the store (etc/techo5/boot.sh)
 #   inputs/apks312/*.apk                                   wpa_supplicant 2.9 + libssl1.1 + libcrypto1.1
 set -e
 
@@ -59,13 +61,19 @@ $APK --root "$R" $arch --no-cache add --allow-untrusted "$IN"/inputs/apks312/*.a
 $APK --root "$R" $arch info -v | sort > "$R/etc/techo5-packages"
 
 # Vendor tree: Wi-Fi/BT modules, firmware (firmware_class.path=/vendor/firmware on
-# the kernel command line), the audio tuning the daemon reads.
-say "vendor tree"
-tar -xzf "$IN/inputs/vendor.tar.gz" -C "$R" vendor
-# The Wi-Fi driver the device boots with (etc/techo5/device.conf in the overlay; the Show's by default).
-WIFI_MODULE=/vendor/lib/modules/mt76x8_wlan.ko
-[ -r "$IN/overlay/etc/techo5/device.conf" ] && WIFI_MODULE=$(sed -n 's/^WIFI_MODULE=//p' "$IN/overlay/etc/techo5/device.conf" | tr -d '"')
-[ -e "$R$WIFI_MODULE" ] || { echo "mkrootfs: vendor tree has no $WIFI_MODULE" >&2; exit 1; }
+# the kernel command line), the audio tuning the daemon reads. It is Amazon's and the chip makers',
+# so an image leaves /vendor empty: the unit's own tree, kept in the store, is mounted there at boot.
+install -d "$R/vendor"
+if [ -e "$IN/inputs/vendor.tar.gz" ]; then
+	say "vendor tree (development image: not for publishing)"
+	tar -xzf "$IN/inputs/vendor.tar.gz" -C "$R" vendor
+	# The Wi-Fi driver the device boots with (etc/techo5/device.conf in the overlay; the Show's by default).
+	WIFI_MODULE=/vendor/lib/modules/mt76x8_wlan.ko
+	[ -r "$IN/overlay/etc/techo5/device.conf" ] && WIFI_MODULE=$(sed -n 's/^WIFI_MODULE=//p' "$IN/overlay/etc/techo5/device.conf" | tr -d '"')
+	[ -e "$R$WIFI_MODULE" ] || { echo "mkrootfs: vendor tree has no $WIFI_MODULE" >&2; exit 1; }
+else
+	say "no vendor tree: the unit's own is mounted at /vendor"
+fi
 
 # Our binaries and scripts.
 install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa" "$R/usr/var/lib/bluealsa"

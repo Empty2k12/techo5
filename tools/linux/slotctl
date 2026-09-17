@@ -9,6 +9,8 @@
 #   active               the slot the initramfs boots next: a or b
 #   slots/a, slots/b     the root filesystems (plain directories)
 #   slots/<x>.state      good | trial <tries left> | bad   (absent: never installed)
+#   vendor/              the unit's own LineageOS vendor tree (drivers, firmware), copied into
+#                        each slot installed without one (etc/techo5/boot.sh keeps it)
 #   rescue               present: the next boot stays in the initramfs, then removed
 #
 # The initramfs writes the name of the slot it booted into /run/techo5/slot.
@@ -155,6 +157,13 @@ cmd_install() {
 	for f in sbin/init usr/local/bin/techo5 etc/techo5/boot.sh etc/inittab; do
 		[ -e "$STORE/slots/$t/$f" ] || { rm -rf "$STORE/slots/$t"; done_writing; die "not a techo5 rootfs: $f missing"; }
 	done
+	# Images carry no vendor tree: the slot gets the unit's own, so every boot image's rescue
+	# environment finds the drivers in the slot too.
+	if [ -d "$STORE/vendor/lib" ] && [ -z "$(ls -A "$STORE/slots/$t/vendor" 2>/dev/null)" ]; then
+		mkdir -p "$STORE/slots/$t/vendor"
+		cp -a "$STORE/vendor/." "$STORE/slots/$t/vendor/" || { rm -rf "$STORE/slots/$t"; done_writing; die "copying the vendor tree into slot $t failed"; }
+		echo "slotctl: slot $t: vendor tree from the store"
+	fi
 	set_state $t "trial $TRIES"
 	[ -n "$keep" ] || set_active $t
 	done_writing

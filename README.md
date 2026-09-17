@@ -155,7 +155,7 @@ TECHO5 exists because of these projects and the people behind them.
   [go-esphome-device](https://github.com/ygelfand/go-esphome-device), the ESPHome device API it speaks.
 - **amonet-cronos and kaeru** (k4y0z, [R0rt1z2](https://github.com/R0rt1z2)): the bootloader unlock
   and recovery that make any of this possible.
-- [proffalken](https://github.com/proffalken): the
+- [@proffalken](https://github.com/proffalken): the
   [step-by-step install from Linux](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
   that [Getting started](docs/getting-started.md) and the cross-platform installers are based on.
 - **LineageOS 18.1 for `cronos`** (unofficial, R0rt1z2), built on

@@ -56,20 +56,18 @@ It fills `inputs/` with:
 - `models/`: the wake word models from
   [esphome/micro-wake-word-models](https://github.com/esphome/micro-wake-word-models) (`models/v2`).
 
-Two inputs come from **your own unit** and are never published, because they are LineageOS and
-vendor binaries:
+One input comes from **your own unit** and is never published: **the LineageOS boot image**
+(`inputs/boot-lineage-18.1-20260904-cronos.img`), for building a boot image yourself. With LineageOS
+running and adb as root, `adb pull /dev/block/mmcblk0p9`, or keep the `boot.img` from the LineageOS
+zip you installed. Its kernel and header are used as they are.
 
-- **The LineageOS boot image** (`inputs/boot-lineage-18.1-20260904-cronos.img`): with LineageOS
-  running and adb as root, `adb pull /dev/block/by-name/boot`, or keep the `boot.img` from the
-  LineageOS zip you installed. Its kernel and header are used as they are.
-- **The vendor tree** (`inputs/vendor/system-vendor-cronos.tar.gz`): the Wi-Fi and Bluetooth
-  modules, firmware and audio tuning from LineageOS's system partition. Take it before TECHO5
-  replaces LineageOS:
-  ```
-  adb root
-  adb shell "tar -czf /data/local/tmp/vendor.tgz -C /system vendor"
-  adb pull /data/local/tmp/vendor.tgz inputs/vendor/system-vendor-cronos.tar.gz
-  ```
+**The vendor tree** (the Wi-Fi and Bluetooth drivers, firmware and audio tuning from LineageOS's
+system partition) is not an input at all. It belongs to Amazon and the chip makers, so no image
+carries it: the installer copies each unit's own into the slot store before LineageOS is erased,
+`slotctl install` copies it into every new slot, and `boot.sh` mounts it at `/vendor`. A unit that
+came from an older image, which did carry one, keeps the copy it already has. For a development
+image that has to boot on a unit without a store copy, `VENDOR_TGZ=<tarball>` puts one in; such an
+image is never published, and the release scripts refuse one.
 
 ## The daemon
 
@@ -87,7 +85,7 @@ next update or a reboot into the other slot puts the release back.
 ## The root filesystem
 
 [tools/linux/deploy-rootfs.sh](../tools/linux/deploy-rootfs.sh) builds the daemon and tools, stages
-them with the inputs and [tools/linux/rootfs](../tools/linux/rootfs), and builds the tarball with
+them with the inputs and [tools/linux/rootfs](../tools/linux/rootfs) (no vendor tree), and builds the tarball with
 [mkrootfs.sh](../tools/linux/mkrootfs.sh) (Alpine packages from
 [packages-rootfs.txt](../tools/linux/packages-rootfs.txt), installed by `apk.static` under QEMU):
 

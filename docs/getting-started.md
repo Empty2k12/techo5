@@ -69,7 +69,7 @@ supported.
 
 ## Echo Dot (2nd gen)
 
-These steps follow [proffalken's write-up](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
+These steps follow [@proffalken](https://github.com/proffalken)'s [write-up](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
 of installing TECHO5 Dot from Linux, which found the exact Fire OS build that avoids SELinux boot
 loops. Every command runs the same on Windows, Linux and macOS once the Dot is unlocked.
 
@@ -243,6 +243,6 @@ The unlocks are the work of [R0rt1z2](https://github.com/R0rt1z2) and k4y0z (amo
 Echo TWRP builds); LineageOS for these devices is R0rt1z2's and
 [amazon-oss](https://github.com/amazon-oss)'s. TECHO5's daemon is built on
 [EchoLocal](https://github.com/ygelfand/echolocal) by Yuri Gelfand. The Echo Dot steps come from
-[proffalken](https://github.com/proffalken)'s
+[@proffalken](https://github.com/proffalken)'s
 [write-up](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b) of installing TECHO5
 Dot from Linux, whose fixes also made the installers cross-platform.

@@ -19,8 +19,8 @@
   listed one is gone the newest is taken and the script says so.
 
   What it can't fetch, because it comes from your own unit and is never published: the LineageOS boot
-  image (Show, Spot), the LineageOS vendor tarball (inputs/vendor/, Show and Spot), and the recovery
-  backup (Dot; the installer keeps it). docs/building.md says how to take each.
+  image (Show, Spot) and the recovery backup (Dot; the installer keeps it). docs/building.md says how
+  to take each. No vendor tree is needed: each unit keeps its own.
 
 .EXAMPLE
   ./tools/fetch-inputs.ps1 -Device show
@@ -153,5 +153,5 @@ Remove-Item -Recurse -Force $tmp
 Write-Host "Inputs are in $Out."
 switch ($Device) {
     'dot' { Write-Host "Still to come from your own unit or builds: see techo5-dot's docs/building.md." }
-    default { Write-Host "Still to come from your own unit: the LineageOS boot image and vendor tarball (docs/building.md)." }
+    default { Write-Host "Still to come from your own unit, for a boot image: the LineageOS boot image (docs/building.md)." }
 }

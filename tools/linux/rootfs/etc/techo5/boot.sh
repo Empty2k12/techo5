@@ -59,6 +59,37 @@ mkdir -p /dev/graphics
 hostname -F /etc/hostname
 log "slot $(cat /run/techo5/slot 2>/dev/null || echo '?'): $(cat /etc/techo5-release 2>/dev/null)"
 
+# --- Vendor tree: the Wi-Fi and Bluetooth drivers, firmware and audio tuning from the unit's own
+# LineageOS. Images don't carry it (it isn't ours to publish): it is kept once in the store, taken
+# from wherever this unit already has it (the installer puts it there; a unit coming from an image
+# that carried it adopts it from a slot), and appears at /vendor in every slot.
+VMOD=${WIFI_MODULE#/vendor/}
+if [ ! -e "/store/vendor/$VMOD" ]; then
+	src=
+	for d in /vendor /store/slots/a/vendor /store/slots/b/vendor; do
+		[ -e "$d/$VMOD" ] && { src=$d; break; }
+	done
+	if [ -z "$src" ]; then
+		log "vendor tree: none on this unit; no Wi-Fi or Bluetooth drivers"
+	elif mount -o remount,rw /store; then
+		rm -rf /store/vendor.new
+		if cp -a "$src" /store/vendor.new && [ -e "/store/vendor.new/$VMOD" ]; then
+			rm -rf /store/vendor && mv /store/vendor.new /store/vendor && log "vendor tree: kept in the store, from $src"
+		else
+			rm -rf /store/vendor.new
+			log "vendor tree: copying $src into the store failed"
+		fi
+		sync
+		mount -o remount,ro /store || log "vendor tree: the store stayed writable"
+	else
+		log "vendor tree: the store could not be made writable"
+	fi
+fi
+if [ ! -e "$WIFI_MODULE" ] && [ -e "/store/vendor/$VMOD" ]; then
+	mkdir -p /vendor 2>/dev/null
+	mount --bind /store/vendor /vendor && log "vendor tree: /vendor is the store's"
+fi
+
 # --- Screen: the daemon paints it (feature/display); the bootloader's logo stays until then.
 # `fbprobe -hold 1m` is still there for a bare-panel check from the console.
 

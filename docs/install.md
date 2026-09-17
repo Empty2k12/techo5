@@ -6,6 +6,8 @@ that install. Placeholders: `<serial>` is the unit's adb/fastboot serial, `<addr
 on your network, `<version>` a release such as `v0.2.7`.
 
 **This erases Android.** LineageOS on the `system` partition is replaced by the TECHO5 slot store.
+The one part of LineageOS TECHO5 keeps is its `vendor` tree (the Wi-Fi and Bluetooth drivers and
+firmware): releases don't carry it, so it is copied into the store before the partition is erased.
 `userdata` is kept (TECHO5 reads the Wi-Fi network Android saved from it), and TWRP stays in
 `recovery`, so LineageOS can be put back with TWRP and its zip.
 
@@ -115,12 +117,18 @@ In the rescue shell. `mkstore` is the step that erases LineageOS.
 
 ```
 cat /proc/idme/serial                             # the unit you mean
+tar -cf /data/techo5-linux/vendor.tar -C /android/system vendor   # this unit's drivers and firmware
 umount /android                                   # LineageOS's system, mounted read-only
 PATH=/usr/local/sbin:$PATH
 slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it
+tar -xf /data/techo5-linux/vendor.tar -C /store   # kept in the store from now on
 STORE=/store slotctl install /data/media/0/Download/techo5-rootfs-<version>.tar.gz
+[ -e /store/slots/a/vendor/lib/modules/mt76x8_wlan.ko ] || cp -a /store/vendor/. /store/slots/a/vendor/
+rm /data/techo5-linux/vendor.tar
 STORE=/store slotctl status                       # slot a: trial 3
 ```
+
+Run `mkdir -p /data/techo5-linux` first if the `tar -cf` line says the directory is missing.
 
 If `mkfs failed` mentions `libgcc_s.so.1`, the boot image predates the fix (one older than v0.2.8):
 take the library from the root filesystem and run `mkstore` again.

@@ -26,8 +26,9 @@ TZ_NAME=${TZ_NAME:-UTC}
 GO=${GO:-go}
 VERSION=${VERSION:-}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
-# Another device: BUILD_TAGS (the daemon's, e.g. spot), VENDOR_TGZ (its LineageOS vendor/ tarball) and
-# DEVICE_OVERLAY (files laid over tools/linux/rootfs, with etc/techo5/device.conf).
+# Another device: BUILD_TAGS (the daemon's, e.g. spot) and DEVICE_OVERLAY (files laid over tools/linux/rootfs,
+# with etc/techo5/device.conf). VENDOR_TGZ puts a LineageOS vendor/ tarball into the image, for
+# development only: images are published without it, and a unit mounts its own (etc/techo5/boot.sh).
 BUILD_TAGS=${BUILD_TAGS:-}
 VENDOR_TGZ=${VENDOR_TGZ:-}
 DEVICE_OVERLAY=${DEVICE_OVERLAY:-}
@@ -70,7 +71,7 @@ cp "$ROOT/tools/linux/slotctl" "$ROOT/tools/linux/techo5-lib.sh" "$ROOT/tools/li
 cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 [ -n "$DEVICE_OVERLAY" ] && cp -r "$DEVICE_OVERLAY/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
-if [ -n "$VENDOR_TGZ" ]; then cp "$VENDOR_TGZ" "$STAGE/inputs/vendor.tar.gz"; else cp "$INPUTS"/vendor/system-vendor-*.tar.gz "$STAGE/inputs/vendor.tar.gz"; fi
+[ -n "$VENDOR_TGZ" ] && cp "$VENDOR_TGZ" "$STAGE/inputs/vendor.tar.gz"
 cp "$INPUTS"/apks312/wpa_supplicant-2.9-*.apk "$INPUTS"/apks312/libssl1.1-*.apk "$INPUTS"/apks312/libcrypto1.1-*.apk "$STAGE/inputs/apks312/"
 # scripts must reach the device with LF endings whatever the checkout did
 for f in "$STAGE"/tools/*.sh "$STAGE"/tools/slotctl "$STAGE"/tools/*.txt; do sed -i 's/\r$//' "$f"; done

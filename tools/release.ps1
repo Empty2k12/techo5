@@ -30,6 +30,11 @@ param(
     [string]$Boot = ''
 )
 $ErrorActionPreference = 'Stop'
+# A root filesystem must not carry LineageOS's vendor tree: it is Amazon's and the chip makers', not ours to
+# publish. Each unit mounts its own (tools/linux/rootfs/etc/techo5/boot.sh).
+foreach ($t in @($Rootfs) | Where-Object { $_ }) {
+    if (& tar -tzf $t | Where-Object { $_ -match '^(\./)?vendor/.' } | Select-Object -First 1) { throw "$t carries a vendor tree; build it without VENDOR_TGZ" }
+}
 if (-not $SignKey -or -not (Test-Path $SignKey)) { throw "no release signing key: set TECHO5_SIGN_KEY or pass -SignKey" }
 $repo = 'HuskerMinion/techo5'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')

@@ -73,8 +73,9 @@ Inputs (kept out of the repo, in `inputs/` or `$TECHO5_INPUTS`; [docs/building.m
 - `alpine-minirootfs-3.24.1-armv7.tar.gz`, `busybox.static` (from `busybox-static-1.37.0-r31.apk`)
 - `apks/`, `apks312/` — the packages in `packages.txt` (initramfs) and the
   wpa_supplicant 2.9 set (both)
-- `vendor/system-vendor-cronos-lineage-18.1-20260904.tar.gz` — `vendor/` from the
-  LineageOS system partition (taken from the bench unit before it was wiped)
+- no vendor tree: images don't carry LineageOS's drivers and firmware. Each unit keeps its own in the
+  slot store, mounted at `/vendor` (`rootfs/etc/techo5/boot.sh`); `VENDOR_TGZ` puts one into a
+  development image only
 - `techo5_ed25519` / `.pub` — the SSH key built into the rescue boot image (`build-image.sh`);
   root filesystems carry no key: send one with the `ssh_keys` action and turn on the SSH switch
 
