@@ -15,6 +15,7 @@
 </p>
 
 <p align="center">
+  <a href="#built-on-echolocal">Built on EchoLocal</a> ·
   <a href="#why-techo5">Why</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#stock-vs-techo5">Stock vs TECHO5</a> ·
@@ -29,6 +30,18 @@
 **TECHO5** (Tech Echo 5) is open firmware for the **Amazon Echo Show 5, 2nd generation** (2021,
 `cronos`). It replaces Android and Alexa with a small Alpine Linux image and one Go daemon, turning
 the Show into a fast, private Home Assistant voice satellite with a touch screen of its own.
+
+## Built on EchoLocal
+
+TECHO5 started from **[EchoLocal](https://github.com/ygelfand/echolocal)** by Yuri Gelfand (MIT),
+which already turns the Echo Dot 2 (`biscuit`, the same MT8163 family) into an ESPHome-native Home
+Assistant satellite, with a single static Go daemon that drives the hardware directly. TECHO5's
+`echod` is that daemon, vendored and ported to the Show 5's `cronos`, and much of it is still
+EchoLocal's code: the wake word engine, the ALSA client and the service framework almost unchanged,
+and the voice satellite, media player and component registry grown from EchoLocal's own. What TECHO5
+added is the Show's hardware, the screen, the camera, Bluetooth, the update and
+slot system, phone calls, and a minimal Alpine root filesystem in place of Android. See
+[NOTICE](NOTICE) for the full attribution and EchoLocal's license.
 
 ## Why TECHO5
 
@@ -127,9 +140,9 @@ updates. Both run the same daemon source, built per device.
 TECHO5 exists because of these projects and the people behind them.
 
 **The path here**
-- [EchoLocal](https://github.com/ygelfand/echolocal) (MIT, Yuri Gelfand): the Echo Dot daemon TECHO5's
-  `echod` grew from, and [go-esphome-device](https://github.com/ygelfand/go-esphome-device), the
-  ESPHome device API it speaks.
+- [EchoLocal](https://github.com/ygelfand/echolocal) (MIT, Yuri Gelfand): the daemon TECHO5 is built
+  on (see [Built on EchoLocal](#built-on-echolocal)), and
+  [go-esphome-device](https://github.com/ygelfand/go-esphome-device), the ESPHome device API it speaks.
 - **amonet-cronos and kaeru** (k4y0z, [R0rt1z2](https://github.com/R0rt1z2)): the bootloader unlock
   and recovery that make any of this possible.
 - **LineageOS 18.1 for `cronos`** (unofficial, R0rt1z2), built on
