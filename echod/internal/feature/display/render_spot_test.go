@@ -95,7 +95,7 @@ func TestRoundScenesDraw(t *testing.T) {
 		"jog-volume":     {now: at, phase: "idle", menuOpen: true, menuMode: modeVolume, volume: 14, maxVolume: 30},
 		"jog-brightness": {now: at, phase: "idle", menuOpen: true, menuMode: modeBrightness, brightness: 72},
 		"jog-night":      {now: at, phase: "idle", menuOpen: true, menuMode: modeNightFrom, nightFrom: 22, nightTo: 7},
-		"info":           {now: at, phase: "idle", menuOpen: true, menuMode: modeInfo, infoName: "Kitchen", infoAddress: "192.168.1.50", infoVersion: "v0.0.4-spot · slot b"},
+		"info":           {now: at, phase: "idle", menuOpen: true, menuMode: modeInfo, infoName: "Kitchen", infoAddress: "192.168.x.y", infoVersion: "v0.0.4-spot · slot b"},
 	}
 	dir := os.Getenv("SPOT_PREVIEW")
 	for name, s := range scenes {
