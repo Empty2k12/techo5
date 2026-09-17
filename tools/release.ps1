@@ -80,6 +80,12 @@ if ($Boot) {
     Copy-Item $Boot $named -Force
     $args += $named
 }
+# SHA256SUMS: what tools/install-show.ps1 checks the boot image against (the manifest covers the rest).
+$files = @($args | Where-Object { $_ -is [string] -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+$sums = $files | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_).Hash.ToLower())  $(Split-Path -Leaf $_)" }
+$sumsFile = Join-Path $bin 'SHA256SUMS'
+[IO.File]::WriteAllText($sumsFile, ($sums -join "`n") + "`n")
+$args = @($args[0..2]) + $sumsFile + @($args[3..($args.Count - 1)])
 if ($Prerelease) { $args += '--prerelease' }
 & gh @args
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }

@@ -105,15 +105,19 @@ You need a Show 5 2nd gen **unlocked with
 [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/)
 and running
 [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/)**,
-a USB cable, a computer (Windows, Linux or macOS), and Home Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest)
-carries everything else: the boot image and the root filesystem.
+a USB cable, a computer (Windows, Linux or macOS) with PowerShell 7, `adb` and `fastboot`, and Home
+Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest) carries everything
+else: the boot image (with Bluetooth) and the root filesystem. Nothing is built.
 
-1. Copy the root filesystem to the Show with `adb` and flash the boot image with `fastboot`.
-2. From the USB serial console of the rescue environment, create the slot store and install.
-3. Add the Show in Home Assistant with the key it prints. Done: later updates come from Home Assistant.
+```
+git clone https://github.com/HuskerMinion/techo5
+cd techo5
+pwsh ./tools/install-show.ps1 -Serial <adb serial> -Name "Kitchen"
+```
 
-The whole walk-through, with every command and the fixes for what can go wrong, is in
-**[docs/install.md](docs/install.md)**.
+It downloads and checks the release, flashes the boot image, creates the slot store and installs over
+the USB serial console, and prints where the Home Assistant key is kept. Later updates come from Home
+Assistant. Every step by hand, and the fixes for what can go wrong: **[docs/install.md](docs/install.md)**.
 
 > **Status:** in daily use on two Echo Show 5 units. It's a hobby project, not a product: keep your
 > backups, and expect rough edges.

@@ -17,12 +17,37 @@ on your network, `<version>` a release such as `v0.2.7`.
   [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/),
   connected to your Wi-Fi in Android, with USB debugging on.
 - Its power adapter and a USB **data** cable to the PC. Keep it on mains power while flashing.
-- A Windows PC with Git Bash, `adb` and `fastboot` (Android platform tools), and a serial terminal
-  such as PuTTY. Go, Python 3 and WSL (Ubuntu) only if you build the boot image yourself.
+- A Windows, Linux or macOS computer with `adb` and `fastboot` (Android platform tools).
 - Home Assistant with the ESPHome integration.
 
-Work in Git Bash. It rewrites arguments that look like paths, including paths on the device, so set
-`export MSYS_NO_PATHCONV=1` first or `adb push … /sdcard/…` lands somewhere else.
+## The quick way: one command
+
+With [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+(`pwsh`) on any of the three:
+
+```
+git clone https://github.com/HuskerMinion/techo5
+cd techo5
+pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen" -DryRun   # download and check the release only
+pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen"
+```
+
+It does steps 1 to 6 below: downloads the latest release and checks the boot image and root filesystem
+against their checksums, keeps LineageOS's boot image in `backups/<serial>/` when adb is root, flashes,
+creates the slot store over the USB serial console (it asks before erasing), provisions the name and
+the Home Assistant key (kept in `backups/<serial>/api.psk`), and waits for the first boot.
+`-SshKey ~/.ssh/id_ed25519.pub` also turns SSH on with your key. Then go to
+[step 7](#7-add-it-to-home-assistant).
+
+On Linux you may need to be in the `dialout` group for the serial console
+(`sudo usermod -aG dialout $USER`, then log in again), and ModemManager, if installed, should be
+stopped while installing (`sudo systemctl stop ModemManager`).
+
+## By hand
+
+The same steps, typed. On Windows work in Git Bash, which rewrites arguments that look like paths,
+including paths on the device, so set `export MSYS_NO_PATHCONV=1` first or `adb push … /sdcard/…`
+lands somewhere else. Linux and macOS shells need nothing extra.
 
 If more than one Android or fastboot device is plugged in, pass `-s <serial>` to every `adb` and
 `fastboot` command and check `adb devices -l` first.
@@ -40,8 +65,7 @@ The boot image is the kernel plus the small rescue environment that sets a unit 
   ssh-keygen -t ed25519 -f techo5_ed25519        # into your inputs directory
   ```
 
-  then build the kernel and boot image as [tools/linux/README.md](../tools/linux/README.md) describes
-  ("Build": inputs, `build-kernel.sh` in WSL, `patch-dtb.py`, `build-image.sh`).
+  then build the kernel and boot image as [docs/building.md](building.md) describes.
 
 Either way the kernel is the LineageOS commit the Show's own kernel came from, so the vendor Wi-Fi
 and Bluetooth modules load. Check before flashing:
@@ -74,9 +98,11 @@ The unit boots the TECHO5 initramfs. With LineageOS still on `system` there is n
 stays in the **rescue environment**: it joins the Wi-Fi network Android saved and shows a test
 screen. Open a root shell on it:
 
-- **USB serial console** (any boot image): the unit appears in Device Manager as a new "USB Serial
-  Device (COMn)". Open that port in PuTTY (connection type Serial, speed 115200) and press Enter for
-  a `#` prompt.
+- **USB serial console** (any boot image), at 115200 baud; press Enter for a `#` prompt:
+  - Windows: a new "USB Serial Device (COMn)" in Device Manager; open it in PuTTY (connection type
+    Serial).
+  - Linux: `screen /dev/ttyACM0 115200` (or `picocom -b 115200 /dev/ttyACM0`).
+  - macOS: `screen /dev/cu.usbmodem* 115200`.
 - **SSH** (a boot image built with your key), within about a minute:
 
   ```

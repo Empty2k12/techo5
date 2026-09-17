@@ -15,7 +15,7 @@ The model number is on the bottom of the device, or in the Alexa app under the d
 
 | Device | Codename | Model | Supported by | Difficulty today |
 |---|---|---|---|---|
-| **Echo Show 5, 2nd gen** (2021) | `cronos` | AEOCN | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: prebuilt images, a guided manual install |
+| **Echo Show 5, 2nd gen** (2021) | `cronos` | AEOCN | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 | **Echo Dot, 2nd gen** (2016) | `biscuit` | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | Moderate: the unlock and Fire OS steps by hand, then a one-command installer |
 | **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 
@@ -29,11 +29,11 @@ supported.
 - **Home Assistant** with the ESPHome integration (built in).
 - A computer. Which one depends on the device and the step; see [Windows, Linux or macOS](#windows-linux-or-macos)
   below.
-- For the Dot and Spot installers: [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+- For the installers: [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
   (`pwsh`), the Android platform tools (`adb`, `fastboot`), Python 3, and `git` to fetch the repository.
   Nothing is compiled: the installers download the signed release (root filesystem, Bluetooth kernel
-  and rescue packages), check every file against its checksum, and build the boot image from your own
-  unit's backup.
+  and boot image or rescue packages) and check every file against its checksum; the Dot and Spot boot
+  images are built from your own unit's backup.
 - The unlock threads on XDA need a (free) XDA account to download attachments.
 
 ## Echo Show 5 (2nd gen)
@@ -52,9 +52,18 @@ supported.
 3. **Prepare LineageOS:** join your Wi-Fi, then in Settings → About → tap Build number seven times,
    and in Developer options turn on **USB debugging**.
    *Check:* `adb devices` on the computer lists the Show as `device`.
-4. **Install TECHO5.** Follow [docs/install.md](install.md). The
-   [latest release](https://github.com/HuskerMinion/techo5/releases/latest) has the boot image and
-   the root filesystem, so nothing needs building.
+4. **Install TECHO5.** With the Show connected by USB and on LineageOS:
+   ```
+   git clone https://github.com/HuskerMinion/techo5
+   cd techo5
+   pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen" -DryRun
+   pwsh ./tools/install-show.ps1 -Serial <serial> -Name "Kitchen"
+   ```
+   `<serial>` is what `adb devices` shows. The dry run downloads and checks the
+   [latest release](https://github.com/HuskerMinion/techo5/releases/latest) (boot image with Bluetooth,
+   root filesystem); the second run replaces LineageOS with TECHO5 (it asks before erasing) and waits
+   for the first boot. Turning on **Rooted debugging** first lets it keep a backup of LineageOS's boot
+   image. Every step by hand, and troubleshooting: [docs/install.md](install.md).
    *Check:* the screen shows the TECHO5 clock.
 5. **Add it to Home Assistant**: see [After installing](#after-installing-every-device).
 
@@ -192,7 +201,7 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 | Unlock: Dot (amonet-biscuit) | Use a Linux live USB | **Yes** (what the thread uses) | Use a Linux live USB |
 | Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | Use a Linux live USB |
 | LineageOS (Show 5, Spot) | Yes | Yes | Yes (TWRP and `adb` only) |
-| Install TECHO5 on the Show 5 ([install.md](install.md)) | Yes (Git Bash, PuTTY) | **Yes** | **Yes** |
+| Install TECHO5 on the Show 5 (`install-show.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
 | Fire OS 6574.1, root, adb key (Dot) | Yes | Yes | Yes |
 | Install TECHO5 Dot (`install-dot.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
 | Install TECHO5 Spot (`install-spot-linux.ps1`) | **Yes** (pwsh) | **Yes** (pwsh) | **Yes** (pwsh) |
@@ -201,10 +210,8 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 **On Linux:**
 - Install the Android platform tools (`adb` and `fastboot`, e.g. `sudo apt install adb fastboot`)
   and a serial terminal (`screen` or `picocom`).
-- For the Show 5's install.md, the Git Bash commands run as they are in any Linux shell; skip
-  `MSYS_NO_PATHCONV`, and open the USB serial console with `screen /dev/ttyACM0 115200` instead of
-  PuTTY. You may need to be in the `dialout` group (`sudo usermod -aG dialout $USER`, then log in
-  again).
+- For the USB serial console the installers use, you may need to be in the `dialout` group
+  (`sudo usermod -aG dialout $USER`, then log in again). By hand: `screen /dev/ttyACM0 115200`.
 - If ModemManager is installed, stop it while working with serial consoles and the BootROM
   (`sudo systemctl stop ModemManager`); it grabs new USB serial ports.
 
@@ -213,9 +220,10 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
   built in: `screen /dev/tty.usbmodem* 115200`.
 - The amonet BootROM steps need Linux. A live USB (Ubuntu) is more reliable than a virtual machine:
   the exploit re-enumerates USB mid-way, and VM USB passthrough often loses the device.
-- The Show 5's install.md works from Terminal once the device is unlocked and on LineageOS.
+- The installers work from Terminal once the device is unlocked (and, for the Show 5 and the Spot,
+  on LineageOS).
 
-**The Dot and Spot installers** run in PowerShell 7 on all three (`sudo snap install powershell --classic`
+**The Show 5, Dot and Spot installers** run in PowerShell 7 on all three (`sudo snap install powershell --classic`
 on Ubuntu, `brew install powershell` on macOS, `winget install Microsoft.PowerShell` on Windows) and
 find the device's USB serial console on each. Nothing is built on your computer. Building the images
 yourself instead is described in each repository's `docs/building.md`.
