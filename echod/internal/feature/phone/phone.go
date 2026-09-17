@@ -357,9 +357,12 @@ func (p *Phone) Call(number string) error {
 
 	safe.Go("phone: call", func() {
 		defer cancel()
-		dctx, dcancel := context.WithTimeout(ctx, dialFor)
-		d, err := l.dial(dctx, number)
-		dcancel()
+		// The call's media lives on the context it was placed with, so that context must outlast the
+		// call: a timeout on it would cut the audio the moment the call was answered. Nobody answering
+		// is limited by cancelling the whole call instead.
+		unanswered := time.AfterFunc(dialFor, cancel)
+		d, err := l.dial(ctx, number)
+		unanswered.Stop()
 		if err != nil {
 			reason := "failed"
 			if ctx.Err() != nil {

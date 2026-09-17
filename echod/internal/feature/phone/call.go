@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emiago/diago"
@@ -55,19 +57,25 @@ func talk(ctx context.Context, m *diago.DialogMedia, say <-chan []int16) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var st stats
+	defer func() {
+		slog.Info("phone: call audio", "sent", st.sent.Load(), "sent_dbfs", st.level(&st.sentSq, &st.sent),
+			"received", st.received.Load(), "received_dbfs", st.level(&st.recvSq, &st.received))
+	}()
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	safe.Go("phone: send", func() {
 		defer wg.Done()
 		defer cancel()
-		if err := send(ctx, enc, say); err != nil && ctx.Err() == nil {
+		if err := send(ctx, enc, say, &st); err != nil && ctx.Err() == nil {
 			slog.Warn("phone: sending audio", "err", err)
 		}
 	})
 	safe.Go("phone: receive", func() {
 		defer wg.Done()
 		defer cancel()
-		if err := receive(ctx, dec); err != nil && ctx.Err() == nil && !errors.Is(err, io.EOF) {
+		if err := receive(ctx, dec, &st); err != nil && ctx.Err() == nil && !errors.Is(err, io.EOF) {
 			slog.Warn("phone: receiving audio", "err", err)
 		}
 	})
@@ -77,7 +85,7 @@ func talk(ctx context.Context, m *diago.DialogMedia, say <-chan []int16) error {
 }
 
 // send is the microphones, and anything to say, out to the call.
-func send(ctx context.Context, enc io.Writer, say <-chan []int16) error {
+func send(ctx context.Context, enc io.Writer, say <-chan []int16, st *stats) error {
 	frames, stop := mic.Get().Listen("call")
 	defer stop()
 
@@ -114,6 +122,7 @@ func send(ctx context.Context, enc io.Writer, say <-chan []int16) error {
 				if _, err := enc.Write(buf); err != nil {
 					return err
 				}
+				st.add(&st.sent, &st.sentSq, out[:callFrame])
 				out = out[callFrame:]
 			}
 		}
@@ -122,7 +131,7 @@ func send(ctx context.Context, enc io.Writer, say <-chan []int16) error {
 
 // receive is the far end, out of the speaker. It holds the speaker for the call; anything that takes it
 // in the meantime (an announcement) has it until it is done, and then the call takes it back.
-func receive(ctx context.Context, dec io.Reader) error {
+func receive(ctx context.Context, dec io.Reader, st *stats) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	audioCh := make(chan []int16, 50)
@@ -137,6 +146,7 @@ func receive(ctx context.Context, dec io.Reader) error {
 				for i := range s {
 					s[i] = int16(binary.LittleEndian.Uint16(buf[2*i:]))
 				}
+				st.add(&st.received, &st.recvSq, s)
 				select {
 				case audioCh <- u.run(s):
 				default: // the speaker is behind; this frame is lost rather than everything after it late
@@ -193,6 +203,36 @@ func receive(ctx context.Context, dec io.Reader) error {
 		}
 	}
 	return nil
+}
+
+// stats counts a call's audio frames each way and their energy, for the log line at its end: a call
+// where one side heard nothing says here which way the audio stopped.
+type stats struct {
+	sent, received atomic.Int64
+	sentSq, recvSq atomic.Uint64 // mean square per frame, summed
+}
+
+func (st *stats) add(n *atomic.Int64, sq *atomic.Uint64, s []int16) {
+	if len(s) == 0 {
+		return
+	}
+	var sum float64
+	for _, v := range s {
+		sum += float64(v) * float64(v)
+	}
+	n.Add(1)
+	sq.Add(uint64(sum / float64(len(s))))
+}
+
+func (st *stats) level(sq *atomic.Uint64, n *atomic.Int64) string {
+	if n.Load() == 0 {
+		return "none"
+	}
+	ms := float64(sq.Load()) / float64(n.Load())
+	if ms < 1 {
+		return "silent"
+	}
+	return fmt.Sprintf("%.0f", 10*math.Log10(ms/(32768*32768)))
 }
 
 // ringTone is one cycle of a device ringing: two short rising bursts and a pause, at 16 kHz.
