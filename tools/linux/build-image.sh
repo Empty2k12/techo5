@@ -2,12 +2,16 @@
 # build-image.sh — build the boot image (LineageOS kernel + the rescue/boot
 # initramfs) with tools/linux/mkimage.py.
 #
-#   tools/linux/build-image.sh [-o out.img]
+#   tools/linux/build-image.sh [-o out.img] [--no-key]
 #
 # Inputs come from TECHO5_INPUTS (D:/platform-tools/echoshow/linux-image):
 # the LineageOS boot image, the Alpine minirootfs, busybox.static, the apks
 # listed in packages.txt (apks/ and apks312/), and the SSH public key. The Go
 # tools are built here. Git Bash on Windows is the expected shell.
+#
+# --no-key builds the image published with releases: no SSH key inside, so the
+# rescue environment accepts only keys already on the unit's userdata, and a new
+# unit is set up from the USB serial console.
 set -euo pipefail
 
 INPUTS=${TECHO5_INPUTS:-D:/platform-tools/echoshow/linux-image}
@@ -17,9 +21,11 @@ KERNEL_IMAGE=${KERNEL_IMAGE:-D:/platform-tools/echoshow/boot-lineage-18.1-202609
 KERNEL=${KERNEL:-}
 GO=${GO:-/c/Program Files/Go/bin/go.exe}
 OUT=techo5-linux-boot.img
+NOKEY=
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-o) OUT=$2; shift 2;;
+	--no-key) NOKEY=1; shift;;
 	*) echo "unknown argument: $1" >&2; exit 1;;
 	esac
 done
@@ -49,6 +55,7 @@ export MSYS_NO_PATHCONV=1
 R=$(W "$ROOT"); I=$(W "$INPUTS")
 mini=$(ls "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz | head -1)
 kern=(); [ -n "$KERNEL" ] && kern=(--kernel "$(W "$KERNEL")")
+key=(--copy "$I/techo5_ed25519.pub=/root/.ssh/authorized_keys"); [ -n "$NOKEY" ] && key=()
 python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" "${kern[@]}" \
 	--rootfs "$(W "$mini")" \
 	"${apks[@]}" \
@@ -60,7 +67,7 @@ python "$R/tools/linux/mkimage.py" --kernel-image "$(W "$KERNEL_IMAGE")" "${kern
 	--add "$R/bin/btbridge-arm=/usr/local/bin/btbridge" \
 	--script "$R/tools/linux/slotctl=/usr/local/sbin/slotctl" \
 	--script "$R/tools/linux/techo5-lib.sh=/lib/techo5-lib.sh" \
-	--copy "$I/techo5_ed25519.pub=/root/.ssh/authorized_keys" \
+	"${key[@]}" \
 	--compress xz --cmdline-append techo5=linux -o "$(W "$OUT")"
 echo "built: $OUT"
 echo "flash: fastboot flash boot $OUT && fastboot continue"

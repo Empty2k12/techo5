@@ -34,6 +34,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
@@ -45,6 +46,8 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
@@ -134,6 +137,8 @@ type Display struct {
 	// stays once the turn is over.
 	weatherArmed bool
 	weatherUntil time.Time
+	// radar is the rain map in place of the forecast, while the weather page is up.
+	radar bool
 
 	// draft is the alarm open in the Alarms tab's editor; ringPreview shows the ringing page silently
 	// until then.
@@ -194,7 +199,9 @@ func build() *Display {
 		}
 	}()
 	hastate.Get().Changed.Listen(func(u hastate.Update) {
-		if u.Attribute != "" || u.Entity == "" || u.Entity != config.Get().Home.Radio.Now {
+		// The first value is the station that played last, sent when Home Assistant connects after
+		// a start; only a change means a station is starting.
+		if u.First || u.Attribute != "" || u.Entity == "" || u.Entity != config.Get().Home.Radio.Now {
 			return
 		}
 		if u.Value == "" || u.Value == "unknown" || u.Value == "unavailable" {
@@ -206,6 +213,7 @@ func build() *Display {
 		d.wake()
 	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	phone.Get().Changed.Listen(func(phone.State) { d.wake() })
 	security.Get().Changed.Listen(func(struct{}) { d.wake() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -329,6 +337,7 @@ func (d *Display) changed(s voice.State) {
 	// while, and then the screen goes back to whatever it was showing.
 	if newHeard && aboutWeather(s.Heard) {
 		d.weatherArmed = true
+		d.radar = aboutRadar(s.Heard)
 	}
 	// "Show the front door": the camera goes up at once, while the assistant answers. Once per
 	// sentence: the state repeats the transcript on every phase change.
@@ -353,10 +362,16 @@ func (d *Display) changed(s voice.State) {
 	d.wake()
 }
 
+// aboutRadar is whether what was heard asked for the rain map rather than the forecast.
+func aboutRadar(heard string) bool {
+	h := strings.ToLower(heard)
+	return strings.Contains(h, "radar") || strings.Contains(h, "rain map") || strings.Contains(h, "weather map")
+}
+
 // aboutWeather is whether what was heard asked about the weather.
 func aboutWeather(heard string) bool {
 	h := strings.ToLower(heard)
-	for _, w := range []string{"weather", "forecast", "temperature", "rain", "snow", "how hot", "how cold"} {
+	for _, w := range []string{"weather", "forecast", "temperature", "rain", "snow", "how hot", "how cold", "radar", "storm"} {
 		if strings.Contains(h, w) {
 			return true
 		}
@@ -389,6 +404,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		return
 	}
+	// A call: its page takes every tap.
+	if st := phone.Get().State(); st.Phase != phone.Idle {
+		if g.Kind == touch.Tap {
+			d.callTap(g.X, g.Y, st)
+		}
+		d.wake()
+		return
+	}
+
 	// A timer or an alarm ringing: its page takes every tap.
 	if st := d.ringing(time.Now()); st.any() {
 		if g.Kind == touch.Tap {
@@ -485,10 +509,17 @@ func (d *Display) gesture(g touch.Gesture) {
 		idle := d.view.Phase == "idle"
 		d.mu.Unlock()
 		if weatherUp {
-			// The forecast page: a tap puts it away.
+			// The weather page: its button turns between the forecast and the rain map, and keeps the
+			// page up a while longer; a tap anywhere else puts it away.
 			d.mu.Lock()
-			d.weatherUntil = time.Time{}
+			if d.r != nil && g.X >= 0 && image.Pt(g.X, g.Y).In(d.r.weatherButton()) {
+				d.radar = !d.radar
+				d.weatherUntil = time.Now().Add(weatherShow)
+			} else {
+				d.weatherUntil, d.radar = time.Time{}, false
+			}
 			d.mu.Unlock()
+			d.wake()
 			return
 		}
 		if idle && d.nowPlaying() {
@@ -592,17 +623,39 @@ func (d *Display) sheetTap(h hit) {
 	case tabAlarms:
 		d.alarmsTap(h, page)
 	case tabRadio:
-		rows := radioList(home.Get().Radio())
-		i, ok := d.listTap(len(rows), page, h.row)
-		if !ok {
-			return
-		}
-		if rows[i] == "■ Stop" {
-			home.Get().Stop()
-			return
-		}
-		home.Get().Play(rows[i])
+		d.radioTap(h, page)
 	}
+}
+
+// radioTap is a row of the Radio tab: the list to show, or a station of it.
+func (d *Display) radioTap(h hit, page int) {
+	if h.row == radioRowSource {
+		if h.button == 2 {
+			d.mu.Lock()
+			d.page = 0
+			d.mu.Unlock()
+			home.Get().NextRadioSource()
+		}
+		return
+	}
+	rows := radioList(home.Get().Radio())
+	i, ok := d.listTapIn(len(rows), page, h.row-1, sheetRows-1)
+	if !ok {
+		return
+	}
+	if rows[i] == "■ Stop" {
+		home.Get().Stop()
+		return
+	}
+	home.Get().Play(rows[i])
+}
+
+// ShowWeather puts the weather page up, the forecast or the rain map, as a question would.
+func (d *Display) ShowWeather(radar bool) {
+	d.mu.Lock()
+	d.weatherUntil, d.radar, d.sheet = time.Now().Add(weatherShow), radar, false
+	d.mu.Unlock()
+	d.wake()
 }
 
 // securityTap is a row of the Security tab. Only the On/Off buttons act; keys are not changed here.
@@ -625,10 +678,32 @@ func (d *Display) securityTap(h hit) {
 	}
 }
 
+// nextWakeWord is the installed wake word after the one in the first slot, in the order the
+// library lists them, wrapping round; empty when nothing is installed.
+func nextWakeWord() string {
+	models := wake.Lib().Ours()
+	if len(models) == 0 {
+		return ""
+	}
+	cur := config.Get().Wake.Slot(0).ID
+	for i, m := range models {
+		if m.ID == cur {
+			return models[(i+1)%len(models)].ID
+		}
+	}
+	return models[0].ID
+}
+
 // listTap maps a row of a paged list to the item it shows; the More row turns the page instead.
-func (d *Display) listTap(n, page, row int) (int, bool) {
-	start, end, more := pageOf(n, page)
-	if more && row == sheetRows-1 {
+func (d *Display) listTap(n, page, row int) (int, bool) { return d.listTapIn(n, page, row, sheetRows) }
+
+// listTapIn is listTap for a list given only the last rows of the tab, row counted from its first.
+func (d *Display) listTapIn(n, page, row, rows int) (int, bool) {
+	start, end, more := pageIn(n, page, rows)
+	if row < 0 {
+		return 0, false
+	}
+	if more && row == rows-1 {
 		d.mu.Lock()
 		d.page++
 		d.mu.Unlock()
@@ -674,6 +749,12 @@ func (d *Display) deviceTap(h hit) {
 			d.mu.Unlock()
 			d.setAuto(!on, true)
 		}
+	case rowWake:
+		if h.button == 2 {
+			if next := nextWakeWord(); next != "" {
+				safe.Go("wake word from the sheet", func() { voice.Get().ChooseWakeWord(next) })
+			}
+		}
 	case rowMic:
 		if h.button == 2 {
 			mute.Get().Toggle()
@@ -689,7 +770,14 @@ func (d *Display) deviceTap(h hit) {
 				slog.Warn("saving the night setting failed", "err", err)
 			}
 		}
-	case rowRestart:
+	case rowWeather:
+		switch h.button {
+		case 1:
+			d.ShowWeather(false)
+		case 2:
+			safe.Go("weather source from the sheet", home.Get().NextWeather)
+		}
+	case rowAbout:
 		if h.button != 2 {
 			return
 		}
@@ -747,7 +835,7 @@ func (d *Display) night(now time.Time, on bool, view voice.State) bool {
 	d.mu.Unlock()
 	switch {
 	case in && on:
-		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle || d.ringing(now).any()
+		busy := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(d.viewAt) < nightIdle || d.ringing(now).any() || phone.Get().Busy()
 		if playing, _ := media.Get().Playing(); playing || busy {
 			return false
 		}
@@ -1104,8 +1192,9 @@ func (d *Display) frame() time.Duration {
 
 	now := time.Now()
 	ring := d.ringing(now)
-	if ring.any() && !on {
-		// A ring lights a dark panel, night or not: its page is how it is stopped.
+	call := phone.Get().State()
+	if (ring.any() || call.Phase != phone.Idle) && !on {
+		// A ring or a call lights a dark panel, night or not: its page is how it is answered or stopped.
 		d.apply(true, d.ceilingOrDefault(), false)
 		on = true
 	}
@@ -1145,7 +1234,7 @@ func (d *Display) frame() time.Duration {
 		return 80 * time.Millisecond
 	}
 
-	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at, ring: ring}
+	s := scene{now: now, phase: view.Phase, heard: view.Heard, reply: view.Reply, since: at, ring: ring, call: call}
 	s.snooze = config.Get().Alarms.Snooze()
 	s.alarms = alarm.Get().View(now)
 	s.timers = timer.Get().List(now)
@@ -1209,9 +1298,13 @@ func (d *Display) frame() time.Duration {
 	s.weather = home.Get().Weather()
 	d.mu.Lock()
 	s.showWeather = (s.phase == "idle" || s.phase == "lingering") && now.Before(d.weatherUntil)
+	s.showRadar = s.showWeather && d.radar
 	d.mu.Unlock()
 	if s.showWeather {
 		s.forecast = home.Get().Forecast()
+	}
+	if s.showRadar {
+		s.radar = home.Get().Radar()
 	}
 
 	d.r.draw(s)
@@ -1223,11 +1316,14 @@ func (d *Display) frame() time.Duration {
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
 	}
-	if ring.any() {
+	if ring.any() || call.Phase != phone.Idle {
 		return 500 * time.Millisecond
 	}
 	if s.bt.Pairing || s.showSheet || s.showWifi {
 		return 500 * time.Millisecond
+	}
+	if s.showRadar && len(s.radar.Frames) > 1 {
+		return radarStep
 	}
 	if s.showWeather || s.nowPlaying {
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))

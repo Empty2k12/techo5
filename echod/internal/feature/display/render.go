@@ -21,6 +21,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
@@ -62,6 +63,9 @@ type scene struct {
 	// security feeds the sheet's Security tab.
 	security security.State
 
+	// call is the phone: while one rings, is placed or is up, its page is over everything.
+	call phone.State
+
 	// ring is a timer or an alarm sounding: the ringing page is over everything. snooze is its length.
 	ring   ringState
 	snooze int
@@ -84,7 +88,10 @@ type scene struct {
 	// idle screen while the radio plays or sits paused.
 	showWeather bool
 	forecast    forecastDays
-	nowPlaying  bool
+	// showRadar is the rain map in place of the forecast.
+	showRadar  bool
+	radar      home.RadarView
+	nowPlaying bool
 
 	// showCamera is a live camera view, over everything but the sheet; cameras feeds the sheet's tab.
 	showCamera bool
@@ -148,6 +155,10 @@ func newRenderer(dst *image.RGBA) *renderer {
 func (r *renderer) draw(s scene) {
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(walnut), image.Point{}, draw.Src)
 
+	if s.call.Phase != phone.Idle {
+		r.callPage(s)
+		return
+	}
 	if s.ring.any() {
 		r.ringingPage(s)
 		return
@@ -175,6 +186,13 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showCamera {
 		r.cameraView(s, s.camera)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showRadar {
+		r.radarPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

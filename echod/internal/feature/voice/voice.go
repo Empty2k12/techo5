@@ -19,6 +19,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
@@ -135,6 +136,11 @@ func (v *Voice) Busy() bool { return v.turn.Busy() }
 // is. Cancelling is the more useful half — it is the way out of a turn that is waiting on a pipeline
 // that is not going to answer.
 func (v *Voice) Action() {
+	// A call ringing or up is what the button is for until it is over: it answers or hangs up.
+	if phone.Get().Button() {
+		return
+	}
+
 	// Anything audible is what the press meant. Asking a question is what the button is for when the
 	// device is doing nothing; while it is talking or playing, reaching for it means make it stop.
 	if v.Stop() {
@@ -234,6 +240,24 @@ func (v *Voice) OnWakeWord(load func(ids []string) []string, selected func()) {
 		}
 		selected()
 	}
+}
+
+// ChooseWakeWord puts id in the first slot from the device itself — the settings sheet — by the same
+// path Home Assistant's selection takes, keeping a second slot if one is set. The API then reconnects,
+// because Home Assistant reads the selection once per connection and would otherwise keep showing
+// the old word.
+func (v *Voice) ChooseWakeWord(id string) {
+	set := v.vs.OnSetActiveWakeWords
+	if set == nil || id == "" {
+		return
+	}
+	ids := []string{id}
+	if cur := v.vs.ActiveWakeWords; len(cur) > 1 && cur[1] != id {
+		ids = append(ids, cur[1])
+	}
+	slog.Info("wake word chosen on the device", "id", id)
+	set(ids)
+	component.Reconnect.Emit(struct{}{})
 }
 
 // ActiveWakeWords is what the device is advertising as listening, by slot.

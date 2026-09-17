@@ -184,3 +184,60 @@ func (c *Client) State(entity string) (State, error) {
 func (c *Client) Fetch(path string) ([]byte, error) {
 	return c.do("GET", path, nil)
 }
+
+// Entity is an entity's id and the name Home Assistant shows for it.
+type Entity struct {
+	ID, Name string
+}
+
+// Entities lists the entities of a domain ("weather"), in Home Assistant's order.
+func (c *Client) Entities(domain string) ([]Entity, error) {
+	out, err := c.do("GET", "/api/states", nil)
+	if err != nil {
+		return nil, err
+	}
+	var states []struct {
+		EntityID   string         `json:"entity_id"`
+		Attributes map[string]any `json:"attributes"`
+	}
+	if err := json.Unmarshal(out, &states); err != nil {
+		return nil, err
+	}
+	var list []Entity
+	for _, s := range states {
+		if !strings.HasPrefix(s.EntityID, domain+".") {
+			continue
+		}
+		name, _ := s.Attributes["friendly_name"].(string)
+		list = append(list, Entity{ID: s.EntityID, Name: name})
+	}
+	return list, nil
+}
+
+// PlayMedia asks a media player to play something: a URL, or a media-source:// id that Home Assistant
+// resolves (and converts for the player) itself.
+func (c *Client) PlayMedia(player, id, kind string) error {
+	if kind == "" {
+		kind = "music"
+	}
+	_, err := c.do("POST", "/api/services/media_player/play_media", map[string]any{
+		"entity_id": player, "media_content_id": id, "media_content_type": kind,
+	})
+	return err
+}
+
+// Config is the part of Home Assistant's configuration the device uses.
+type Config struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Country   string  `json:"country"`
+}
+
+func (c *Client) Config() (Config, error) {
+	out, err := c.do("GET", "/api/config", nil)
+	if err != nil {
+		return Config{}, err
+	}
+	var cfg Config
+	return cfg, json.Unmarshal(out, &cfg)
+}

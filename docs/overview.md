@@ -12,7 +12,7 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   the CPU), streaming to Home Assistant's pipeline, spoken replies, echo cancellation so the
   wake word works over music.
 - **Screen**: clock and weather, the conversation as it happens, a now-playing page with song and
-  artwork, a forecast page, live views of Home Assistant cameras and of the Show's own camera, and
+  artwork, a forecast page and a rain radar map, live views of Home Assistant cameras and of the Show's own camera, and
   a swipe-down settings sheet with its tabs down the left (Device, Alarms, Bluetooth, Cameras, Radio,
   Theme, Security) and Wi-Fi
   setup with an on-screen keyboard. A first-run card shows once.
@@ -21,18 +21,34 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   helpers (`alarms_follow`), and ring from the device's own clock even when Home Assistant is down.
   A ringing timer or alarm takes the whole screen, lights a dark one, and offers Stop and Snooze
   (9 minutes); the stop word, the action button and Home Assistant's Stop/Snooze buttons work too.
-- **Radio**: stations from Home Assistant's lists, playing on the device's own speaker or on
-  Bluetooth earbuds; song, artist and cover from iHeartRadio or TuneIn behind the page.
+- **Weather**: a new device shows Home Assistant's own forecast (`weather.forecast_home`); any other
+  weather entity is chosen on the Device tab, with the "Weather source" select, or with the
+  `home_weather` action, and stays chosen. The forecast page (after a weather question, or Show on
+  the Device tab) has a Radar button: RainViewer's radar over an OpenStreetMap map centred on
+  Home Assistant's home zone, the last hour as a loop. "Show the radar" asks for it directly.
+- **Radio**: the Radio tab steps through its lists with Next. Favorites are the stations wired with
+  `home_radio` (Home Assistant `input_select` lists played through a script). With a Home Assistant
+  token, Local stations (within 100 km of home) and Popular worldwide come from Home Assistant's
+  Radio Browser integration and play through `media_player.play_media` on the device's own player,
+  with no setup. Stations play on the device's own speaker or on Bluetooth earbuds; song, artist and
+  cover come from iHeartRadio or TuneIn behind the page.
 - **Camera**: the front camera as a Home Assistant camera entity (plus JPEG and MJPEG over HTTP
   when switched on). Auto-exposure meters a centre-weighted zone grid, so a window behind somebody
   no longer sets it, and the tone curve finds black and lifts the middle of a backlit frame. Off
   unless something is looking, and off while the mute button is engaged.
+- **Phone calls** through a SIP provider (TLS and SRTP): placed from Home Assistant (`phone_call`) or
+  by voice through an automation, answered on the call page, device to device calls, an
+  `esphome.techo5_phone` event per step. Off until `phone_account` signs the device in. See
+  [phone.md](phone.md).
 - **Bluetooth audio** to earbuds or a speaker; a Bluetooth proxy for Home Assistant (scanning
   through BlueZ on the Show), off by default.
 - **Security**: nothing is open to the network by default except Home Assistant's encrypted link
   and the Sendspin player. SSH (keys only), the camera page and the screen page each have a switch
   on the Security tab and in Home Assistant, all off on a new device. SSH keys come only from Home
   Assistant (`ssh_keys` action) and live on userdata; the image carries none.
+- **Time zone**: taken from Home Assistant on each connection (the POSIX rule it sends ESPHome devices)
+  and kept on userdata, so the images carry none and a unit keeps its zone while Home Assistant is
+  away; a new unit is on UTC until its first connection.
 - **Updates**: two root filesystem slots with a trial and automatic fallback; a release that
   carries a rootfs tarball installs over the air from Home Assistant's update entity.
 
@@ -67,8 +83,9 @@ Android, with one Go daemon, `echod`, doing everything the device does:
 - **Logs**: `/data/techo5-linux/techo5.log` on the device; `dmesg` for the kernel.
 - **Slots**: `slotctl status`, `slotctl install <tar.gz>`, `slotctl switch <a|b>`; a trial slot
   commits after five minutes of a healthy daemon.
-- **Release**: `tools/release.ps1 -Version vX.Y.Z -Notes "..." -Rootfs <tarball>` builds the
-  daemon, writes the manifest, and publishes the release Home Assistant will offer.
+- **Release**: `tools/release.ps1 -Version vX.Y.Z -Notes "..." -Rootfs <tarball> [-Boot <image>]` builds the
+  daemon, writes the manifest, and publishes the release Home Assistant will offer. `-Boot` attaches a
+  boot image built with `build-image.sh --no-key` for new units, and refuses one that carries a key.
 
 ## Known gaps
 

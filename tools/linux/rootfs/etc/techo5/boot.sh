@@ -29,6 +29,14 @@ mountpoint -q /store || mount -t ext4 -o ro,noatime /dev/mmcblk0p12 /store
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
 mkdir -p /run/lock /run/techo5 $LOGDIR /data/misc/techo5/models
+# The clock's zone lives on userdata (echod sets it from Home Assistant); a unit without one starts
+# on the image's default.
+if [ ! -e /data/misc/techo5/timezone ] || [ ! -e /data/misc/techo5/localtime ]; then
+	zone=$(cat /etc/techo5/default-timezone 2>/dev/null || echo UTC)
+	[ -e "/usr/share/zoneinfo/$zone" ] || zone=UTC
+	ln -sfn "/usr/share/zoneinfo/$zone" /data/misc/techo5/localtime
+	echo "$zone" > /data/misc/techo5/timezone
+fi
 mkdir -p -m 700 /data/misc/techo5/ssh
 # A fresh unit gets the wake word models the image carries.
 if [ -d /usr/share/techo5/models ] && [ -z "$(ls -A /data/misc/techo5/models 2>/dev/null)" ]; then
