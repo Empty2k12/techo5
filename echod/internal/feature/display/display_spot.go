@@ -365,11 +365,14 @@ func (d *Display) changed(s voice.State) {
 			go home.Get().ShowCamera(entity, cameraShow)
 		}
 		if aboutGoingHome(s.Heard) {
-			d.weatherArmed, d.quiet = false, true
+			// Back to the clock: whatever is up comes down, and music stops rather than holding the
+			// now-playing face.
+			d.weatherArmed, d.quiet, d.radar, d.radioCue = false, true, false, time.Time{}
 			if d.menuOpen {
 				d.closeMenu()
 			}
 			go home.Get().HideCamera()
+			go stopMusic()
 			slog.Info("screen: home by voice")
 		}
 	}

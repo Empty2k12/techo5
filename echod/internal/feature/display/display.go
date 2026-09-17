@@ -346,11 +346,18 @@ func (d *Display) changed(s voice.State) {
 			d.quiet = true
 			go home.Get().ShowCamera(entity, cameraVoiceShow)
 		}
-		// "Go home": whatever page is up comes down, back to the clock or the radio.
+		// "Go home": whatever page is up comes down, back to the clock, and music stops rather than
+		// holding the now-playing page.
 		if h := strings.ToLower(s.Heard); strings.Contains(h, "go home") || strings.Contains(h, "home screen") || strings.Contains(h, "main screen") {
 			d.weatherArmed, d.weatherUntil = false, time.Time{}
 			d.sheet, d.quiet = false, true
 			go home.Get().HideCamera()
+			go func() {
+				if playing, paused := media.Get().Playing(); playing || paused {
+					home.Get().Stop()
+					media.Get().Stop()
+				}
+			}()
 			slog.Info("screen: home by voice")
 		}
 	}

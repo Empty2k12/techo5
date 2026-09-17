@@ -71,6 +71,12 @@ type Feature struct {
 	weathers   []hass.Entity
 	weathersAt time.Time
 
+	// haCameras is every camera Home Assistant has, fetched at haCamerasAt, for a device given no list
+	// of its own; haCamerasBusy is a fetch under way.
+	haCameras     []config.Camera
+	haCamerasAt   time.Time
+	haCamerasBusy bool
+
 	// The radio's lists from Home Assistant's Radio Browser; see local.go.
 	lists radioLists
 

@@ -67,6 +67,14 @@ func currentStation(rd home.Radio) string {
 	return rd.Chosen
 }
 
+// stopMusic ends what plays, radio or otherwise, so the face goes back to the clock.
+func stopMusic() {
+	if playing, paused := media.Get().Playing(); playing || paused {
+		home.Get().Stop()
+		media.Get().Stop()
+	}
+}
+
 // togglePlay is a tap on now playing.
 func togglePlay() {
 	if playing, _ := media.Get().Playing(); playing {

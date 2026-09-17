@@ -44,10 +44,54 @@ const LocalCamera = "local"
 // Cameras is the configured list, with the device's own camera first where it has one.
 func (f *Feature) Cameras() []config.Camera {
 	cams := config.Get().Home.Cameras
+	if len(cams) == 0 {
+		// No list chosen (the home_cameras action): every camera Home Assistant has, by its own name.
+		cams = f.homeAssistantCameras()
+	}
 	if camera.Available() {
 		return append([]config.Camera{{Entity: LocalCamera, Name: localCameraName}}, cams...)
 	}
 	return cams
+}
+
+// haCamerasEvery is how often Home Assistant's own camera list is looked at again.
+const haCamerasEvery = 10 * time.Minute
+
+// homeAssistantCameras is Home Assistant's cameras as last fetched, starting a fetch in the background
+// when that is stale; it never waits, since screens ask for it while drawing.
+func (f *Feature) homeAssistantCameras() []config.Camera {
+	if !hass.Get().Ready() {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if time.Since(f.haCamerasAt) > haCamerasEvery && !f.haCamerasBusy {
+		f.haCamerasBusy = true
+		go func() {
+			list, err := hass.Get().Entities("camera")
+			var cams []config.Camera
+			for _, e := range list {
+				name := e.Name
+				if name == "" {
+					name = e.ID
+				}
+				cams = append(cams, config.Camera{Entity: e.ID, Name: name})
+			}
+			f.mu.Lock()
+			f.haCamerasBusy = false
+			if err != nil {
+				slog.Warn("home: listing Home Assistant's cameras", "err", err)
+				f.haCamerasAt = time.Now().Add(time.Minute - haCamerasEvery) // try again in a minute
+			} else {
+				f.haCameras, f.haCamerasAt = cams, time.Now()
+			}
+			f.mu.Unlock()
+			if err == nil {
+				f.Changed.Emit(struct{}{})
+			}
+		}()
+	}
+	return f.haCameras
 }
 
 // Camera is the view in progress, if any.
