@@ -32,7 +32,7 @@ In Home Assistant, **Developer Tools → Actions**, for each device:
 ```yaml
 action: esphome.<device>_phone_account
 data:
-  server: denver2.voip.ms
+  server: chicago1.voip.ms
   username: "100000_kitchen"
   password: "<the sub-account's password>"
 ```
