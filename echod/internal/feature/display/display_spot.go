@@ -1059,12 +1059,14 @@ func (d *Display) frame() time.Duration {
 
 	drawn := time.Now()
 	d.r.draw(s)
+	painted := time.Now()
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
 	if took := time.Since(drawn); took > slowFrame && time.Since(d.slowSaid) > time.Minute {
 		d.slowSaid = time.Now()
-		slog.Info("screen: slow frame", "took", took.Round(time.Millisecond), "menu", s.menuOpen, "mode", s.menuMode, "now_playing", s.nowPlaying, "camera", s.showCamera)
+		slog.Info("screen: slow frame", "took", took.Round(time.Millisecond), "draw", painted.Sub(drawn).Round(time.Millisecond),
+			"present", time.Since(painted).Round(time.Millisecond), "menu", s.menuOpen, "mode", s.menuMode, "now_playing", s.nowPlaying, "camera", s.showCamera)
 	}
 	for pending := true; pending; {
 		select {

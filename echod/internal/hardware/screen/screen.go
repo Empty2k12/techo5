@@ -14,6 +14,7 @@
 package screen
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -92,6 +93,12 @@ type Device struct {
 	shift     [4]uint // where red, green, blue and alpha sit in a pixel
 
 	canvas *image.RGBA
+
+	// shadow is what each page of the framebuffer already holds, in RAM, so a frame writes only the
+	// rows that differ: writing the framebuffer's own memory is slow (on the Spot most of a frame),
+	// and most frames change a few rows. row is scratch for one converted row.
+	shadow [][]byte
+	row    []byte
 }
 
 // Open maps the framebuffer and reads its geometry.
@@ -186,6 +193,38 @@ func (d *Device) Present() error {
 	img := d.canvas
 	w, h := img.Rect.Dx(), img.Rect.Dy()
 	sr, sg, sb, sa := d.shift[0], d.shift[1], d.shift[2], d.shift[3]
+	// The common layouts row by row, a copy and at most a swap of red and blue, rather than a pixel
+	// packed at a time: on the Spot this is most of a frame's cost otherwise.
+	if !rotated && w <= d.panelW && sg == 8 && sa == 24 && ((sr == 0 && sb == 16) || (sr == 16 && sb == 0)) {
+		swap := sr == 16
+		if d.shadow == nil {
+			d.shadow = make([][]byte, max(d.pages, 1))
+			d.row = make([]byte, w*4)
+		}
+		shadow := d.shadow[next]
+		if shadow == nil {
+			// A page never written by this process: take what it holds, so the first frame compares
+			// against the truth rather than against zeros.
+			shadow = append([]byte(nil), dst...)
+			d.shadow[next] = shadow
+		}
+		row := d.row[:w*4]
+		for y := 0; y < h && y < d.panelH; y++ {
+			copy(row, img.Pix[y*img.Stride:y*img.Stride+w*4])
+			if swap {
+				for i := 0; i+3 < len(row); i += 4 {
+					row[i], row[i+2] = row[i+2], row[i]
+				}
+			}
+			at := y * d.line
+			if bytes.Equal(row, shadow[at:at+w*4]) {
+				continue
+			}
+			copy(shadow[at:at+w*4], row)
+			copy(dst[at:at+w*4], row)
+		}
+		return d.pan(next)
+	}
 	if !rotated {
 		for y := 0; y < h && y < d.panelH; y++ {
 			row := dst[y*d.line : y*d.line+d.panelW*4]

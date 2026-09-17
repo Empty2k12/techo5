@@ -272,33 +272,47 @@ func (r *roundRenderer) arc(r0, r1 float64, a0, a1 float64, c color.RGBA) {
 func (r *roundRenderer) ringAt(cx, cy, r0, r1 float64, a0, a1 float64, c color.RGBA) {
 	full := a1-a0 >= 2*math.Pi-1e-9
 	b := r.dst.Rect
+	outer, inner := r1+1, r0-1
 	for y := max(int(cy-r1)-1, b.Min.Y); y <= min(int(cy+r1)+1, b.Max.Y-1); y++ {
 		dy := float64(y) + 0.5 - cy
-		for x := max(int(cx-r1)-1, b.Min.X); x <= min(int(cx+r1)+1, b.Max.X-1); x++ {
-			dx := float64(x) + 0.5 - cx
-			d := math.Hypot(dx, dy)
-			if d < r0-1 || d > r1+1 {
-				continue
-			}
-			if !full {
-				a := math.Atan2(dx, -dy)
-				if a < 0 {
-					a += 2 * math.Pi
-				}
-				lo := math.Mod(a0, 2*math.Pi)
-				if lo < 0 {
-					lo += 2 * math.Pi
-				}
-				rel := a - lo
-				if rel < 0 {
-					rel += 2 * math.Pi
-				}
-				if rel > a1-a0 {
+		if math.Abs(dy) > outer {
+			continue
+		}
+		// Only this row's stretch of the ring: from its outer edge in to the hole, on each side, rather
+		// than every pixel of the square round it.
+		xo := math.Sqrt(outer*outer-dy*dy) + 1
+		spans := [][2]int{{int(cx - xo), int(cx + xo)}}
+		if inner > 1 && math.Abs(dy) < inner-1 {
+			xi := math.Sqrt(inner*inner-dy*dy) - 1
+			spans = [][2]int{{int(cx - xo), int(cx - xi)}, {int(cx+xi) + 1, int(cx + xo)}}
+		}
+		for _, sp := range spans {
+			for x := max(sp[0], b.Min.X); x <= min(sp[1], b.Max.X-1); x++ {
+				dx := float64(x) + 0.5 - cx
+				d := math.Hypot(dx, dy)
+				if d < r0-1 || d > r1+1 {
 					continue
 				}
+				if !full {
+					a := math.Atan2(dx, -dy)
+					if a < 0 {
+						a += 2 * math.Pi
+					}
+					lo := math.Mod(a0, 2*math.Pi)
+					if lo < 0 {
+						lo += 2 * math.Pi
+					}
+					rel := a - lo
+					if rel < 0 {
+						rel += 2 * math.Pi
+					}
+					if rel > a1-a0 {
+						continue
+					}
+				}
+				cover := math.Min(math.Min(d-(r0-1), (r1+1)-d), 1)
+				r.blend(x, y, c, cover)
 			}
-			cover := math.Min(math.Min(d-(r0-1), (r1+1)-d), 1)
-			r.blend(x, y, c, cover)
 		}
 	}
 }
