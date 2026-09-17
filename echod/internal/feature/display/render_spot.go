@@ -102,6 +102,7 @@ type roundScene struct {
 	phoneReady   bool
 	contacts     []phone.Contact
 	contactCount int
+	contactTop   int // the first contact shown
 }
 
 type roundRenderer struct {

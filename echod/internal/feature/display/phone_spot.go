@@ -96,15 +96,55 @@ func (r *roundRenderer) callFace(s roundScene) {
 	}
 }
 
+// The contact list: big rows, five at a time, so a finger lands on the one it means. A swipe up or down
+// scrolls, and arrows above and below say there is more.
+const (
+	contactRows   = 5
+	contactRowH   = 58
+	contactFirstY = 158 // the first visible row's baseline
+)
+
+// contactRowAt is which contact a tap at y is on, with top the first one shown, or -1.
+func contactRowAt(y, top, n int) int {
+	i := (y - (contactFirstY - 38)) / contactRowH
+	if y < contactFirstY-38 || i < 0 || i >= contactRows || top+i >= n {
+		return -1
+	}
+	return top + i
+}
+
+// contactTopFor keeps a scroll position inside the list.
+func contactTopFor(top, n int) int { return min(max(top, 0), max(n-contactRows, 0)) }
+
 // contactList is who the Call item offers: a tap calls them.
 func (r *roundRenderer) contactList(s roundScene) {
-	names := make([]string, len(s.contacts))
-	for i, c := range s.contacts {
-		names[i] = c.Name
+	r.clear()
+	r.centred(r.label, "CALL", 84, colCall)
+	if len(s.contacts) == 0 {
+		msg := "No contacts yet: Home Assistant's phone_contacts action sets them"
+		if !s.phoneReady {
+			msg = "The phone is not set up"
+		}
+		r.paragraph(r.body, msg, 230, colDim, 3)
+		return
 	}
-	empty := "No contacts yet: Home Assistant's phone_contacts action sets them"
-	if !s.phoneReady {
-		empty = "The phone is not set up"
+	top := contactTopFor(s.contactTop, len(s.contacts))
+	for i := 0; i < contactRows && top+i < len(s.contacts); i++ {
+		y := contactFirstY + i*contactRowH
+		w := 330
+		if i == 0 || i == contactRows-1 {
+			w = 280 // the circle is narrower at the top and bottom rows
+		}
+		r.line(float64(centre-w/2), float64(y-12), float64(centre+w/2), float64(y-12), float64(contactRowH-10), color.RGBA{28, 34, 42, 255})
+		r.centred(r.title, clip(r.title, r, s.contacts[top+i].Name, w-30), y, colText)
 	}
-	r.pickList("CALL", names, -1, colCall, empty)
+	if top > 0 {
+		r.triangle(centre-16, 112, centre+16, 112, centre, 96, colCall)
+	}
+	if top+contactRows < len(s.contacts) {
+		r.triangle(centre-16, 438, centre+16, 438, centre, 454, colCall)
+	}
+	if len(s.contacts) > contactRows {
+		r.centred(r.tiny, "swipe for more", 426, colDim)
+	}
 }

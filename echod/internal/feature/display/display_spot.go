@@ -153,6 +153,8 @@ type Display struct {
 	radioSel int
 	// cameraSel is the camera list's middle row.
 	cameraSel int
+	// contactTop is the first contact the Call list shows.
+	contactTop int
 	// slowSaid is when a slow frame was last logged.
 	slowSaid time.Time
 
@@ -587,10 +589,17 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		}
 
 	case mode == modeContacts:
+		n := len(phone.Get().Contacts())
+		switch g.Kind {
+		case touch.SwipeUp:
+			d.contactTop = contactTopFor(d.contactTop+contactRows-1, n)
+		case touch.SwipeDown:
+			d.contactTop = contactTopFor(d.contactTop-(contactRows-1), n)
+		}
 		if g.Kind != touch.Tap {
 			break
 		}
-		row := listRowAt(g.Y, len(phone.Get().Contacts()))
+		row := contactRowAt(g.Y, contactTopFor(d.contactTop, n), n)
 		d.closeMenu() // a tap off the list puts it away
 		if row < 0 {
 			break
@@ -707,7 +716,10 @@ func (d *Display) act(id itemID) {
 		d.locked(d.closeMenu)
 		voice.Get().Action()
 	case itemCall:
-		d.locked(func() { d.openMenu(modeContacts, "") })
+		d.locked(func() {
+			d.openMenu(modeContacts, "")
+			d.contactTop = 0
+		})
 	case itemMute:
 		mute.Get().Toggle()
 	case itemMusic:
@@ -1019,6 +1031,9 @@ func (d *Display) frame() time.Duration {
 		s.contactCount = len(contacts)
 		if s.menuMode == modeContacts {
 			s.contacts = contacts
+			d.mu.Lock()
+			s.contactTop = d.contactTop
+			d.mu.Unlock()
 		}
 	}
 	s.call = phone.Get().State()
