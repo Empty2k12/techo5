@@ -54,6 +54,20 @@ diagnostics can read, and never in an image or a release.
 | **Decline or hang up** | The same button again, a sideways swipe on the Spot, **Decline** / **Hang up** on the Show, the **Hang up** button, or `esphome.<device>_phone_hangup`. |
 | **Say something into a call** | `assist_satellite.announce` on the same device while a call is up: the message plays in the room and goes into the call. |
 
+### Contacts on a screen
+
+A device with a screen can call without a voice command: the Spot's dial has **Call**, listing the
+contacts Home Assistant gives it, up to 12:
+
+```yaml
+action: esphome.<device>_phone_contacts
+data:
+  contacts: "Alex=15551234567, Sam=15557654321, Kitchen=106"
+```
+
+An empty `contacts` clears the list. Like the login, the numbers are kept in their own owner-only file
+on the device.
+
 While a call rings or is up, the wake word is ignored (the far end talking through the speaker is not
 someone in the room), and music and other sounds pause for it. A ringing call lights the Show's and
 the Spot's screen and pulses the Dot's ring green.
