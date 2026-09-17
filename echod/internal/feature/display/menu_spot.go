@@ -39,6 +39,7 @@ const (
 	modeWeather
 	modeBluetooth
 	modeRadio
+	modeCameras
 )
 
 // jogging is whether the mode turns the ring into a jog wheel.
@@ -362,6 +363,8 @@ func (r *roundRenderer) menu(s roundScene) {
 		r.weatherFace(s)
 	case s.menuMode == modeRadio:
 		r.radioList(s)
+	case s.menuMode == modeCameras:
+		r.cameraList(s)
 	default:
 		r.dial(s)
 	}

@@ -26,8 +26,11 @@ import (
 const (
 	metaEvery = 15 * time.Second
 
-	// artW and artH are the panel; pictures are made to fit it once, when they arrive.
+	// artW and artH are the panel; pictures are made to fit it once, when they arrive. thumbSide is
+	// the square the same picture is also made into, for a screen that shows it as a picture rather
+	// than behind the words (the Spot's round one).
 	artW, artH = 960, 480
+	thumbSide  = 240
 )
 
 // meta is the state the poller keeps.
@@ -36,6 +39,7 @@ type meta struct {
 	st      radiometa.Station
 	now     radiometa.Now
 	art     *image.RGBA
+	thumb   *image.RGBA
 	artURL  string
 	artLogo bool // the picture is the station's logo, not a cover
 }
@@ -133,12 +137,12 @@ func (f *Feature) refreshMeta(ctx context.Context) {
 		want, logo = next.st.Logo, true
 	}
 	if want != next.artURL {
-		img, err := fetchArt(ctx, want, logo)
+		img, thumb, err := fetchArt(ctx, want, logo)
 		if err != nil {
 			slog.Debug("radio: art", "url", want, "err", err)
-			img = nil
+			img, thumb = nil, nil
 		}
-		next.art, next.artURL, next.artLogo = img, want, logo
+		next.art, next.thumb, next.artURL, next.artLogo = img, thumb, want, logo
 	}
 	f.mu.Lock()
 	changed := next.now != cur.now || next.artURL != cur.artURL || next.station != cur.station
@@ -151,33 +155,34 @@ func (f *Feature) refreshMeta(ctx context.Context) {
 }
 
 // fetchArt downloads a picture and lays it out for the panel: a cover is scaled to fill the
-// panel and cropped; a logo is scaled to fit and centred, since a cropped logo is no logo.
-func fetchArt(ctx context.Context, u string, logo bool) (*image.RGBA, error) {
+// panel and cropped; a logo is scaled to fit and centred, since a cropped logo is no logo. The square
+// thumbnail follows the same rule.
+func fetchArt(ctx context.Context, u string, logo bool) (*image.RGBA, *image.RGBA, error) {
 	if u == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res, err := artClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer res.Body.Close()
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(http.MaxBytesReader(nil, res.Body, 4<<20)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	src, _, err := image.Decode(&buf)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, artW, artH))
 	sb := src.Bounds()
 	sw, sh := sb.Dx(), sb.Dy()
 	if sw == 0 || sh == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var target image.Rectangle
 	if logo {
@@ -200,5 +205,14 @@ func fetchArt(ctx context.Context, u string, logo bool) (*image.RGBA, error) {
 		target = image.Rect((artW-w)/2, (artH-h)/2, (artW-w)/2+w, (artH-h)/2+h)
 	}
 	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Src, nil)
-	return dst, nil
+
+	thumb := image.NewRGBA(image.Rect(0, 0, thumbSide, thumbSide))
+	w, h := thumbSide, thumbSide
+	if (sw > sh) == logo {
+		h = sh * thumbSide / sw // fit the longer side (a logo), or fill with the shorter (a cover)
+	} else {
+		w = sw * thumbSide / sh
+	}
+	xdraw.ApproxBiLinear.Scale(thumb, image.Rect((thumbSide-w)/2, (thumbSide-h)/2, (thumbSide-w)/2+w, (thumbSide-h)/2+h), src, sb, draw.Src, nil)
+	return dst, thumb, nil
 }

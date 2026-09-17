@@ -49,6 +49,7 @@ type Radio struct {
 	// background — the cover when there is one, else the station's logo (Logo true).
 	Title, Artist, Album string
 	Art                  *image.RGBA
+	Thumb                *image.RGBA // the same picture as a square, fitted or filled the same way
 	Logo                 bool
 	Music                bool // a music station, for the default picture when there is none
 }
@@ -353,22 +354,14 @@ func (f *Feature) Radio() Radio {
 	}
 	t := hastate.Get()
 	if r.Source == config.RadioFavorites {
-		seen := map[string]bool{}
-		for _, entity := range h.Stations {
-			v, ok := t.Value(entity, "options")
-			if !ok {
-				continue
-			}
-			for _, name := range hastate.Options(v) {
-				name = strings.TrimSpace(name)
-				if name == "" || seen[name] || strings.HasPrefix(strings.ToLower(name), "select a") {
-					continue
-				}
-				seen[name] = true
-				r.Stations = append(r.Stations, name)
-			}
-		}
-	} else {
+		r.Stations = favoriteNames(h)
+	}
+	// Favorites that turn out to hold no stations (lists not in Home Assistant yet) fall back to
+	// the stations near home, when there are any to fall back to.
+	if r.Source == config.RadioFavorites && len(r.Stations) == 0 && r.Sources > 1 {
+		r.Source = config.RadioLocal
+	}
+	if r.Source != config.RadioFavorites {
 		f.fetchList(r.Source)
 		f.mu.Lock()
 		l := f.list(r.Source)
@@ -383,7 +376,7 @@ func (f *Feature) Radio() Radio {
 	r.Chosen = f.chosen
 	r.Now = f.urlName
 	r.Title, r.Artist, r.Album = f.meta.now.Title, f.meta.now.Artist, f.meta.now.Album
-	r.Art, r.Logo, r.Music = f.meta.art, f.meta.artLogo, f.meta.st.Music
+	r.Art, r.Thumb, r.Logo, r.Music = f.meta.art, f.meta.thumb, f.meta.artLogo, f.meta.st.Music
 	f.mu.Unlock()
 	// The stream's own name wins; Home Assistant's "last station" text is the fallback.
 	if r.Now == "" && h.Now != "" {
@@ -395,10 +388,36 @@ func (f *Feature) Radio() Radio {
 	return r
 }
 
+// favoriteNames is the stations in Home Assistant's lists, in order, each once.
+func favoriteNames(h config.Radio) []string {
+	t := hastate.Get()
+	var out []string
+	seen := map[string]bool{}
+	for _, entity := range h.Stations {
+		v, ok := t.Value(entity, "options")
+		if !ok {
+			continue
+		}
+		for _, name := range hastate.Options(v) {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] || strings.HasPrefix(strings.ToLower(name), "select a") {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // Play plays a station of the list shown on this device: a favorite through Home Assistant's
 // script, a Radio Browser station through the device's own player entity.
 func (f *Feature) Play(station string) {
 	source := radioSource()
+	// Favorites with nothing in them show the stations near home instead (Radio).
+	if source == config.RadioFavorites && len(favoriteNames(config.Get().Home.Radio)) == 0 {
+		source = config.RadioLocal
+	}
 	if source != config.RadioFavorites {
 		if f.playListed(source, station) {
 			f.Changed.Emit(struct{}{})

@@ -17,6 +17,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
@@ -88,6 +89,13 @@ type roundScene struct {
 
 	// call is the phone: while one rings, is placed or is up, its face is over everything.
 	call phone.State
+
+	// ringing is a timer or an alarm sounding: its face is over everything but a call.
+	ringing ringing
+
+	// cameras is the camera list and cameraSel its row in the middle, while the list is open.
+	cameras   []config.Camera
+	cameraSel int
 }
 
 type roundRenderer struct {
@@ -128,6 +136,10 @@ func (r *roundRenderer) draw(s roundScene) {
 
 	if s.call.Phase != phone.Idle {
 		r.callFace(s)
+		return
+	}
+	if s.ringing.any() {
+		r.ringFace(s)
 		return
 	}
 	r.rim(s)

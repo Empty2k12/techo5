@@ -40,6 +40,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
@@ -147,6 +148,8 @@ type Display struct {
 	radioCue time.Time
 	radar    bool
 	radioSel int
+	// cameraSel is the camera list's middle row.
+	cameraSel int
 
 	poke chan struct{}
 
@@ -190,7 +193,8 @@ func build() *Display {
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
-	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
+	timer.Get().Changed.Listen(func(struct{}) { d.ringLights() })
+	alarm.Get().Changed.Listen(func(struct{}) { d.ringLights() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	hastate.Get().Changed.Listen(func(u hastate.Update) {
 		// Only a change means a station is starting; the first value is the one that played last.
@@ -397,7 +401,7 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	if d.callGesture(g) {
+	if d.callGesture(g) || d.ringGesture(g) {
 		return
 	}
 	if open {
@@ -414,6 +418,14 @@ func (d *Display) gesture(g touch.Gesture) {
 			return
 		case touch.SwipeRight:
 			go stepCamera(v.Entity, -1)
+			return
+		case touch.Hold:
+			d.mu.Lock()
+			d.openMenu(modeCameras, "")
+			d.cameraSel = cameraIndex(v.Entity)
+			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
+			d.mu.Unlock()
+			d.wake()
 			return
 		}
 	}
@@ -455,7 +467,9 @@ func (d *Display) openMenu(mode menuMode, id itemID) {
 		d.menuRot = restFor(d.menuSel, len(items))
 		d.menuRest = d.menuRot
 	}
-	touch.Get().SetFollow(true)
+	// The finger follows (every move a turn of the ring) wherever there is a ring to turn. The weather
+	// face has none, and needs its sideways swipe between the forecast and the radar.
+	touch.Get().SetFollow(mode != modeWeather)
 }
 
 // closeMenu takes the menu off the screen. Called with d.mu held.
@@ -540,6 +554,12 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		case touch.Release:
 			d.spinning, d.jogTurn = false, 0
 		case touch.Tap:
+			if g.Y < radioTitleBelow {
+				// The list's name at the top: the next list.
+				d.radioSel = 0
+				go home.Get().NextRadioSource()
+				break
+			}
 			sel := d.radioSel
 			d.closeMenu()
 			d.mu.Unlock()
@@ -549,6 +569,37 @@ func (d *Display) menuGesture(g touch.Gesture) {
 		case touch.SwipeLeft, touch.SwipeRight:
 			d.radioSel = 0
 			go home.Get().NextRadioSource()
+		}
+
+	case mode == modeCameras:
+		switch g.Kind {
+		case touch.Hold:
+			d.spinning, d.spinAngle = true, fingerAngle(g.X, g.Y)
+		case touch.Drag:
+			if !d.spinning {
+				break
+			}
+			a := fingerAngle(g.X, g.Y)
+			d.jogTurn += wrapAngle(a - d.spinAngle)
+			d.spinAngle = a
+			n := len(home.Get().Cameras())
+			for d.jogTurn >= jogStep {
+				d.jogTurn -= jogStep
+				d.cameraSel = min(d.cameraSel+1, max(n-1, 0))
+			}
+			for d.jogTurn <= -jogStep {
+				d.jogTurn += jogStep
+				d.cameraSel = max(d.cameraSel-1, 0)
+			}
+		case touch.Release:
+			d.spinning, d.jogTurn = false, 0
+		case touch.Tap:
+			sel := d.cameraSel
+			d.closeMenu()
+			d.mu.Unlock()
+			go pickCamera(sel)
+			d.wake()
+			return
 		}
 
 	default:
@@ -880,6 +931,10 @@ func (d *Display) frame() time.Duration {
 			if now.Sub(d.menuAt) > radioIdle {
 				d.closeMenu()
 			}
+		case d.menuMode == modeCameras:
+			if now.Sub(d.menuAt) > cameraListIdle {
+				d.closeMenu()
+			}
 		case !d.menuMode.jogging() && now.Sub(d.menuAt) > menuIdle:
 			d.closeMenu()
 		}
@@ -910,6 +965,7 @@ func (d *Display) frame() time.Duration {
 		restartArmed: !d.restartArm.IsZero() && now.Sub(d.restartArm) < restartWindow,
 		forgetArmed:  !d.forgetArm.IsZero() && now.Sub(d.forgetArm) < restartWindow,
 		radioSel:     d.radioSel,
+		cameraSel:    d.cameraSel,
 		radarOn:      d.radar,
 	}
 	quiet := d.quiet
@@ -940,6 +996,10 @@ func (d *Display) frame() time.Duration {
 		}
 	}
 	s.timerRinging = timer.Get().Ringing()
+	s.ringing = ringingNow(now)
+	if s.menuOpen && s.menuMode == modeCameras {
+		s.cameras = home.Get().Cameras()
+	}
 	s.call = phone.Get().State()
 	s.weather = home.Get().Weather()
 	s.camera, s.showCamera = home.Get().Camera()
@@ -1003,7 +1063,7 @@ func (d *Display) frame() time.Duration {
 		return activeFrame
 	case s.menuOpen && s.menuMode == modeWeather && s.radarOn:
 		return radarStep
-	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing || s.call.Phase != phone.Idle:
+	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing || s.call.Phase != phone.Idle || s.ringing.any():
 		return activeFrame
 	default:
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))

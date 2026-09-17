@@ -18,9 +18,9 @@ import (
 // Music on the round screen. While something plays or sits paused the idle face is now playing:
 // the cover (or the station's logo) fills the circle behind the song, the artist and the station, a
 // tap plays or pauses and a sideways swipe steps to the next station on the list. Music on the dial
-// opens the station list, a ring you turn to scroll: a tap plays the one in the middle, a sideways
-// swipe changes list (favorites, stations near you, popular worldwide), and while anything plays the
-// first row stops it.
+// opens the station list, a ring you turn to scroll: a tap plays the one in the middle, a tap on the
+// list's name at the top changes list (Home Assistant's favorites, stations near you, popular
+// worldwide), and while anything plays the first row stops it.
 //
 // The rain map is the weather face's other side: a sideways swipe there turns between the forecast
 // and the radar, and "radar" by voice opens it.
@@ -33,6 +33,9 @@ const (
 
 	// radarStep is how long each frame of the rain map's loop shows; the newest holds for three.
 	radarStep = 600 * time.Millisecond
+
+	// radioTitleBelow is where the station list's name ends: a tap above it changes list.
+	radioTitleBelow = 175
 )
 
 var (
@@ -117,18 +120,29 @@ func pickStation(sel int) {
 	home.Get().Play(rows[sel])
 }
 
-// nowPlayingFace is the idle face while music plays or waits paused.
+// nowPlayingFace is the idle face while music plays or waits paused, laid out as the Show's: the time
+// and date along the top, the station's picture (the song's cover when it has one, else the station's
+// logo) in the middle, then the station, the song and the artist.
 func (r *roundRenderer) nowPlayingFace(s roundScene) {
 	rd := s.radio
-	if rd.Art != nil {
-		r.coverCircle(rd.Art, false)
-		shade := uint8(150)
+	r.centred(r.title, s.now.Format("3:04 PM"), 84, colText)
+	r.centred(r.small, s.now.Format("Monday, January 2"), 114, colDim)
+
+	const artY, artR = 205.0, 76.0
+	r.discAt(centre, artY, artR+3, color.RGBA{44, 50, 60, 255})
+	if rd.Thumb != nil {
 		if rd.Logo {
-			shade = 185
+			r.discAt(centre, artY, artR, color.RGBA{236, 240, 244, 255}) // a logo reads best on white
 		}
-		r.shadeCircle(shade)
+		r.discImage(rd.Thumb, centre, artY, artR)
 	} else {
-		r.notesMark(centre, 250, 70, color.RGBA{34, 40, 48, 255})
+		r.discAt(centre, artY, artR, color.RGBA{24, 28, 34, 255})
+		r.notesMark(centre, artY, 38, colMusic)
+	}
+	if s.paused {
+		// Paused: the picture dims under a play mark.
+		r.discAt(centre, artY, artR, color.RGBA{0, 0, 0, 140})
+		r.triangle(centre-16, artY-26, centre-16, artY+26, centre+28, artY, colText)
 	}
 
 	station := currentStation(rd)
@@ -139,34 +153,21 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 	if s.paused {
 		label = "PAUSED"
 	}
-	r.centred(r.label, s.now.Format("3:04"), 70, colDim)
-
-	headline, sub := station, ""
+	label = clip(r.label, r, label+" · "+strings.ToUpper(station), 330)
+	r.centred(r.label, label, 314, colMusic)
 	if rd.Title != "" {
-		label += " · " + strings.ToUpper(station)
-		headline, sub = rd.Title, rd.Artist
-	}
-	label = clip(r.label, r, label, 320)
-	r.centred(r.label, label, 132, colMusic)
-	y := r.paragraph(r.title, headline, 205, colText, 2)
-	if sub != "" {
-		r.paragraph(r.body, sub, y+8, colDim, 2)
-	}
-
-	// Play or pause, with what a tap does.
-	cx, cy := float64(centre), 372.0
-	r.discAt(cx, cy, 30, color.RGBA{0, 0, 0, 120})
-	if s.paused {
-		r.triangle(cx-9, cy-16, cx-9, cy+16, cx+17, cy, colText)
+		r.centred(r.title, clip(r.title, r, rd.Title, 350), 354, colText)
+		if rd.Artist != "" {
+			r.centred(r.body, clip(r.body, r, rd.Artist, 320), 388, colDim)
+		}
 	} else {
-		r.line(cx-8, cy-14, cx-8, cy+14, 7, colText)
-		r.line(cx+8, cy-14, cx+8, cy+14, 7, colText)
+		r.centred(r.title, clip(r.title, r, station, 350), 358, colText)
 	}
-	hint := "tap to pause"
+	hint := "tap to pause · swipe for next"
 	if s.paused {
-		hint = "tap to play"
+		hint = "tap to play · swipe for next"
 	}
-	r.centred(r.small, hint, 432, colDim)
+	r.centred(r.tiny, hint, 424, colDim)
 }
 
 // shadeCircle darkens the inside of the rim, so text reads over a picture.
@@ -218,7 +219,7 @@ func (r *roundRenderer) radioList(s roundScene) {
 		}
 		r.paragraph(r.body, msg, 230, colDim, 3)
 		if rd.Sources > 1 {
-			r.centred(r.small, "swipe for other lists", 400, colDim)
+			r.centred(r.small, "tap the title for other lists", 400, colDim)
 		}
 		return
 	}
@@ -251,7 +252,7 @@ func (r *roundRenderer) radioList(s roundScene) {
 	}
 	r.centred(r.small, hint, 392, colDim)
 	if rd.Sources > 1 {
-		r.centred(r.small, "swipe for other lists", 420, colDim)
+		r.centred(r.small, "tap the title for other lists", 420, colDim)
 	}
 
 	// Where in the list, round the ring.

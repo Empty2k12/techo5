@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -78,7 +80,11 @@ func TestRoundScenesDraw(t *testing.T) {
 		"weather-none":      {now: at, phase: "idle", menuOpen: true, menuMode: modeWeather},
 		"menu-bluetooth":    {now: at, phase: "idle", menuOpen: true, menuMode: modeSettings, menuSel: 3, menuRot: restFor(3, len(settingsItems)), btAvailable: true, btConnected: "Kitchen speaker"},
 		"bt-dial":           {now: at, phase: "idle", menuOpen: true, menuMode: modeBluetooth, menuSel: 1, menuRot: restFor(1, len(bluetoothItems)), btAvailable: true, btConnected: "Kitchen speaker", btRemembered: "Kitchen speaker"},
-		"nowplaying":        {now: at, phase: "idle", nowPlaying: true, playing: true, radio: home.Radio{Now: "KXYZ 101.1", Title: "Take It Easy", Artist: "Eagles", Art: testPicture()}},
+		"nowplaying":        {now: at, phase: "idle", nowPlaying: true, playing: true, radio: home.Radio{Now: "KXYZ 101.1", Title: "Take It Easy", Artist: "Eagles", Art: testPicture(), Thumb: testPicture()}},
+		"nowplaying-logo":   {now: at, phase: "idle", nowPlaying: true, playing: true, radio: home.Radio{Now: "Morning News 850", Logo: true, Thumb: testPicture()}},
+		"cameras":           {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "camera.deck", Name: "Deck", Frame: testPicture()}, menuOpen: true, menuMode: modeCameras, cameraSel: 1, cameras: []config.Camera{{Entity: home.LocalCamera, Name: "This Spot"}, {Entity: "camera.deck", Name: "Deck"}, {Entity: "camera.front_door", Name: "Front door"}}},
+		"ringing-alarm":     {now: at, phase: "idle", ringing: ringing{alarm: &alarm.Ring{Label: "Wake up", At: at}, snoozeIn: 9}},
+		"ringing-timer":     {now: at, phase: "idle", ringing: ringing{timer: "pasta", timerOn: true}},
 		"nowplaying-paused": {now: at, phase: "idle", nowPlaying: true, paused: true, radio: home.Radio{Chosen: "Morning News"}},
 		"radio-list":        {now: at, phase: "idle", playing: true, menuOpen: true, menuMode: modeRadio, radioSel: 2, radio: home.Radio{Configured: true, Source: "local", Sources: 2, Now: "KXYZ 101.1", Stations: []string{"KAAA 90.1", "KXYZ 101.1", "The Mountain 99.5 Classic Rock and More", "KBBB 104.3"}}},
 		"radar-loading":     {now: at, phase: "idle", menuOpen: true, menuMode: modeWeather, radarOn: true, radar: home.RadarView{Loading: true}},

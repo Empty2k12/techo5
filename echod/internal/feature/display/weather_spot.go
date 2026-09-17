@@ -37,7 +37,7 @@ var (
 // aboutWeather is whether what was heard asked about the weather.
 func aboutWeather(heard string) bool {
 	h := strings.ToLower(heard)
-	for _, w := range []string{"weather", "forecast", "temperature", "rain", "snow", "how hot", "how cold", "storm"} {
+	for _, w := range []string{"weather", "forecast", "temperature", "rain", "snow", "how hot", "how cold", "storm", "radar", "weather map"} {
 		if strings.Contains(h, w) {
 			return true
 		}
