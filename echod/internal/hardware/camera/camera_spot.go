@@ -31,6 +31,9 @@ import (
 // Width and Height are the frames handed out: the sensor's own size.
 const Width, Height = 640, 480
 
+// sensorSupported: the Spot has one camera and this file drives it.
+func sensorSupported() bool { return true }
+
 const (
 	sensorW, sensorH = Width, Height
 	frameBytes       = sensorW * sensorH // one byte a pixel

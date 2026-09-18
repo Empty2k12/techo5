@@ -1,10 +1,17 @@
 #!/bin/bash
-# build-kernel.sh — build the cronos kernel (LineageOS 18.1 tree, 4.9.337
+# build-kernel.sh, build the Echo Show 5 kernel (LineageOS 18.1 tree, 4.9.337
 # arm64) with Bluetooth added, at the exact commit the LineageOS boot image
 # was built from so its vendor modules (mt76x8_wlan.ko, mt76x8_bt.ko; built
 # with CONFIG_MODVERSIONS) still load. Run inside WSL/Linux.
 #
 #   tools/linux/build-kernel.sh [-o Image.gz-dtb]
+#   DEVICE=checkers tools/linux/build-kernel.sh -o Image.gz-dtb-checkers
+#
+# DEVICE (default cronos) picks the defconfig, and with it the appended device
+# trees: eleven cronos board revisions, five checkers ones. Everything else is
+# the same tree and the same commit; KCOMMIT is what the unit's own LineageOS
+# kernel reports in `uname -r`, so check it before building for a 1st gen
+# (docs/porting-checkers.md).
 #
 # Environment: KSRC (~/kernel: github.com/amazon-oss/android_kernel_amazon_mt8163,
 # branch cronos/lineage-18.1), KCOMMIT (8d928c5176cc — `uname -r` on the device
@@ -19,6 +26,7 @@
 # patch-dtb.py does, then build-image.sh KERNEL=<Image.gz-dtb> (see README.md).
 set -euo pipefail
 
+DEVICE=${DEVICE:-cronos}
 KSRC=${KSRC:-$HOME/kernel}
 KCOMMIT=${KCOMMIT:-8d928c5176cc}
 KOUT=${KOUT:-$HOME/kout}
@@ -50,7 +58,7 @@ export KBUILD_BUILD_USER=${KBUILD_BUILD_USER:-techo5} KBUILD_BUILD_HOST=${KBUILD
 export TZ=UTC # the build date in the version string, without the builder's zone
 export ARCH=arm64 CROSS_COMPILE
 mkdir -p "$KOUT"
-make -s O="$KOUT" cronos_defconfig
+make -s O="$KOUT" "${DEVICE}_defconfig"
 # Bluetooth core + BR/EDR + LE, RFCOMM (serial profiles), the virtual HCI
 # driver btbridge feeds, and HCI UART/H4 as the alternative transport.
 scripts/config --file "$KOUT/.config" \

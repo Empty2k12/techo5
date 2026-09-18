@@ -19,15 +19,33 @@ import (
 // a second "1", or a "0", leaves them cut, and only the physical button releases them. That is
 // the privacy design of the hardware rather than a gap in the driver, so Set(false) reports it
 // instead of pretending.
-const (
-	dir    = "/sys/devices/platform/gpio-privacy"
+//
+// The 1st gen (checkers) has the same latch behind a driver of its own, amazon-gating
+// (drivers/misc/gating.c): the same `state` and `enable` files with the same semantics, under its
+// own directory, and one input device named "gating" for the button rather than a separate
+// gpio-privacy-button and gpio-privacy-state pair. Whichever directory the unit has is the one
+// used, so one binary serves both.
+var (
+	dir    = pickDir()
 	state  = dir + "/state"
 	enable = dir + "/enable"
+)
+
+const (
+	cronosDir   = "/sys/devices/platform/gpio-privacy"
+	checkersDir = "/sys/devices/platform/amazon-gating"
 
 	// toggleLag is how long the latch takes to report the flip once enable has been pulsed,
 	// with margin over the 1000 ms pulse.
 	toggleLag = 1400 * time.Millisecond
 )
+
+func pickDir() string {
+	if _, err := os.Stat(checkersDir); err == nil {
+		return checkersDir
+	}
+	return cronosDir
+}
 
 // platform is the mute as the gpio-privacy driver exposes it.
 type platform struct{}
@@ -81,7 +99,7 @@ func (p platform) Toggle() (bool, error) {
 // itself and has no brightness control, so it always reads bright while muted.
 type noLED struct{}
 
-func (noLED) SetBright(bool) error { return nil }
+func (noLED) SetBright(bool) error  { return nil }
 func (noLED) Bright() (bool, error) { return true, nil }
 
 func platformMute() (Mute, error) {

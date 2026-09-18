@@ -27,7 +27,11 @@ param(
     [string]$SignKey = $env:TECHO5_SIGN_KEY,
     # A boot image built with build-image.sh --no-key, published as techo5-boot-<version>.img for new
     # units (docs/install.md). Refused if it carries an SSH key.
-    [string]$Boot = ''
+    [string]$Boot = '',
+    # The Echo Show 5 1st gen's boot image (DEVICE=checkers build-image.sh --no-key), published as
+    # techo5-boot-checkers-<version>.img. Only the kernel and its device trees differ; the daemon,
+    # the manifest and the root filesystem are the same ones (docs/porting-checkers.md).
+    [string]$BootCheckers = ''
 )
 $ErrorActionPreference = 'Stop'
 # A root filesystem must not carry LineageOS's vendor tree: it is Amazon's and the chip makers', not ours to
@@ -75,14 +79,15 @@ $args = @('release', 'create', $Version, (Join-Path $bin 'echod-arm'), (Join-Pat
     (Join-Path $bin 'manifest.json.sig'), '--repo', $repo, '--title', $Version, '--notes', $Notes)
 if ($Rootfs) { $args += $Rootfs }
 if ($DotRootfs) { $args += $DotRootfs }
-if ($Boot) {
-    # An image built without --no-key carries the builder's key in its initramfs; that must not ship.
-    # The check is for the file entry (its name ends in a NUL), not the init script that mentions it.
-    $py = "import gzip,lzma,struct,sys; b=open(sys.argv[1],'rb').read(); ks,_,rs=struct.unpack('<3I',b[8:20]); ps=struct.unpack('<I',b[36:40])[0]; r0=ps+((ks+ps-1)//ps)*ps; r=b[r0:r0+rs]; d=gzip.decompress(r) if r[:2]==b'\x1f\x8b' else lzma.decompress(r); sys.exit(1 if b'root/.ssh/authorized_keys'+bytes(1) in d else 0)"
-    python -c $py $Boot
-    if ($LASTEXITCODE -ne 0) { throw "$Boot carries an SSH key: build it with build-image.sh --no-key" }
-    $named = Join-Path $bin "techo5-boot-$Version.img"
-    Copy-Item $Boot $named -Force
+# An image built without --no-key carries the builder's key in its initramfs; that must not ship.
+# The check is for the file entry (its name ends in a NUL), not the init script that mentions it.
+$py = "import gzip,lzma,struct,sys; b=open(sys.argv[1],'rb').read(); ks,_,rs=struct.unpack('<3I',b[8:20]); ps=struct.unpack('<I',b[36:40])[0]; r0=ps+((ks+ps-1)//ps)*ps; r=b[r0:r0+rs]; d=gzip.decompress(r) if r[:2]==b'\x1f\x8b' else lzma.decompress(r); sys.exit(1 if b'root/.ssh/authorized_keys'+bytes(1) in d else 0)"
+foreach ($image in @(@($Boot, "techo5-boot-$Version.img"), @($BootCheckers, "techo5-boot-checkers-$Version.img"))) {
+    if (-not $image[0]) { continue }
+    python -c $py $image[0]
+    if ($LASTEXITCODE -ne 0) { throw "$($image[0]) carries an SSH key: build it with build-image.sh --no-key" }
+    $named = Join-Path $bin $image[1]
+    Copy-Item $image[0] $named -Force
     $args += $named
 }
 # SHA256SUMS: what tools/install-show.ps1 checks the boot image against (the manifest covers the rest).

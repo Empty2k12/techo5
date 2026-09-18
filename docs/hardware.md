@@ -125,6 +125,13 @@ is MT7663 only; `btmtksdio` does list MT7668). Not usable for this project.
   (module 0x11 = RSN), then `dmesg | grep "Gen RSN IE"`.
 - The firmware picks the BSS itself (by SSID, any band), whatever BSSID the
   supplicant asked for; pinning `bssid=` just makes the join fail.
+- **WPA2-PSK only, and PMF must not be required.** The pinned wpa_supplicant 2.9
+  (Alpine 3.12) is built without SAE and without management frame protection, so
+  neither can be asked for: `ieee80211w` is rejected as an unknown network field.
+  On WPA3 the scan reports the access point with an empty key-management field
+  (`[WPA2--CCMP]`); on WPA2 with PMF required the supplicant skips it with
+  `skip RSN IE - no mgmt frame protection enabled but AP requires it`. Both leave
+  it in `SCANNING` for ever (seen on a checkers unit 2026-09-18).
 - The Bluetooth driver does **not** register a Linux HCI device. It creates the
   character device `/dev/stpbt` (plus `/dev/stpbtfwlog`) carrying raw H4 packets
   (leading type byte `0x01` command, `0x02` ACL, `0x04` event), which Android's

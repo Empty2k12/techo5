@@ -577,6 +577,13 @@ session.
    first boot = rescue initramfs on the FireOS kernel flashed to recovery, then
    the slot store on its system partition. The Wi-Fi driver loading is the
    unknown that decides it.
+12. **Echo Show 5 1st gen (`checkers`) on the same image**: the same board a
+   generation earlier, and the closest port of the three. Panel, touch, capture
+   path, both PCM device numbers, radio and partitions are the same; the speaker
+   (RT5616 with an external amplifier, not the MAX98396), the mute latch
+   (`amazon-gating`, not `gpio-privacy`), the kernel's defconfig and device trees,
+   and the camera sensor are not. Desk research, nothing run on a unit:
+   [docs/porting-checkers.md](porting-checkers.md).
 
 ## Ground rules
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Edit the device trees appended to an Android boot image's kernel.
 
-The LineageOS cronos kernel is Image.gz with eleven flattened device trees
-appended (one per board revision; the bootloader picks by board id). This
-rewrites every one of them and writes a new boot image with the same header,
-ramdisk and command line.
+The LineageOS kernel is Image.gz with the board's flattened device trees
+appended, one per board revision, and the bootloader picks by board id: eleven
+of them on cronos, five on checkers. This rewrites every one it finds and
+writes a new boot image with the same header, ramdisk and command line.
 
     python3 patch-dtb.py boot.img out.img --delete /soc/spi@1100a000/spi@0 amzn,mic-downmix
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // Output is one of the device's audio outputs. The Echo Show 5 has a speaker and no jack, so
@@ -45,15 +46,35 @@ type kctl struct {
 	blob  []byte
 }
 
+// initSequence is the quiet, known state the player starts and ends on; AmpSwitch is the mixer
+// control that gates the speaker, empty where switching it is not safe. Both differ between the
+// two Show 5 generations, which is the whole of the speaker port (docs/porting-checkers.md).
+//
 // On cronos the AIC3101 codec is left as the kernel brings it up, the playback stream is driven
-// at unity and the volume curve is applied in software; there is nothing to route, and the
-// amplifier switch is never touched (see AmpSwitch below). One write matters: the MAX98396 comes
-// up in "Speaker Safe Mode", a power cap that takes about 30 dB off the output (measured
-// 2026-09-15: a 0.3 FS tone at the mic went from -47 to -15 dBFS when it was cleared). Amazon's
-// HAL cleared it at boot; with Android on the null HAL nobody does, so the daemon does. Codec
-// writes are cached until the stream powers up, which is why this goes before the first write.
-var initSequence = []kctl{
-	{name: "Speaker Safe Mode A", level: 0},
+// at unity and the volume curve is applied in software; there is nothing to route. Its
+// Ext_Speaker_Amp_Switch drives the GPIO wired to the MAX98396's reset, so switching it off and
+// on resets the amplifier and wipes the register setup the codec driver did at probe, which it
+// never repeats, leaving the speaker silent until a reboot (found 2026-09-14): the switch is
+// never touched and AmpSwitch stays empty. One write matters instead: the MAX98396 comes up in
+// "Speaker Safe Mode", a power cap that takes about 30 dB off the output (measured 2026-09-15:
+// a 0.3 FS tone at the mic went from -47 to -15 dBFS when it was cleared). Amazon's HAL cleared
+// it at boot; with Android on the null HAL nobody does, so the daemon does. Codec writes are
+// cached until the stream powers up, which is why this goes before the first write.
+//
+// checkers has neither chip: its codec is a Realtek RT5616 at i2c 2-0x1b with an external
+// amplifier on a GPIO, so there is no safe mode to clear and the same control is a plain enable,
+// used the way the Dot and the Spot use theirs: off until the codec has settled, then on. The
+// codec's own controls (HP/OUT playback switches, DAC1 playback volume) are left at the driver's
+// power-on state until they have been measured on a unit, and the volume curve stays the one
+// tuned for the MAX98396 until this amplifier has been listened to.
+var initSequence, AmpSwitch = speakerPath(layout.Checkers())
+
+func speakerPath(checkers bool) ([]kctl, string) {
+	if checkers {
+		const ampSwitch = "Ext_Speaker_Amp_Switch"
+		return []kctl{{name: ampSwitch, value: "Off"}}, ampSwitch
+	}
+	return []kctl{{name: "Speaker Safe Mode A", level: 0}}, ""
 }
 
 var pathSequence = map[Output][]kctl{
@@ -122,12 +143,6 @@ func gainForStep(out Output, step int) float32 {
 
 // MediaService is the init service that owns Android's audio HAL on LineageOS.
 const MediaService = "vendor.audio-hal"
-
-// AmpSwitch is empty: on cronos Ext_Speaker_Amp_Switch drives the GPIO wired to the MAX98396's
-// reset, so switching it off and on resets the amplifier and wipes the register setup the codec
-// driver did at probe — which it never repeats, leaving the speaker silent until a reboot
-// (found 2026-09-14). The amplifier is left as the kernel brought it up.
-const AmpSwitch = ""
 
 // OutputBoost is make-up gain on everything the speaker plays, before the volume curve and the
 // limiter. Unity: the quiet output that once seemed to need it was the amplifier's safe mode

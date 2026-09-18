@@ -97,6 +97,10 @@ t5_wifi_up() {
 	[ $n -gt 0 ] && log "wifi: wlan0 up after ${n}s"
 	if ! pidof wpa_supplicant >/dev/null; then
 		wpa_supplicant -B -i wlan0 -c "$conf" -P /run/wpa.pid > /tmp/wpa.log 2>&1
+		sleep 1
+		# A supplicant that died at start (a configuration it cannot parse, say) otherwise shows up
+		# only as "not associated ()" a minute later, with the reason sitting unread in its log.
+		pidof wpa_supplicant >/dev/null || { log "wifi: wpa_supplicant did not start: $(tail -3 /tmp/wpa.log | tr '\n' ' ')"; return 1; }
 	fi
 	n=0; while [ $n -lt ${WIFI_WAIT:-60} ]; do
 		wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break

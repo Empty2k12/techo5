@@ -27,10 +27,18 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // Width and Height are the frames handed out.
 const Width, Height = 800, 600
+
+// sensorSupported: everything below programs the OV02B10, the 2nd gen's sensor. The 1st gen
+// (checkers) carries an OV9734 on the same ISP, a different part with its own init table and
+// sizes, so there the camera is reported absent rather than offered and broken. The ISP half of
+// this file is what would carry over; see docs/porting-checkers.md.
+func sensorSupported() bool { return !layout.Checkers() }
 
 // ---- the hardware ----
 

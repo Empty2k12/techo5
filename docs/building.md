@@ -108,6 +108,10 @@ Its header lists the source checkout and the toolchain (Arm's GCC 8.3, downloade
 [tools/linux/README.md](../tools/linux/README.md) has the device tree edit that gives the daemon both
 microphones instead of their average (`patch-dtb.py`, which needs `python3 -m pip install fdt`).
 
+For an Echo Show 5 **1st gen** (2019, `checkers`), set `DEVICE=checkers`: same tree, same commit, its
+own defconfig and device trees. Check `uname -r` on the unit first, since the vendor modules only load
+on the release the LineageOS build was made with. See [porting-checkers.md](porting-checkers.md).
+
 ## 6. The boot image
 
 ```
@@ -117,6 +121,10 @@ KERNEL=inputs/Image.gz-dtb-bt bash tools/linux/build-image.sh -o build/techo5-bo
 `--no-key` is how releases are built: the rescue environment then accepts only SSH keys already on the
 unit. Put your public key at `inputs/techo5_ed25519.pub` and leave `--no-key` out to have it built in.
 
+`DEVICE=checkers` here picks the 1st gen's LineageOS boot image for the header, the load addresses and
+the command line. Everything else in the image, and the daemon and root filesystem, are the same for
+both generations: the daemon works out which Show it is on at start.
+
 ## 7. Install your build
 
 On a Show still running LineageOS, the installer takes your files in place of the release's:
@@ -124,6 +132,8 @@ On a Show still running LineageOS, the installer takes your files in place of th
 ```
 python3 tools/install-show.py --serial <serial> --name Kitchen --boot build/techo5-boot.img --rootfs build/rootfs.tar.gz
 ```
+
+(Add `--device checkers` for a 1st gen.)
 
 On a Show already running TECHO5, step 4's `--install` puts a root filesystem in the spare slot. A boot
 image goes on with `fastboot flash boot` (with the Show in fastboot, docs/install.md step 3).

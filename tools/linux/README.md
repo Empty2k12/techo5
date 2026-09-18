@@ -169,6 +169,19 @@ Windows paths to python and normalise line endings on the way to the device.
   element (capabilities 0) into the association request; 2.11 advertises 16
   replay counters (0x000c) in the handshake, hostapd on the access points sees the
   mismatch and deauthenticates with "wrong key". 2.9 does not advertise them.
+  The cost is everything newer than **WPA2-PSK (CCMP)**. Alpine 3.12's 2.9 is built
+  without SAE and without management frame protection: `ieee80211w` is an "unknown
+  network field" and `WPA-PSK-SHA256` an "invalid key_mgmt", so there is no
+  device-side way to join a network that needs either. Seen on a checkers unit
+  2026-09-18, both halves of it: on WPA3 the driver hears the access point but
+  `scan_results` shows the SSID with an empty key-management field
+  (`[WPA2--CCMP]`, an AKM this build does not know); switched to WPA2-PSK with PMF
+  still required, the supplicant reads the beacon and walks past it with
+  `skip RSN IE - no mgmt frame protection enabled but AP requires it`. Either way
+  no association is attempted and it sits in `SCANNING`. The network keeper then reboots the unit every 15 minutes
+  for want of an address, which eventually parks the bootloader in fastboot
+  (`fastboot continue` resumes). Fix on the access point: a WPA2-PSK SSID, or
+  WPA2/WPA3 transition with PMF optional rather than required.
 - **Static busybox as `/init`'s interpreter**, breadcrumbs in the spare area of
   MISC (`readmisc.sh`), boot log on userdata: the image explains its own failures.
 - **Wi-Fi credentials come from Android's saved networks** on userdata

@@ -18,6 +18,11 @@ firmware): releases don't carry it, so it is copied into the store before the pa
   and running
   [LineageOS 18.1](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/),
   connected to your Wi-Fi in Android, with USB debugging on.
+- A Wi-Fi network offering **WPA2-PSK (CCMP) with management frame protection off or optional**.
+  The wpa_supplicant this driver needs is built without WPA3 and without PMF, so a WPA3 network,
+  or a WPA2 one that *requires* PMF, is skipped and the unit scans for ever without joining. In
+  most routers PMF is not a switch of its own: it comes with the WPA3 or WPA2+WPA3 mode, so
+  plain "WPA2 (CCMP)" is the setting. An IoT or guest SSID is the usual answer.
 - Its power adapter and a USB **data** cable to the PC. Keep it on mains power while flashing.
 - A Windows, Linux or macOS computer with `adb` and `fastboot` (Android platform tools).
 - Home Assistant with the ESPHome integration.

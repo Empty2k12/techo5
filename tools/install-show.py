@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Install TECHO5 on an Echo Show 5 (2nd gen, cronos) running LineageOS 18.1, in one command.
+"""Install TECHO5 on an Echo Show 5 running LineageOS 18.1, in one command.
 
     python3 tools/install-show.py --serial <serial> --name Kitchen --dry-run
     python3 tools/install-show.py --serial <serial> --name Kitchen
+    python3 tools/install-show.py --serial <serial> --name Kitchen --device checkers
+
+The 2nd gen (2021, cronos) is the default; --device checkers is the 1st gen (2019), which installs
+the same way from its own boot image (docs/porting-checkers.md).
 
 Windows, Linux and macOS alike; needs Python 3, adb and fastboot. Nothing is built: the release's boot
 image (LineageOS's kernel rebuilt with Bluetooth, and TECHO5's rescue environment, with no SSH key) and
 root filesystem are downloaded and checked. Each step is checked before the next:
 
-  1. checks    adb sees the unit as cronos on the LineageOS kernel TECHO5's is built from
+  1. checks    adb sees the unit as the device given, on the LineageOS kernel TECHO5's is built from
   2. backup    with Rooted debugging on, LineageOS's boot image into backups/<serial>/ (the way back)
   3. release   the boot image and root filesystem, checked against their checksums
   4. push      the root filesystem onto the unit's storage, checked by md5
@@ -32,9 +36,25 @@ from techo5lib import (CONSOLE_TECHO5, Adb, Console, Fastboot, Release, default_
                        need, new_api_key, note, run_main, step, valid_api_key, wait_for)
 
 REPO = 'HuskerMinion/techo5'
-# The LineageOS kernel commit TECHO5's kernel is rebuilt from: the vendor modules only load on it.
-KERNEL_RELEASE = '4.9.337-g8d928c5176cc'
 WIFI_MODULE = 'vendor/lib/modules/mt76x8_wlan.ko'
+
+# The two Echo Show 5 generations. They install the same way and run the same root filesystem and
+# daemon; only the boot image differs, because the kernel is built for the board's own defconfig
+# and device trees (docs/porting-checkers.md). `kernel` is the LineageOS kernel release TECHO5's is
+# rebuilt from, which the vendor modules only load on; checkers' is unknown until a unit reports it,
+# and is then checked like the other.
+DEVICES = {
+    'cronos': {
+        'what': 'an Echo Show 5 2nd gen (2021)',
+        'kernel': '4.9.337-g8d928c5176cc',
+        'boot': 'techo5-boot-%s.img',
+    },
+    'checkers': {
+        'what': 'an Echo Show 5 1st gen (2019)',
+        'kernel': None,
+        'boot': 'techo5-boot-checkers-%s.img',
+    },
+}
 
 
 def quote(s):
@@ -44,6 +64,8 @@ def quote(s):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--serial', required=True, help="the unit's adb serial (adb devices)")
+    ap.add_argument('--device', choices=sorted(DEVICES), default='cronos',
+                    help='which Echo Show 5 this is (default cronos, the 2nd gen)')
     ap.add_argument('--name', required=True, help='the name Home Assistant shows, e.g. Kitchen')
     ap.add_argument('--release', default='latest', help='a release tag, or latest')
     ap.add_argument('--key-file', help='where the Home Assistant key is kept (default backups/<serial>/api.psk)')
@@ -82,13 +104,17 @@ def main():
     state = adb.state()
     if state != 'device':
         fail("adb does not see %s running LineageOS (state '%s'): turn on USB debugging and accept this computer" % (a.serial, state))
+    want = DEVICES[a.device]
     dev = adb.sh('getprop ro.product.device')
-    if dev != 'cronos':
-        fail("%s reports '%s', not cronos (an Echo Show 5 2nd gen)" % (a.serial, dev))
+    if dev != a.device:
+        fail("%s reports '%s', not %s (%s)" % (a.serial, dev, a.device, want['what']))
     kr = adb.sh('uname -r')
-    if kr != KERNEL_RELEASE:
-        fail('%s runs kernel %s, not %s: install the LineageOS 18.1 build the getting started guide links' % (a.serial, kr, KERNEL_RELEASE))
-    note('cronos, LineageOS kernel %s' % kr)
+    if want['kernel'] is None:
+        note('%s, LineageOS kernel %s (not checked: no known-good release recorded for this device yet)' % (dev, kr))
+    elif kr != want['kernel']:
+        fail('%s runs kernel %s, not %s: install the LineageOS 18.1 build the getting started guide links' % (a.serial, kr, want['kernel']))
+    else:
+        note('%s, LineageOS kernel %s' % (dev, kr))
 
     # ------------------------------------------------------------------------------------ 2. backup
     step('backup')
@@ -129,7 +155,7 @@ def main():
         boot = os.path.abspath(a.boot)
         note('boot image: your own, %s' % boot)
     else:
-        boot = rel.asset('techo5-boot-%s.img' % version)
+        boot = rel.asset(want['boot'] % version)
         note('boot image %s checked' % os.path.basename(boot))
     if a.dry_run:
         print('\nDry run: TECHO5 %s downloaded and checked in %s; nothing written to the unit.' % (version, rel.dir))
