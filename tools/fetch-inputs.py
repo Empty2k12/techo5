@@ -10,7 +10,9 @@ What it fetches, over HTTPS from Alpine's CDN and GitHub:
   alpine-minirootfs-3.24.1-armv7.tar.gz   Alpine's base image (pinned sha256)
   busybox.static                          from Alpine v3.24's busybox-static (armv7)
   apk.static                              apk-tools-static 2.14 (v3.22, x86_64), for the root filesystem build
-  models/                                 okay_nabu, hey_jarvis, hey_mycroft, alexa, from esphome/micro-wake-word-models
+  models/                                 okay_nabu, hey_jarvis, hey_mycroft, alexa, from esphome/micro-wake-word-models;
+                                           computer, jarvis, hey_friday, glados, hal, terminator, marvin,
+                                           home_assistant, from fwartner/home-assistant-wakewords-collection
   show, spot: apks/, apks312/             tools/linux/packages.txt; the wpa_supplicant 2.9 set from Alpine v3.12
   spot:       apks/libgcc                 mkfs.ext4 needs it in the Spot's rescue initramfs
   dot:        apks-dot/, apks-bt-dot/     techo5-dot's tools/linux/packages-rescue.txt and packages-bt.txt
@@ -21,6 +23,7 @@ Windows, Linux and macOS alike; needs Python 3.
 """
 import argparse
 import io
+import json
 import os
 import re
 import sys
@@ -31,6 +34,23 @@ from techo5lib import alpine, download, fail, fetch, note, repo_root, run_main, 
 
 MIRROR = 'https://dl-cdn.alpinelinux.org/alpine'
 MODELS = ('okay_nabu', 'hey_jarvis', 'hey_mycroft', 'alexa')
+
+# Wake words beyond esphome's built-in set, from the community collection at
+# https://github.com/fwartner/home-assistant-wakewords-collection, which ships models with no manifest
+# alongside them — the phrase is supplied here and written into one, the same shape a Home Assistant
+# custom_wake_words offer arrives in (echod/internal/lib/wake).
+EXTRA_MODELS = {
+    'computer': ('en/computer/computer_v2.tflite', 'Computer'),
+    'jarvis': ('en/jarvis/jarvis_v2.tflite', 'Jarvis'),
+    'hey_friday': ('en/hey_friday/hey_Friday!.tflite', 'Hey Friday'),
+    'glados': ('en/glados/glados.tflite', 'GLaDOS'),
+    'hal': ('en/hal/hal_v2.tflite', 'HAL'),
+    'terminator': ('en/terminator/Terminator.tflite', 'Terminator'),
+    'marvin': ('en/marvin/marvin_v2.tflite', 'Marvin'),
+    'home_assistant': ('en/home_assistant/Home_assistant.tflite', 'Home Assistant'),
+}
+EXTRA_MODELS_REPO = 'https://raw.githubusercontent.com/fwartner/home-assistant-wakewords-collection/main'
+
 _indexes = {}
 
 
@@ -114,6 +134,14 @@ def main():
             f = os.path.join(out, 'models', '%s.%s' % (m, ext))
             if not os.path.exists(f):
                 download('https://raw.githubusercontent.com/esphome/micro-wake-word-models/main/models/v2/%s.%s' % (m, ext), f)
+    for m, (path, phrase) in EXTRA_MODELS.items():
+        tf = os.path.join(out, 'models', '%s.tflite' % m)
+        if not os.path.exists(tf):
+            download('%s/%s' % (EXTRA_MODELS_REPO, path), tf)
+        js = os.path.join(out, 'models', '%s.json' % m)
+        if not os.path.exists(js):
+            with open(js, 'w') as f:
+                json.dump({'wake_word': phrase, 'model': '%s.tflite' % m, 'trained_languages': ['en']}, f, indent=2)
     step('packages for the %s' % a.device)
     if a.device in ('show', 'spot'):
         get_list(os.path.join(repo_root(), 'tools', 'linux', 'packages.txt'), os.path.join(out, 'apks'), out)
