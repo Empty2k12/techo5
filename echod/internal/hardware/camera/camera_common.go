@@ -65,11 +65,8 @@ const (
 	frameWait = 6 * time.Second
 )
 
-// Available reports whether this device has the camera nodes, and a sensor this code can drive.
+// Available reports whether this device has the camera nodes.
 func Available() bool {
-	if !sensorSupported() {
-		return false
-	}
 	for _, p := range []string{"/dev/camera-isp", "/dev/kd_camera_hw", "/dev/ion", "/proc/m4u"} {
 		if _, err := os.Stat(p); err != nil {
 			return false

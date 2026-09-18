@@ -85,16 +85,27 @@ properties that `checkers` does not have). So:
   Everything else about it, the commit pinning, the Bluetooth options, the module ABI story,
   is unchanged. Whether the checkers LineageOS build is the same commit `8d928c5176cc` is
   what `uname -r` on a unit will say. *(unverified)*
-- `tools/linux/patch-dtb.py` walks the appended trees; five instead of eleven. Neither
-  `checkers.dtsi` nor its variants carries `amzn,mic-downmix` at the branch HEAD, so whether
-  this unit downmixes its two microphones has to be measured rather than assumed.
+- `tools/linux/patch-dtb.py` walks the appended trees; five instead of eleven, and all five
+  carry `amzn,mic-downmix` (built 2026-09-18: "5 device trees, 5 changes"). checkers averages
+  its two microphones into both slots exactly as cronos did, and the same delete undoes it.
 
 ### 4. The camera is a different sensor
 
 `CONFIG_CUSTOM_KERNEL_IMGSENSOR="ov9734_mipi_raw"`, and the 1st gen ships a 1 MP camera
 against the 2nd gen's 2 MP. Everything in `hardware/camera` that is ISP work (receiver, TG,
-CMMCLK divider, IMGO DMA ring, debayer, exposure) carries over; the sensor programming does
-not. First release for this device should simply not offer the camera entity.
+CMMCLK divider, IMGO DMA ring, debayer, exposure) carries over, and so does the sensor
+programming: the kernel's imgsensor driver owns the power sequence and the I2C init table for
+both parts, and both are one-lane MIPI RAW10. What the daemon has to know is the geometry, so
+`sensorGeometry` carries it per board: 1600x1200 for the OV02B10, 1280x720 for the OV9734,
+with the exposure ceilings scaled to the shorter frame. The OV9734 numbers are its nominal mode,
+not yet read off a unit, so `open` logs what the driver reports for line length, frame length
+and pixel clock (`SENSOR_FEATURE_GET_PERIOD` and `GET_PIXEL_CLOCK_FREQ`, the same eight-byte
+parameter `SET_ESHUTTER` uses) next to the geometry it assumed. One boot with the camera
+acquired says whether the table is right. *(unverified)*
+
+Two things the table cannot answer and a first picture can: whether the Bayer order is the same
+RGGB (red and blue swapped is unmistakable), and whether the receiver needs anything the
+OV02B10 did not.
 
 ## The shape of the port: a variant, not a fourth build tag
 
@@ -136,8 +147,12 @@ Written from the sources above, not yet run on a 1st gen:
   cronos clears the MAX98396's safe mode and never touches the amplifier switch; checkers uses the
   switch as a plain enable and writes nothing to the codec. The volume curve is still the one
   tuned for the MAX98396.
-- `hardware/camera` reports the camera absent on checkers (`sensorSupported`), so no camera entity
-  and no web page is offered for a sensor this code cannot drive.
+- `hardware/camera` drives both sensors: `sensorGeometry` is the only board-dependent part, and
+  `Width`, `Height`, the line and frame sizes and the exposure ceilings follow from it. The
+  sensor's own line and frame lengths are logged at open to check that table against a unit.
+- Bluetooth needs nothing: the same MT7668 behind the same `mt76x8_bt.ko` and `/dev/stpbt`, the
+  same `/proc/idme/bt_mac_addr`, and `build-kernel.sh` turns the Bluetooth options on whichever
+  defconfig it started from. It is a smoke test, not a port.
 - `tools/linux/build-kernel.sh` and `build-image.sh` take `DEVICE=checkers`; `patch-dtb.py`
   already rewrites however many device trees it finds.
 - `tools/install-show.py` takes `--device checkers` (its own boot image, and the kernel release
@@ -158,17 +173,20 @@ Written from the sources above, not yet run on a 1st gen:
 4. **Privacy.** Confirm the latch, the red indicator and the button through `amazon-gating`.
 5. **Kernel and boot image.** `DEVICE=checkers tools/linux/build-kernel.sh`, device trees patched,
    image built the usual way, flashed to `boot`.
-6. **Everything else is a smoke test**: screen, touch, Wi-Fi, Bluetooth, wake word, the slot
+6. **Camera.** Acquire it once and read the logged line/frame lengths against the assumed
+   geometry, then take a picture: skew means the line length is wrong, red and blue swapped mean
+   the Bayer order is.
+7. **Everything else is a smoke test**: screen, touch, Wi-Fi, Bluetooth, wake word, the slot
    store, an update, an alarm.
-7. **Installer and release.** Fill in the kernel release for `checkers` in `install-show.py`'s
+8. **Installer and release.** Fill in the kernel release for `checkers` in `install-show.py`'s
    `DEVICES` once a unit reports one, and publish the boot image with
    `release.ps1 -BootCheckers`.
 
 ## Open questions for the first unit
 
+- Does the OV9734 come up at 1280x720 with the same RGGB order, or does the table need both
+  corrected?
 - Is `Ext_Speaker_Amp_Switch` safe to switch here, and does the speaker need it On?
-- Does the capture stream carry two distinct microphones, or a downmixed pair as `cronos` did
-  before the device tree was patched?
 - Is the LineageOS checkers kernel the same commit the vendor modules were built against
   (`4.9.337-g8d928c5176cc`), or its own?
 - Does the mute latch light the red indicator and cut the microphones the same way, and is it

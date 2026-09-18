@@ -2,20 +2,21 @@
 
 // Package camera is the Echo Show's front camera, driven without Android.
 //
-// The OV02B10 sits behind MediaTek's imgsensor driver (power, clock mux, the init table over
-// I2C) and the ISP driver (clocks, register windows, the IMGO DMA). Neither offers V4L2; the
-// sensor interface, CSI-2 receiver, timing generator and DMA are programmed here through the ISP
-// driver's mmap, the way MediaTek's libcamdrv does on MT8163. docs/camera-research.md has the
-// map and the dead ends; cmd/camframe is the standalone version of this file.
+// The sensor (an OV02B10 on cronos, an OV9734 on checkers) sits behind MediaTek's imgsensor
+// driver (power, clock mux, the init table over I2C) and the ISP driver (clocks, register
+// windows, the IMGO DMA). Neither offers V4L2; the sensor interface, CSI-2 receiver, timing
+// generator and DMA are programmed here through the ISP driver's mmap, the way MediaTek's
+// libcamdrv does on MT8163. docs/camera-research.md has the map and the dead ends.
 //
-// Frames arrive as 1600x1200 packed 10-bit Bayer at about 14 frames a second and are handed out
-// two ways: an 800x600 RGBA made on every frame (one pixel per Bayer cell, grey-world white
-// balance, a gamma curve) for the live view and the stream, and the packed frame itself, which
-// Full() demosaics to 1600x1200 on demand for stills. The sensor runs only while something holds
+// Frames arrive as the sensor's own packed 10-bit Bayer at about 14 frames a second and are
+// handed out two ways: a half-size RGBA made on every frame (one pixel per Bayer cell,
+// grey-world white balance, a gamma curve) for the live view and the stream, and the packed
+// frame itself, which Full() demosaics at full size on demand for stills. The sensor runs only while something holds
 // it (Acquire), and a little longer, so a run of snapshots does not restart it each time.
 package camera
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -31,22 +32,32 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
-// Width and Height are the frames handed out.
-const Width, Height = 800, 600
-
-// sensorSupported: everything below programs the OV02B10, the 2nd gen's sensor. The 1st gen
-// (checkers) carries an OV9734 on the same ISP, a different part with its own init table and
-// sizes, so there the camera is reported absent rather than offered and broken. The ISP half of
-// this file is what would carry over; see docs/porting-checkers.md.
-func sensorSupported() bool { return !layout.Checkers() }
+// Width and Height are the frames handed out: the sensor's own size halved, a pixel a Bayer cell.
+var Width, Height = sensorW / 2, sensorH / 2
 
 // ---- the hardware ----
 
+// The sensor differs between the two generations and nothing else here does: the OV02B10
+// (cronos) and the OV9734 (checkers) are both one-lane MIPI RAW10 through this ISP, both
+// powered and initialised by the kernel's imgsensor driver, so only the geometry and the
+// exposure ceilings change. The checkers numbers are the OV9734's nominal mode and have not
+// been read off a unit yet; the driver reports its own through GETINFO2.
+var sensorW, sensorH, aeFrame, aeMaxShut = sensorGeometry(layout.Checkers())
+
+func sensorGeometry(checkers bool) (w, h, frame, maxShut int) {
+	if checkers {
+		return 1280, 720, 740, 2400
+	}
+	return 1600, 1200, 1200, 4000
+}
+
+var (
+	bytesPerLine = sensorW * 10 / 8 // packed 10-bit Bayer: four pixels in five bytes
+	frameBytes   = bytesPerLine * sensorH
+)
+
 const (
-	sensorW, sensorH = 1600, 1200
-	bytesPerLine     = sensorW * 10 / 8 // packed 10-bit Bayer: four pixels in five bytes
-	frameBytes       = bytesPerLine * sensorH
-	slots            = 3 // DMA targets in rotation: a finished frame rests two periods
+	slots = 3 // DMA targets in rotation: a finished frame rests two periods
 
 	sensMagic   = 'i'
 	nrOpen      = 0
@@ -58,7 +69,10 @@ const (
 	nrFeature   = 15
 	sensorMain  = 1
 
-	// Sensor features (ACDK_SENSOR_FEATURE_ENUM, from 3000): exposure in lines, gain in 1/64.
+	// Sensor features (ACDK_SENSOR_FEATURE_ENUM, from 3000): line length and frame length in
+	// one word, the pixel clock, exposure in lines, gain in 1/64.
+	featPeriod  = 3002
+	featPClk    = 3003
 	featShutter = 3004
 	featGain    = 3006
 
@@ -262,6 +276,13 @@ func open() (*device, error) {
 		d.close()
 		return nil, fmt.Errorf("sensor control: %w", err)
 	}
+	// What the driver says it is running: line length and frame length (the sensor's own frame
+	// in shutter lines, which is what aeFrame has to match) and the pixel clock. Logged rather
+	// than used, so a sensor whose table here is wrong says so in the first line it logs.
+	period := d.getFeature(featPeriod)
+	slog.Info("camera: sensor", "board", layout.Board, "assumed", fmt.Sprintf("%dx%d", sensorW, sensorH),
+		"line", uint16(period), "frame_lines", uint16(period>>16), "pclk", d.getFeature(featPClk))
+
 	// A middling exposure to start from; the loop takes it from there.
 	d.shutter, d.gain = 600, 128
 	d.setFeature(featShutter, uint64(d.shutter))
@@ -270,13 +291,22 @@ func open() (*device, error) {
 	return d, nil
 }
 
-// setFeature is KDIMGSENSORIOC_X_FEATURECONCTROL with one integer parameter. The kernel is 64-bit
+// setFeature and getFeature are KDIMGSENSORIOC_X_FEATURECONCTROL with one integer parameter;
+// the driver reads or writes the same eight bytes. The kernel is 64-bit
 // and reads the parameter as an unsigned long, so eight bytes go over.
 func (d *device) setFeature(id uint32, v uint64) {
 	var para [8]byte
-	for i := range para {
-		para[i] = byte(v >> (8 * i))
-	}
+	binary.LittleEndian.PutUint64(para[:], v)
+	d.feature(id, &para)
+}
+
+func (d *device) getFeature(id uint32) uint64 {
+	var para [8]byte
+	d.feature(id, &para)
+	return binary.LittleEndian.Uint64(para[:])
+}
+
+func (d *device) feature(id uint32, para *[8]byte) {
 	size := uint32(len(para))
 	ctl := [4]uint32{sensorMain, id, uint32(uintptr(unsafe.Pointer(&para[0]))), uint32(uintptr(unsafe.Pointer(&size)))}
 	if err := ioctl(d.sens, ioc(3, sensMagic, nrFeature, 16), unsafe.Pointer(&ctl[0])); err != nil {
@@ -292,12 +322,10 @@ const (
 	aeTarget   = 290 // mean of the 10-bit frame to aim for: a lit room, no clipping to speak of
 	aeDelay    = 3   // frames between changes: a new exposure takes two frames to show
 	aeMinShut  = 4
-	aeFrame    = 1200 // shutter lines that fit a frame at the sensor's own rate
-	aeMaxShut  = 4000 // beyond this the frame rate drops under 5 a second
-	aeMinGain  = 64   // 1x
-	aeMidGain  = 384  // 6x, before trading frame rate
-	aeMaxGain  = 992  // the driver's ceiling, 15.5x
-	aeDeadband = 6    // no change inside target ± this
+	aeMinGain  = 64  // 1x
+	aeMidGain  = 384 // 6x, before trading frame rate
+	aeMaxGain  = 992 // the driver's ceiling, 15.5x
+	aeDeadband = 6   // no change inside target ± this
 )
 
 func (d *device) autoExpose(bayer []byte) {
@@ -324,11 +352,11 @@ func (d *device) autoExpose(bayer []byte) {
 	case want <= float64(aeFrame*aeMinGain):
 		shutter, gain = int(want/aeMinGain), aeMinGain
 	case want <= float64(aeFrame*aeMidGain):
-		shutter, gain = aeFrame, int(want/aeFrame)
+		shutter, gain = aeFrame, int(want/float64(aeFrame))
 	case want <= float64(aeMaxShut*aeMidGain):
 		shutter, gain = int(want/aeMidGain), aeMidGain
 	default:
-		shutter, gain = aeMaxShut, int(want/aeMaxShut)
+		shutter, gain = aeMaxShut, int(want/float64(aeMaxShut))
 	}
 	shutter = min(max(shutter, aeMinShut), aeMaxShut)
 	gain = min(max(gain, aeMinGain), aeMaxGain)
@@ -462,9 +490,9 @@ func (d *device) setupISP() {
 	cam.wr(regImgoFbc, 0)
 	cam.wr(regImgoBase, d.mva)
 	cam.wr(regImgoOfst, 0)
-	cam.wr(regImgoXsize, bytesPerLine-1)
-	cam.wr(regImgoYsize, sensorH-1)
-	cam.wr(regImgoStride, bytesPerLine)
+	cam.wr(regImgoXsize, uint32(bytesPerLine)-1)
+	cam.wr(regImgoYsize, uint32(sensorH)-1)
+	cam.wr(regImgoStride, uint32(bytesPerLine))
 	cam.wr(regCtlImgoSize, uint32(sensorW)<<16|uint32(sensorH))
 	if cam.rd(regImgoCon) == 0 {
 		cam.wr(regImgoCon, 0x80000040)
@@ -604,7 +632,7 @@ func unpackLine(line []byte, dst []uint16) {
 	}
 }
 
-// convert turns one packed frame into an 800x600 RGBA picture: one pixel per RGGB cell (the
+// convert turns one packed frame into a half-size RGBA picture: one pixel per RGGB cell (the
 // two greens summed), grey-world white balance, the darkest 0.1% at black (within reason), the top
 // percentile at white, gamma 1/1.8 or steeper for a backlit frame. The tone it settled on comes back for Full.
 func convert(raw []byte) (*image.RGBA, tone) {
@@ -690,7 +718,7 @@ func (t tone) tables() *[3][2048]uint8 {
 	return &lut
 }
 
-// Full demosaics the frame at the sensor's own 1600x1200: bilinear, each pixel's missing two
+// Full demosaics the frame at the sensor's own size: bilinear, each pixel's missing two
 // colours averaged from its neighbours, levelled the way the half-size picture was. It costs a
 // few hundred milliseconds on this SoC, so it is for stills, not the stream.
 func (f *Frame) Full() *image.RGBA {
