@@ -150,22 +150,33 @@ project's key, so a fork publishing its own releases needs its own key and a dae
 public key (`echod/internal/update/trust.go`).
 
 `TECHO5_SIGN_KEY` never leaves the maintainer's machine — it is not a GitHub Actions secret, and the
-build itself does not need to happen locally to keep that true. Pushing a version tag runs
-[.github/workflows/build.yml](../.github/workflows/build.yml), which builds `echod-arm` and
-`echod-arm-dot` on GitHub's own runners and attests (via Sigstore, keyless) that they came from that
-exact commit — so anyone, not just the maintainer, can check a release actually matches this repo's
-source instead of trusting that it does:
+build itself does not need to happen locally to keep that true. Pushing a release tag runs
+[.github/workflows/build.yml](../.github/workflows/build.yml), which tests every device's build and
+builds `echod-arm`, `echod-arm-dot` and `echod-arm-spot` on GitHub's own runners, attesting (via
+Sigstore, keyless) that they came from that exact commit and tag — so anyone, not just the maintainer,
+can check a release actually matches this repo's source instead of trusting that it does.
+
+Each device keeps its own version numbers, and Home Assistant compares the version a device's daemon
+reports with its release's, so the tag names the device: `vX.Y.Z` for the Show, `dot-vX.Y.Z`,
+`spot-vX.Y.Z`. The binaries are stamped `vX.Y.Z`. All tags go on this repository, since the daemon
+for all three is built here:
 
 ```
-git tag v0.1.2 && git push origin v0.1.2                       # triggers the workflow
-gh run download -n techo5-v0.1.2 -D bin                        # once it finishes
-gh attestation verify bin/echod-arm --repo HuskerMinion/techo5     # and the -dot binary too
-.\tools\release.ps1 -Version v0.1.2 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot
+git tag v0.6.0 && git push origin v0.6.0                       # the Show; triggers the workflow
+gh run download -n techo5-v0.6.0 -D bin                        # once it finishes
+.\tools\release.ps1 -Version v0.6.0 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot
 ```
 
-`release.ps1` then only signs the manifest and publishes — it never rebuilds the binaries CI already
-attested. Leaving out `-PrebuiltArm`/`-PrebuiltArmDot` still builds locally exactly as before, for a
-quick local test release without pushing a tag first.
+For the root filesystem, `PREBUILT_DAEMON=bin/echod-arm tools/linux/deploy-rootfs.sh --out ... --version
+v0.6.0` puts that same attested binary in it. The Dot (`git tag dot-v0.5.3`, then techo5-dot's
+`release-dot.ps1 -PrebuiltArmDot`) and the Spot (`git tag spot-v0.3.0`, then `BUILD_TAGS=spot
+PREBUILT_DAEMON=... deploy-rootfs.sh` and techo5-spot's `release-spot.ps1`) work the same way.
+
+Every one of these runs `gh attestation verify --source-ref refs/tags/<tag>` on the binary itself and
+refuses it unless CI built it from that release's own tag. A binary from a branch, or from a run
+started by hand (stamped `v0.0.0-dev`), would report the wrong version once installed, and Home
+Assistant would offer the update forever. Leaving out the prebuilt binaries still builds locally
+exactly as before, for a quick local test release without pushing a tag first.
 
 ## Where things default
 

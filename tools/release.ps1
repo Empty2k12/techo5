@@ -29,10 +29,12 @@ param(
     # A boot image built with build-image.sh --no-key, published as techo5-boot-<version>.img for new
     # units (docs/install.md). Refused if it carries an SSH key.
     [string]$Boot = '',
-    # Pre-built binaries from the "Build release binaries" GitHub Actions workflow, verified with
-    # `gh attestation verify <file> --repo HuskerMinion/techo5`. When both are given, the local build is
-    # skipped and these are signed as-is, so the release ships exactly what CI attested came from this
-    # commit rather than a copy rebuilt on the maintainer's machine.
+    # Pre-built binaries from the "Build release binaries" GitHub Actions workflow run for this release's
+    # tag (git tag $Version; git push origin $Version). When both are given, the local build is skipped
+    # and these are signed as-is, so the release ships exactly what CI attested — but only once
+    # `gh attestation verify` confirms CI built them from refs/tags/$Version: a binary built from a
+    # branch or by hand is stamped with another version, and Home Assistant would then offer the
+    # update forever after it was installed.
     [string]$PrebuiltArm = '',
     [string]$PrebuiltArmDot = ''
 )
@@ -56,9 +58,11 @@ try {
     $commit = (git rev-parse --short HEAD).Trim()
 
     if ($PrebuiltArm) {
-        Write-Host "== using prebuilt binaries (CI, commit $commit)"
+        Write-Host "== using prebuilt binaries (CI, tag $Version)"
         foreach ($f in @($PrebuiltArm, $PrebuiltArmDot)) {
             if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "prebuilt binary not found: $f" }
+            & gh attestation verify $f --repo $repo --source-ref "refs/tags/$Version" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$f is not attested as built by CI from tag $Version" }
         }
         Copy-Item $PrebuiltArm (Join-Path $bin 'echod-arm') -Force
         Copy-Item $PrebuiltArmDot (Join-Path $bin 'echod-arm-dot') -Force

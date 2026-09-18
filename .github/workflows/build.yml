@@ -6,11 +6,19 @@ name: Build release binaries
 # scripts (this repo's release.ps1, techo5-dot's release-dot.ps1, techo5-spot's release-spot.ps1 /
 # deploy-rootfs.sh). Signing stays local in each: the release key never touches CI. See
 # docs/building.md, "Releases (maintainer)".
+#
+# Each device keeps its own version numbers, and Home Assistant compares a device's running version
+# with its release's, so the tag says which device a build is for: vX.Y.Z (the Show), dot-vX.Y.Z,
+# spot-vX.Y.Z. Every binary is stamped with vX.Y.Z; each release script takes only its own device's
+# binary, and refuses one whose attestation isn't from that release's tag. A run started by hand is
+# stamped v0.0.0-dev, for testing only: no release script accepts it.
 
 on:
   push:
     tags:
       - 'v*.*.*'
+      - 'dot-v*.*.*'
+      - 'spot-v*.*.*'
   workflow_dispatch:
 
 permissions:
@@ -32,15 +40,24 @@ jobs:
       - name: Version info
         id: ver
         run: |
-          ref="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then ref="v0.0.0-dev"; fi
-          echo "version=$ref" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            name="${GITHUB_REF_NAME}"
+            version="${name#dot-}"; version="${version#spot-}"
+          else
+            name="v0.0.0-dev"; version="v0.0.0-dev"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      # Each device's build is tested with its own tags: some packages differ per device.
       - name: Test
         working-directory: echod
-        run: go test ./...
+        run: |
+          go test ./...
+          go test -tags dot ./...
+          go test -tags spot ./...
 
       - name: Build
         working-directory: echod
@@ -60,8 +77,9 @@ jobs:
         working-directory: bin
         run: sha256sum echod-arm echod-arm-dot echod-arm-spot > SHA256SUMS
 
-      # Cryptographically ties these files to this exact workflow run and source commit (Sigstore,
-      # keyless). Verify locally with: gh attestation verify bin/echod-arm --repo HuskerMinion/techo5
+      # Cryptographically ties these files to this exact workflow run, source commit and tag (Sigstore,
+      # keyless). Check by hand with:
+      #   gh attestation verify bin/echod-arm --repo HuskerMinion/techo5 --source-ref refs/tags/<tag>
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
@@ -72,7 +90,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: techo5-${{ steps.ver.outputs.version }}
+          name: techo5-${{ steps.ver.outputs.name }}
           path: |
             bin/echod-arm
             bin/echod-arm-dot

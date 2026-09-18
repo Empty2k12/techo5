@@ -15,9 +15,10 @@
 # Environment: HOST (the unit; needed unless --out), KEY (the SSH key the unit accepts; default
 # TECHO5_SSH_KEY, else ~/.ssh/id_ed25519), TECHO5_INPUTS (the Alpine minirootfs, apks312/ and models/;
 # default inputs/ in this repository; tools/fetch-inputs.py), TZ_NAME (a new unit's zone until Home
-# Assistant sets it; UTC), GO (go binary), WSL_DISTRO (Ubuntu), PREBUILT_DAEMON (an already-built,
-# already-attested echod-arm[-tag] from the "Build release binaries" GitHub Actions workflow — skips
-# building it here, so the rootfs carries exactly what CI attested instead of a local rebuild).
+# Assistant sets it; UTC), GO (go binary), WSL_DISTRO (Ubuntu), PREBUILT_DAEMON (the echod-arm or
+# echod-arm-spot the "Build release binaries" GitHub Actions workflow built from this release's tag,
+# vX.Y.Z or spot-vX.Y.Z with --version vX.Y.Z; skips building it here, so the rootfs carries exactly what
+# CI attested instead of a local rebuild; needs gh).
 set -euo pipefail
 
 HOST=${HOST:-}
@@ -60,6 +61,11 @@ pkg=github.com/HuskerMinion/techo5/echod/internal/layout
 commit=$(git -C "$ROOT" rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ -n "${PREBUILT_DAEMON:-}" ]; then
+	# Only what CI built from this release's own tag (spot-vX.Y.Z for BUILD_TAGS=spot): anything else
+	# carries another version, and Home Assistant would offer the update forever after it installed.
+	tag=${BUILD_TAGS:+$BUILD_TAGS-}$VERSION
+	gh attestation verify "$PREBUILT_DAEMON" --repo HuskerMinion/techo5 --source-ref "refs/tags/$tag" >/dev/null \
+		|| { echo "$PREBUILT_DAEMON is not attested as built by CI from tag $tag" >&2; exit 1; }
 	cp "$PREBUILT_DAEMON" "$ROOT/bin/echod-arm"
 else
 	(cd "$ROOT/echod" && "$GO" build -tags "$BUILD_TAGS" -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
