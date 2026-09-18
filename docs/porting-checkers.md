@@ -50,10 +50,27 @@ Consequences for `hardware/speaker`:
 - There is no `Speaker Safe Mode A` to clear, and no `Digital Volume A` / `Speaker Volume A`.
   The RT5616 controls are `HP Playback Switch`, `HP Playback Volume`, `HPVOL Playback Switch`,
   `OUT Playback Switch`, `OUT Playback Volume` and `DAC1 Playback Volume`.
-- `Ext_Speaker_Amp_Switch` is very likely a genuine amplifier enable here, not the MAX98396
-  reset line that must never be toggled on `cronos`. Expect to have to switch it **On**, the
-  way `paths_dot.go` and `paths_spot.go` do. *(unverified, and the first thing to test: on
-  `cronos` getting this wrong silences the speaker until a reboot.)*
+- `Ext_Speaker_Amp_Switch` is a genuine amplifier enable here, unlike the MAX98396 reset line
+  on `cronos`, but it is **active low**: it drives `amp_gpio` (pio 35), and LineageOS plays with
+  the control `Off` and the pin low, leaving it `On` and high when idle. Switching it **On** to
+  play, the way `paths_dot.go` and `paths_spot.go` do, is what silenced this board. It is set
+  `Off` once in `initSequence` and `AmpSwitch` stays empty, so the amplifier is simply left
+  enabled. *(measured 2026-09-18, six samples across one stream.)*
+- The RT5616's routing is what the rest of the silence was: the kernel leaves the DAC connected
+  to nothing and the vendor HAL wires it once at boot, so the codec configures, powers up and
+  converts nothing. The path runs DAC → `OUT MIX` → `OUTVOL` → `LOUT`, never through the
+  headphone pins (`HPO MIX DAC1` and `HP Playback` stay off). `AUD_CLK_BUF_Switch` stays `Off`
+  throughout, this codec needs no PMIC clock buffer, and the pinmux is byte-identical idle and
+  playing, so neither is the problem it looked like.
+- **There are two mutes in `LOUT_CTRL1` (reg 03), and clearing one is not enough.**
+  `OUT Playback Switch` is the output mute (bits 15 and 7); `OUT Channel Switch` is the volume
+  stage's own (bits 14 and 6). The RT5616 comes out of reset with both set, and LineageOS has the
+  second clear even when idle. With only the first cleared the register sits at `4848` and the
+  board is silent while *every other piece of evidence says it should not be*: the DAPM dump is
+  byte-identical to a playing LineageOS unit, `amp_gpio` is low, the PCM is open and fed. Both
+  together give `0808` against Amazon's `0a0a`, two volume steps apart, and the speaker plays.
+  That cost a whole debugging round: on this codec, check reg 03 itself rather than trusting the
+  DAPM graph. *(confirmed on the unit over the serial console, 2026-09-18.)*
 - The volume curve is the MAX98396's, tuned by ear for that amplifier. It has to be measured
   and retuned for this one; keep the software curve, keep the limiter.
 - The DL1 SRAM hold (`DRAMHold`) and the "leave the codec as the kernel brought it up"
@@ -83,8 +100,8 @@ properties that `checkers` does not have). So:
 
 - `tools/linux/build-kernel.sh` needs the defconfig as a parameter (`checkers_defconfig`).
   Everything else about it, the commit pinning, the Bluetooth options, the module ABI story,
-  is unchanged. Whether the checkers LineageOS build is the same commit `8d928c5176cc` is
-  what `uname -r` on a unit will say. *(unverified)*
+  is unchanged. The checkers LineageOS build is the same commit: a unit reports
+  `4.9.337-g8d928c5176cc`, so the vendor modules load. *(confirmed 2026-09-18.)*
 - `tools/linux/patch-dtb.py` walks the appended trees; five instead of eleven, and all five
   carry `amzn,mic-downmix` (built 2026-09-18: "5 device trees, 5 changes"). checkers averages
   its two microphones into both slots exactly as cronos did, and the same delete undoes it.
@@ -184,15 +201,21 @@ Written from the sources above, not yet run on a 1st gen:
 
 ## Open questions for the first unit
 
+Three of the six are answered; the dumps behind them are on
+[PR #2](https://github.com/HuskerMinion/techo5/pull/2).
+
 - Does the OV9734 come up at 1280x720 with the same RGGB order, or does the table need both
   corrected?
-- Is `Ext_Speaker_Amp_Switch` safe to switch here, and does the speaker need it On?
-- Is the LineageOS checkers kernel the same commit the vendor modules were built against
-  (`4.9.337-g8d928c5176cc`), or its own?
+- ~~Is `Ext_Speaker_Amp_Switch` safe to switch here, and does the speaker need it On?~~ Safe, and
+  it needs it **Off**: the control is active low.
+- ~~Is the LineageOS checkers kernel the same commit the vendor modules were built against?~~
+  Yes, `4.9.337-g8d928c5176cc`.
+- ~~Is the recovery slot p11 here rather than p10?~~ No: by-name gives `recovery` p10 (16 MB) and
+  `swdl` p11 (32 MB), the same layout as cronos. Writing `boot-recovery` into the first 32 bytes
+  of MISC (p8) and rebooting lands in TWRP, so the bootloader reads the BCB.
+- Does the boot slot boot 64-bit kernels only, as on `cronos`?
 - Does the mute latch light the red indicator and cut the microphones the same way, and is it
-  equally one-way?
-- Does the boot slot boot 64-bit kernels only, as on `cronos`? The recovery slot is p11 here
-  (32 MB, sharing the name with `swdl`) rather than p10.
+  equally one-way? The red LED is not in `/sys/class/leds`, which holds only `lcd-backlight`.
 
 ## Sources
 

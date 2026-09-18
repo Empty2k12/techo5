@@ -35,3 +35,41 @@ func TestGainForStep(t *testing.T) {
 		}
 	}
 }
+
+// The checkers path must leave the amplifier enabled (its switch is active low, so Off) and never
+// hand the player an AmpSwitch to drive On, and it must connect the RT5616's DAC to the line-out
+// and unmute it. cronos clears the MAX98396's safe mode instead and routes nothing.
+func TestSpeakerPath(t *testing.T) {
+	seq, amp := speakerPath(true)
+	if amp != "" {
+		t.Errorf("checkers AmpSwitch = %q, want empty: driving it On mutes this board", amp)
+	}
+	got := map[string]kctl{}
+	for _, c := range seq {
+		got[c.name] = c
+	}
+	if c, ok := got["Ext_Speaker_Amp_Switch"]; !ok || c.value != "Off" {
+		t.Errorf("Ext_Speaker_Amp_Switch = %+v, want Off", c)
+	}
+	for _, name := range []string{
+		"Stereo DAC MIXL DAC L1 Switch", "Stereo DAC MIXR DAC R1 Switch",
+		"OUT MIXL DAC L1 Switch", "OUT MIXR DAC R1 Switch",
+		"LOUT MIX OUTVOL L Switch", "LOUT MIX OUTVOL R Switch",
+		// Both mutes in LOUT_CTRL1: the output's and the volume stage's. Clearing one is silence.
+		"OUT Playback Switch", "OUT Channel Switch",
+	} {
+		if c, ok := got[name]; !ok || c.level != 1 {
+			t.Errorf("%q = %+v, want level 1", name, c)
+		}
+	}
+	for _, name := range []string{"HPO MIX DAC1 Switch", "HP Playback Switch"} {
+		if _, ok := got[name]; ok {
+			t.Errorf("%q is written; the amplifier is on the line-out, not the headphone pins", name)
+		}
+	}
+
+	seq, amp = speakerPath(false)
+	if amp != "" || len(seq) != 1 || seq[0].name != "Speaker Safe Mode A" {
+		t.Errorf("cronos path = %v, %q, want just Speaker Safe Mode A", seq, amp)
+	}
+}

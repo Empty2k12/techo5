@@ -62,17 +62,45 @@ type kctl struct {
 // cached until the stream powers up, which is why this goes before the first write.
 //
 // checkers has neither chip: its codec is a Realtek RT5616 at i2c 2-0x1b with an external
-// amplifier on a GPIO, so there is no safe mode to clear and the same control is a plain enable,
-// used the way the Dot and the Spot use theirs: off until the codec has settled, then on. The
-// codec's own controls (HP/OUT playback switches, DAC1 playback volume) are left at the driver's
-// power-on state until they have been measured on a unit, and the volume curve stays the one
-// tuned for the MAX98396 until this amplifier has been listened to.
+// amplifier on a GPIO, and nothing here is a safe mode to clear. Its Ext_Speaker_Amp_Switch does
+// drive that GPIO (amp_gpio, pio 35) but active low, the opposite of the Dot's and the Spot's:
+// LineageOS plays with the control Off and the pin low, and leaves it On and high when idle
+// (measured 2026-09-18, six samples across one stream). Driving it On to play, which is what
+// AmpSwitch means, is what silenced this board. So it is set Off once here and AmpSwitch stays
+// empty: the amplifier is simply left enabled, as on cronos.
+//
+// The rest is the RT5616's own routing, which the kernel leaves entirely disconnected and the
+// vendor HAL sets up once at boot. Without it the codec configures, powers up and converts
+// nothing. Amazon's own values, read back from a LineageOS unit with a ringtone playing: the DAC
+// reaches the line-out through OUT MIX and OUTVOL, not through the headphone pins (HPO MIX and
+// HP Playback stay off).
+//
+// Two mutes stand in the way, not one, and LOUT_CTRL1 (reg 03) holds both. OUT Playback Switch is
+// the output mute, bits 15 and 7. OUT Channel Switch is the volume stage's own mute, bits 14 and
+// 6, which the RT5616 also comes out of reset with set and which LineageOS has clear even when
+// idle. Clearing only the first leaves reg 03 at 4848: every widget powered, the whole DAPM graph
+// byte-identical to a playing LineageOS unit, the amplifier enabled, and silence. Both together
+// give 0808, against Amazon's 0a0a (two volume steps, nothing else). Volumes are otherwise left
+// where the driver puts them, which is where LineageOS leaves them too.
 var initSequence, AmpSwitch = speakerPath(layout.Checkers())
 
 func speakerPath(checkers bool) ([]kctl, string) {
 	if checkers {
-		const ampSwitch = "Ext_Speaker_Amp_Switch"
-		return []kctl{{name: ampSwitch, value: "Off"}}, ampSwitch
+		return []kctl{
+			{name: "Ext_Speaker_Amp_Switch", value: "Off"},
+			{name: "DAC MIXL INF1 Switch", level: 1},
+			{name: "DAC MIXR INF1 Switch", level: 1},
+			{name: "Stereo DAC MIXL DAC L1 Switch", level: 1},
+			{name: "Stereo DAC MIXL DAC R1 Switch", level: 1},
+			{name: "Stereo DAC MIXR DAC R1 Switch", level: 1},
+			{name: "Stereo DAC MIXR DAC L1 Switch", level: 1},
+			{name: "OUT MIXL DAC L1 Switch", level: 1},
+			{name: "OUT MIXR DAC R1 Switch", level: 1},
+			{name: "LOUT MIX OUTVOL L Switch", level: 1},
+			{name: "LOUT MIX OUTVOL R Switch", level: 1},
+			{name: "OUT Playback Switch", level: 1},
+			{name: "OUT Channel Switch", level: 1},
+		}, ""
 	}
 	return []kctl{{name: "Speaker Safe Mode A", level: 0}}, ""
 }
