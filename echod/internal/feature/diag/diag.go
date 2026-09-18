@@ -57,8 +57,6 @@ type Diag struct {
 	roomLevel   *esphome.Sensor
 	roomFloor   *esphome.Sensor
 
-	luxPath string
-
 	adb   *esphome.Switch
 	tls   *esphome.Switch
 	ip    *esphome.TextSensor
@@ -470,12 +468,6 @@ func (d *Diag) hardware() {
 		StateClass:  esphome.StateClassMeasurement,
 	}
 
-	d.luxPath = metrics.Reader{}.LuxPath()
-	if d.luxPath == "" {
-		slog.Warn("no light sensor found")
-	} else {
-		slog.Info("light sensor", "at", d.luxPath)
-	}
 	d.lux = &esphome.Sensor{
 		Base: esphome.Base{
 			ObjectID: "lux", Name: "Lux", Icon: "mdi:brightness-6",
@@ -602,7 +594,7 @@ func (d *Diag) board() {
 	available, _ := r.Memory()
 	set(d.memory, available)
 
-	set(d.lux, r.Lux(d.luxPath))
+	set(d.lux, lux())
 }
 
 // reading picks one thermal zone out of what was found.
