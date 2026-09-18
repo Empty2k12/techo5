@@ -10,6 +10,7 @@
 .EXAMPLE
   .\tools\release.ps1 -Version v0.1.0 -Notes "First release: voice satellite on the Echo Show 5."
   .\tools\release.ps1 -Version v0.1.1 -Notes "..." -Prerelease
+  .\tools\release.ps1 -Version v0.1.2 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot
 #>
 param(
     [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$')][string]$Version,
@@ -27,9 +28,18 @@ param(
     [string]$SignKey = $env:TECHO5_SIGN_KEY,
     # A boot image built with build-image.sh --no-key, published as techo5-boot-<version>.img for new
     # units (docs/install.md). Refused if it carries an SSH key.
-    [string]$Boot = ''
+    [string]$Boot = '',
+    # Pre-built binaries from the "Build release binaries" GitHub Actions workflow, verified with
+    # `gh attestation verify <file> --repo HuskerMinion/techo5`. When both are given, the local build is
+    # skipped and these are signed as-is, so the release ships exactly what CI attested came from this
+    # commit rather than a copy rebuilt on the maintainer's machine.
+    [string]$PrebuiltArm = '',
+    [string]$PrebuiltArmDot = ''
 )
 $ErrorActionPreference = 'Stop'
+if (($PrebuiltArm -and -not $PrebuiltArmDot) -or ($PrebuiltArmDot -and -not $PrebuiltArm)) {
+    throw "PrebuiltArm and PrebuiltArmDot must be given together"
+}
 # A root filesystem must not carry LineageOS's vendor tree: it is Amazon's and the chip makers', not ours to
 # publish. Each unit mounts its own (tools/linux/rootfs/etc/techo5/boot.sh).
 foreach ($t in @($Rootfs) | Where-Object { $_ }) {
@@ -44,18 +54,28 @@ New-Item -ItemType Directory -Force $bin | Out-Null
 Push-Location (Join-Path $root 'echod')
 try {
     $commit = (git rev-parse --short HEAD).Trim()
-    $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $pkg = 'github.com/HuskerMinion/techo5/echod/internal/layout'
-    $ldflags = "-s -w -X '$pkg.Version=$Version' -X '$pkg.GitCommit=$commit' -X '$pkg.BuildDate=$date'"
 
-    Write-Host "== building echod-arm $Version ($commit)"
-    $env:GOOS = 'linux'; $env:GOARCH = 'arm'; $env:GOARM = '7'; $env:CGO_ENABLED = '0'
-    & $Go build -trimpath -ldflags $ldflags -o (Join-Path $bin 'echod-arm') ./cmd/echod
-    if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-    Write-Host "== building echod-arm-dot $Version ($commit)"
-    & $Go build -tags dot -trimpath -ldflags $ldflags -o (Join-Path $bin 'echod-arm-dot') ./cmd/echod
-    if ($LASTEXITCODE -ne 0) { throw 'dot build failed' }
-    $env:GOOS = $null; $env:GOARCH = $null; $env:GOARM = $null; $env:CGO_ENABLED = $null
+    if ($PrebuiltArm) {
+        Write-Host "== using prebuilt binaries (CI, commit $commit)"
+        foreach ($f in @($PrebuiltArm, $PrebuiltArmDot)) {
+            if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "prebuilt binary not found: $f" }
+        }
+        Copy-Item $PrebuiltArm (Join-Path $bin 'echod-arm') -Force
+        Copy-Item $PrebuiltArmDot (Join-Path $bin 'echod-arm-dot') -Force
+    } else {
+        $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $pkg = 'github.com/HuskerMinion/techo5/echod/internal/layout'
+        $ldflags = "-s -w -X '$pkg.Version=$Version' -X '$pkg.GitCommit=$commit' -X '$pkg.BuildDate=$date'"
+
+        Write-Host "== building echod-arm $Version ($commit)"
+        $env:GOOS = 'linux'; $env:GOARCH = 'arm'; $env:GOARM = '7'; $env:CGO_ENABLED = '0'
+        & $Go build -trimpath -ldflags $ldflags -o (Join-Path $bin 'echod-arm') ./cmd/echod
+        if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+        Write-Host "== building echod-arm-dot $Version ($commit)"
+        & $Go build -tags dot -trimpath -ldflags $ldflags -o (Join-Path $bin 'echod-arm-dot') ./cmd/echod
+        if ($LASTEXITCODE -ne 0) { throw 'dot build failed' }
+        $env:GOOS = $null; $env:GOARCH = $null; $env:GOARM = $null; $env:CGO_ENABLED = $null
+    }
 
     Write-Host "== manifest"
     $from = "https://github.com/$repo/releases/download/$Version"

@@ -149,6 +149,24 @@ are PowerShell scripts for the maintainer's Windows machine. Devices only take a
 project's key, so a fork publishing its own releases needs its own key and a daemon built with its
 public key (`echod/internal/update/trust.go`).
 
+`TECHO5_SIGN_KEY` never leaves the maintainer's machine — it is not a GitHub Actions secret, and the
+build itself does not need to happen locally to keep that true. Pushing a version tag runs
+[.github/workflows/build.yml](../.github/workflows/build.yml), which builds `echod-arm` and
+`echod-arm-dot` on GitHub's own runners and attests (via Sigstore, keyless) that they came from that
+exact commit — so anyone, not just the maintainer, can check a release actually matches this repo's
+source instead of trusting that it does:
+
+```
+git tag v0.1.2 && git push origin v0.1.2                       # triggers the workflow
+gh run download -n techo5-v0.1.2 -D bin                        # once it finishes
+gh attestation verify bin/echod-arm --repo HuskerMinion/techo5     # and the -dot binary too
+.\tools\release.ps1 -Version v0.1.2 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot
+```
+
+`release.ps1` then only signs the manifest and publishes — it never rebuilds the binaries CI already
+attested. Leaving out `-PrebuiltArm`/`-PrebuiltArmDot` still builds locally exactly as before, for a
+quick local test release without pushing a tag first.
+
 ## Where things default
 
 Everything goes into git-ignored folders in the checkout, and each can be moved with an environment
