@@ -103,6 +103,13 @@ type roundScene struct {
 	contacts     []phone.Contact
 	contactCount int
 	contactTop   int // the first contact shown
+
+	// slideshow is Background mode's current photo, drawn under the clock face in place of the flat
+	// background. slideshowScreensaver is Screensaver mode's, taking the whole face; slideshowOverlay
+	// is its clock size.
+	slideshow            *image.RGBA
+	slideshowScreensaver *image.RGBA
+	slideshowOverlay     string
 }
 
 type roundRenderer struct {
@@ -160,7 +167,12 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.conversation(s)
 	case s.nowPlaying:
 		r.nowPlayingFace(s)
+	case s.slideshowScreensaver != nil:
+		r.slideshowScreensaverFace(s)
 	default:
+		if s.slideshow != nil {
+			r.slideshowBackground(s.slideshow)
+		}
 		r.clockFace(s)
 	}
 	if s.menuOpen {

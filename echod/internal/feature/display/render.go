@@ -97,6 +97,15 @@ type scene struct {
 	showCamera bool
 	camera     home.CameraView
 	cameras    []config.Camera
+
+	// slideshow is Background mode's current photo, drawn under the idle clock in place of the
+	// flat background; nil off that mode or before a first photo arrives.
+	slideshow *image.RGBA
+
+	// slideshowScreensaver is Screensaver mode's current photo, taking the whole screen once set
+	// (the idle wait has already been checked); slideshowOverlay is its clock/date size.
+	slideshowScreensaver *image.RGBA
+	slideshowOverlay     string
 }
 
 const sheetVolumeSteps = media.VolumeSteps
@@ -217,9 +226,14 @@ func (r *renderer) draw(s scene) {
 		r.cornerClock(s)
 		r.words(s.heard, s.reply, 70)
 	default:
-		if s.nowPlaying {
+		if s.slideshowScreensaver != nil {
+			r.slideshowScreensaverPage(s)
+		} else if s.nowPlaying {
 			r.nowPlaying(s)
 		} else {
+			if s.slideshow != nil {
+				r.slideshowBackground(s.slideshow)
+			}
 			r.bigClock(s)
 		}
 	}
@@ -244,16 +258,27 @@ func (r *renderer) volumeBar(s scene) {
 	r.text(r.small, pct, r.w-r.margin-r.width(r.small, pct), top+38, cream)
 }
 
-// bigClock is the idle screen: the time across the middle, the date beneath, and under that the running
-// timers. With timers the clock moves up to make room. The next alarm, when it is within a day, follows
-// the date.
-func (r *renderer) bigClock(s scene) {
-	hour := s.now.Format("3:04")
-	ampm := s.now.Format("PM")
+// timeAndDate draws the hour, AM/PM and date centred, with the hour's baseline at base and an
+// optional suffix appended to the date line (an alarm note, on the ordinary idle page). Shared by
+// bigClock and the screensaver's normal-size overlay, which wants the clock alone.
+func (r *renderer) timeAndDate(now time.Time, base int, dateSuffix string) {
+	hour := now.Format("3:04")
+	ampm := now.Format("PM")
 	hw := r.width(r.clock, hour)
 	aw := r.width(r.ampm, ampm)
 	gap := 18
 	x := (r.w - hw - gap - aw) / 2
+	r.text(r.clock, hour, x, base, cream)
+	r.text(r.ampm, ampm, x+hw+gap, base, amber)
+
+	date := now.Format("Monday, January 2") + dateSuffix
+	r.text(r.small, date, (r.w-r.width(r.small, date))/2, base+70, dim)
+}
+
+// bigClock is the idle screen: the time across the middle, the date beneath, and under that the running
+// timers. With timers the clock moves up to make room. The next alarm, when it is within a day, follows
+// the date.
+func (r *renderer) bigClock(s scene) {
 	base := r.h/2 + 60
 	timers := false
 	for _, t := range s.timers {
@@ -262,18 +287,16 @@ func (r *renderer) bigClock(s scene) {
 	if timers {
 		base -= 36
 	}
-	r.text(r.clock, hour, x, base, cream)
-	r.text(r.ampm, ampm, x+hw+gap, base, amber)
 
-	date := s.now.Format("Monday, January 2")
+	suffix := ""
 	if next := s.alarms.Next; next != nil && next.At.Sub(s.now) < 24*time.Hour {
 		what := "Alarm"
 		if next.Snoozed {
 			what = "Snoozed until"
 		}
-		date += "  ·  " + what + " " + next.At.Format("3:04 PM")
+		suffix = "  ·  " + what + " " + next.At.Format("3:04 PM")
 	}
-	r.text(r.small, date, (r.w-r.width(r.small, date))/2, base+70, dim)
+	r.timeAndDate(s.now, base, suffix)
 	if timers {
 		r.timersLine(s, base+128)
 	}

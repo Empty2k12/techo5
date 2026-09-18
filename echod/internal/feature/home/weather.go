@@ -37,8 +37,14 @@ func (f *Feature) buildWeatherSelect() {
 	}
 }
 
-// Entities is the weather source select.
-func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.weatherSel} }
+// Entities is the weather source select, plus the slideshow selects and idle number on a device
+// with a screen to show them on.
+func (f *Feature) Entities() []esphome.Entity {
+	if hasScreen {
+		return []esphome.Entity{f.weatherSel, f.slideshowSel, f.slideshowOverlaySel, f.slideshowIdleNum}
+	}
+	return []esphome.Entity{f.weatherSel}
+}
 
 // weatherOptions is what the select offers: none, Home Assistant's forecast, the one chosen, and
 // every weather entity Home Assistant listed when it was last asked.

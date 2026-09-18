@@ -185,6 +185,52 @@ func (c *Client) Fetch(path string) ([]byte, error) {
 	return c.do("GET", path, nil)
 }
 
+// FetchURL gets bytes from a URL a resolve returned: a path relative to Home Assistant, one of its
+// own absolute URLs, or an absolute URL an external source already signed. The token is sent
+// either way — needed for the first two, harmless for the third.
+func (c *Client) FetchURL(url string) ([]byte, error) {
+	base := c.baseURL()
+	if strings.HasPrefix(url, "/") {
+		return c.do("GET", url, nil)
+	}
+	if rest, ok := strings.CutPrefix(url, base); ok {
+		return c.do("GET", rest, nil)
+	}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := c.token(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("hass: GET %s: %s", url, resp.Status)
+	}
+	return out, nil
+}
+
+// baseURL and token are the configured access, empty when none is set.
+func (c *Client) baseURL() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acc.URL
+}
+
+func (c *Client) token() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acc.Token
+}
+
 // Entity is an entity's id and the name Home Assistant shows for it.
 type Entity struct {
 	ID, Name string

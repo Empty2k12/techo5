@@ -95,6 +95,13 @@ type Feature struct {
 
 	// cam is the camera view in progress; see camera.go.
 	cam CameraView
+
+	// slideshowSel picks the display mode, slideshowOverlaySel the screensaver's clock/date size,
+	// slideshowIdleNum the screensaver's idle wait; slideshow is the fetch state. See slideshow.go.
+	slideshowSel        *esphome.Select
+	slideshowOverlaySel *esphome.Select
+	slideshowIdleNum    *esphome.Number
+	slideshow           slideshowState
 }
 
 // forecastEvery is how often the forecast is refreshed while there is a weather entity.
@@ -103,6 +110,9 @@ const forecastEvery = 30 * time.Minute
 // Run keeps the forecast current. Nothing to do without a token or a weather entity.
 func (f *Feature) Run(ctx context.Context) error {
 	go f.metaLoop(ctx)
+	if hasScreen {
+		go f.slideshowLoop(ctx)
+	}
 	for {
 		f.refreshSources()
 		f.refreshForecast()
@@ -147,6 +157,7 @@ func Get() *Feature {
 	once.Do(func() {
 		shared = &Feature{poke: make(chan struct{}, 1), metaPoke: make(chan struct{}, 1)}
 		shared.buildWeatherSelect()
+		shared.buildSlideshowSelect()
 		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
 		media.Get().OnPlay.Listen(shared.played)
 	})
@@ -223,6 +234,15 @@ func (f *Feature) Name() string { return "home" }
 func (f *Feature) Restore(c config.Config) {
 	f.weatherSel.Options = weatherOptions(c.Home)
 	f.weatherSel.Set(chosenOption(c.Home))
+	if hasScreen {
+		f.slideshowSel.Set(slideshowLabelFor(c.Home.Slideshow.Mode))
+		f.slideshowOverlaySel.Set(slideshowOverlayLabelFor(c.Home.Slideshow.Overlay))
+		idle := c.Home.Slideshow.IdleMinutes
+		if idle <= 0 {
+			idle = int(slideshowIdleDefault / time.Minute)
+		}
+		f.slideshowIdleNum.Set(float32(idle))
+	}
 	f.want(c.Home)
 }
 
@@ -246,8 +266,11 @@ func (f *Feature) want(h config.Home) {
 // Actions are how Home Assistant configures this: which weather entity to show, and how the
 // radio page is wired. Both persist and take effect at the next connection.
 func (f *Feature) Actions() []*esphome.Action {
-	return append(f.cameraActions(), []*esphome.Action{
-		f.accessAction(),
+	actions := append(f.cameraActions(), f.accessAction())
+	if hasScreen {
+		actions = append(actions, f.slideshowAction())
+	}
+	return append(actions, []*esphome.Action{
 		{
 			Name: "home_weather",
 			Args: []esphome.Arg{{Name: "entity", Type: esphome.ArgString}},

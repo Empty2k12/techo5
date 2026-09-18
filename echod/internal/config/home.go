@@ -21,6 +21,31 @@ type Home struct {
 
 	// Cameras are camera.* entities and the names to say for them, in the order the list shows.
 	Cameras []Camera `json:"cameras,omitempty"`
+
+	// Slideshow is the idle photo slideshow's source and display mode.
+	Slideshow Slideshow `json:"slideshow"`
+}
+
+// Slideshow is how the idle screen's photo slideshow is wired: a Home Assistant media source to
+// step through, and how it shows on screen. Empty Mode is off.
+type Slideshow struct {
+	// Source is a media source id, like media-source://immich/album-id or a local media source's
+	// folder — whatever Home Assistant's browse API accepts. Its children are stepped through in
+	// order.
+	Source string `json:"source,omitempty"`
+
+	// Mode is SlideshowBackground (behind the ordinary idle page, always on), SlideshowScreensaver
+	// (full screen, after IdleMinutes idle), or empty for off.
+	Mode string `json:"mode,omitempty"`
+
+	// Overlay is the clock/date shown over a Screensaver photo: SlideshowOverlayOff,
+	// SlideshowOverlaySmall, or empty for the normal, full-size clock. Unused in Background mode,
+	// which always shows the ordinary idle page's own clock.
+	Overlay string `json:"overlay,omitempty"`
+
+	// IdleMinutes is how long Screensaver mode waits for, zero for the default
+	// (SlideshowIdleDefault). Unused in Background mode.
+	IdleMinutes int `json:"idle_minutes,omitempty"`
 }
 
 // Camera is one camera on the screen's list.
@@ -70,6 +95,18 @@ const (
 	RadioPopular    = "popular"
 )
 
+// The slideshow's display modes.
+const (
+	SlideshowBackground  = "background" // behind the ordinary idle page, always on
+	SlideshowScreensaver = "screensaver" // full screen, after idle
+)
+
+// The screensaver's clock/date overlay. Empty is the normal, full-size clock.
+const (
+	SlideshowOverlayOff   = "off"
+	SlideshowOverlaySmall = "small"
+)
+
 func defaultHome() Home {
 	return Home{Radio: Radio{Field: "station", SpeakerField: "speaker"}}
 }
@@ -97,4 +134,8 @@ func (w HomeWriter) RadioSource(source string) error {
 
 func (w HomeWriter) Cameras(cams []Camera) error {
 	return w.st.Update(func(c *Config) { c.Home.Cameras = cams })
+}
+
+func (w HomeWriter) Slideshow(s Slideshow) error {
+	return w.st.Update(func(c *Config) { c.Home.Slideshow = s })
 }

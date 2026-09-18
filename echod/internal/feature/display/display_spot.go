@@ -139,6 +139,10 @@ type Display struct {
 	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
 	wasNight bool
 
+	// slideshowIdleSince is when the face last became the plain idle clock (nothing else showing);
+	// zero while it is not. Screensaver mode waits for this to run long enough before taking over.
+	slideshowIdleSince time.Time
+
 	// weatherArmed is a weather question in progress; weatherUntil when the weather face comes down.
 	weatherArmed bool
 	weatherUntil time.Time
@@ -1073,6 +1077,27 @@ func (d *Display) frame() time.Duration {
 				s.infoVersion += " · slot " + slot
 			}
 		}
+	}
+
+	// boring is the plain idle clock face — the same set of faces draw() checks before falling
+	// through to clockFace. Background mode rides along with it; Screensaver only takes over once it
+	// has held for the configured wait, tracked by how long it has run continuously.
+	boring := s.phase == "idle" && s.call.Phase == phone.Idle && !s.ringing.any() && !s.showVolume &&
+		!s.showCamera && !s.nowPlaying && !s.menuOpen
+	if boring {
+		s.slideshow = home.Get().SlideshowBackground()
+	}
+	d.mu.Lock()
+	if !boring {
+		d.slideshowIdleSince = time.Time{}
+	} else if d.slideshowIdleSince.IsZero() {
+		d.slideshowIdleSince = now
+	}
+	idleSince := d.slideshowIdleSince
+	d.mu.Unlock()
+	if boring && !idleSince.IsZero() && now.Sub(idleSince) >= home.Get().SlideshowIdleTimeout() {
+		s.slideshowScreensaver = home.Get().SlideshowScreensaverPhoto()
+		s.slideshowOverlay = home.Get().SlideshowOverlay()
 	}
 
 	drawn := time.Now()

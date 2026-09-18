@@ -122,6 +122,10 @@ type Display struct {
 	touchedAt time.Time
 	nightDark bool
 
+	// slideshowIdleSince is when the screen last became the plain idle page (nothing else showing);
+	// zero while it is not. Screensaver mode waits for this to run long enough before taking over.
+	slideshowIdleSince time.Time
+
 	// wifi is the Wi-Fi pages' state; wifiOpen shows them. wifiAt is when the status was last read.
 	wifi     wifiState
 	wifiOpen bool
@@ -1314,6 +1318,27 @@ func (d *Display) frame() time.Duration {
 		s.radar = home.Get().Radar()
 	}
 
+	// boring is the plain idle page — the same set of pages draw() checks before falling through to
+	// bigClock/nowPlaying. Background mode rides along with it; Screensaver only takes over once it
+	// has held for the configured wait, tracked by how long it has run continuously.
+	boring := s.phase == "idle" && call.Phase == phone.Idle && !ring.any() && !s.bt.Pairing &&
+		!s.showWifi && !s.showSheet && !s.showCamera && !s.showRadar && !s.showWeather && !s.nowPlaying
+	if boring {
+		s.slideshow = home.Get().SlideshowBackground()
+	}
+	d.mu.Lock()
+	if !boring {
+		d.slideshowIdleSince = time.Time{}
+	} else if d.slideshowIdleSince.IsZero() {
+		d.slideshowIdleSince = now
+	}
+	idleSince := d.slideshowIdleSince
+	d.mu.Unlock()
+	if boring && !idleSince.IsZero() && now.Sub(idleSince) >= home.Get().SlideshowIdleTimeout() {
+		s.slideshowScreensaver = home.Get().SlideshowScreensaverPhoto()
+		s.slideshowOverlay = home.Get().SlideshowOverlay()
+	}
+
 	d.r.draw(s)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
@@ -1331,6 +1356,9 @@ func (d *Display) frame() time.Duration {
 	}
 	if s.showRadar && len(s.radar.Frames) > 1 {
 		return radarStep
+	}
+	if (s.slideshow != nil || s.slideshowScreensaver != nil) && home.Get().SlideshowTransitioning() {
+		return home.SlideshowFrame
 	}
 	if s.showWeather || s.nowPlaying {
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))

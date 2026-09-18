@@ -91,12 +91,13 @@ loops. Every command runs the same on Windows, Linux and macOS once the Dot is u
 1. **Unlock it with amonet-biscuit.** Follow
    [[UNLOCK][ROOT][TWRP][UNBRICK] Echo Dot 2nd Gen / 2016 (biscuit)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
    (source: [R0rt1z2/amonet, branch mt8163-biscuit](https://github.com/R0rt1z2/amonet/tree/mt8163-biscuit)).
-   Use the release ZIP attached to the thread, not the bare git repository: it has `fastbrick.sh`,
-   `boot-root.zip` and the files they need. The unlock needs a **Linux** computer or live USB.
+   Use the release ZIP attached to the thread, not the bare git repository: it has `fastbrick.sh`
+   (Linux/macOS), `fastbrick.bat`/`fastbrick.ps1` (Windows), `boot-root.zip` and the files they
+   need — same as the Show's and Spot's amonet forks, so Windows works directly here too.
    - Hold the **Action** button while plugging in power; the light turns **green** (Amazon's factory
      fastboot mode). Connect USB.
-   - Run `./fastbrick.sh`, check the device it found, and type `YES`. It ends with
-     `Exploit most likely successful!` and reboots into TWRP (a **white** light).
+   - Run `fastbrick.bat` (or `./fastbrick.sh` on Linux/macOS), check the device it found, and type
+     `YES`. It ends with `Exploit most likely successful!` and reboots into TWRP (a **white** light).
    - To get back into TWRP later: unplug power, hold **Volume Up**, plug power back in, and wait for the
      white light.
 
@@ -213,7 +214,7 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 | Step | Windows | Linux | macOS |
 |---|---|---|---|
 | Unlock: Show 5 (amonet-cronos) | Yes (fastbrick) | Yes | Use a Linux live USB |
-| Unlock: Dot (amonet-biscuit) | Use a Linux live USB | **Yes** (what the thread uses) | Use a Linux live USB |
+| Unlock: Dot (amonet-biscuit) | Yes (`fastbrick.bat`/`fastbrick.ps1`, in the release ZIP) | Yes | Use a Linux live USB |
 | Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | Use a Linux live USB |
 | LineageOS (Show 5, Spot) | Yes | Yes | Yes (TWRP and `adb` only) |
 | Install TECHO5 on the Show 5 (`install-show.py`) | **Yes** | **Yes** | **Yes** |

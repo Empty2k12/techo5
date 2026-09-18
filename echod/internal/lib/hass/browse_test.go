@@ -37,19 +37,27 @@ func fakeHA(t *testing.T, token string) *httptest.Server {
 		if err := c.ReadJSON(&cmd); err != nil {
 			return
 		}
-		if cmd["type"] != "media_source/browse_media" || cmd["media_content_id"] != "media-source://radio_browser/local" {
+		fail := func() {
 			_ = c.WriteJSON(map[string]any{"id": cmd["id"], "type": "result", "success": false,
 				"error": map[string]string{"code": "browse_media_failed", "message": "unknown"}})
-			return
 		}
-		_ = c.WriteJSON(map[string]any{"type": "event", "id": 99})
-		_ = c.WriteJSON(map[string]any{"id": cmd["id"], "type": "result", "success": true, "result": map[string]any{
-			"title": "Local stations", "media_content_id": "media-source://radio_browser/local",
-			"children": []map[string]any{{
-				"title": "KXYZ", "media_content_id": "media-source://radio_browser/uuid-1",
-				"media_content_type": "audio/mpeg", "can_play": true, "thumbnail": "http://logo",
-			}},
-		}})
+		switch {
+		case cmd["type"] == "media_source/browse_media" && cmd["media_content_id"] == "media-source://radio_browser/local":
+			_ = c.WriteJSON(map[string]any{"type": "event", "id": 99})
+			_ = c.WriteJSON(map[string]any{"id": cmd["id"], "type": "result", "success": true, "result": map[string]any{
+				"title": "Local stations", "media_content_id": "media-source://radio_browser/local",
+				"children": []map[string]any{{
+					"title": "KXYZ", "media_content_id": "media-source://radio_browser/uuid-1",
+					"media_content_type": "audio/mpeg", "can_play": true, "thumbnail": "http://logo",
+				}},
+			}})
+		case cmd["type"] == "media_source/resolve_media" && cmd["media_content_id"] == "media-source://immich/photo-1":
+			_ = c.WriteJSON(map[string]any{"id": cmd["id"], "type": "result", "success": true, "result": map[string]any{
+				"url": "/api/media/photo-1.jpg", "mime_type": "image/jpeg",
+			}})
+		default:
+			fail()
+		}
 	}))
 }
 
@@ -72,6 +80,24 @@ func TestBrowse(t *testing.T) {
 	}
 	if _, err := c.Browse(context.Background(), "media-source://radio_browser/nowhere"); err == nil {
 		t.Error("a failed browse reported no error")
+	}
+}
+
+func TestResolveMedia(t *testing.T) {
+	srv := fakeHA(t, "secret")
+	defer srv.Close()
+
+	c := &Client{acc: access{URL: srv.URL, Token: "secret"}}
+	r, err := c.ResolveMedia(context.Background(), "media-source://immich/photo-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.URL != "/api/media/photo-1.jpg" || r.MIME != "image/jpeg" {
+		t.Fatalf("resolved = %+v", r)
+	}
+
+	if _, err := c.ResolveMedia(context.Background(), "media-source://immich/nowhere"); err == nil {
+		t.Error("a failed resolve reported no error")
 	}
 }
 
