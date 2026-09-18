@@ -1,9 +1,11 @@
 name: Build release binaries
 
-# Builds echod-arm and echod-arm-dot on GitHub's runners from a tagged commit, and attests that the
-# published binaries were built from that exact source — so anyone can verify a release matches the
-# repo without trusting the maintainer's machine. Signing (tools/release.ps1) stays local: the release
-# key never touches CI. See docs/building.md, "Releases (maintainer)".
+# Builds echod-arm, echod-arm-dot and echod-arm-spot on GitHub's runners from a tagged commit, and
+# attests that the published binaries were built from that exact source — so anyone can verify a
+# release matches the repo without trusting the maintainer's machine, for all three devices' release
+# scripts (this repo's release.ps1, techo5-dot's release-dot.ps1, techo5-spot's release-spot.ps1 /
+# deploy-rootfs.sh). Signing stays local in each: the release key never touches CI. See
+# docs/building.md, "Releases (maintainer)".
 
 on:
   push:
@@ -52,12 +54,13 @@ jobs:
           ldflags="-s -w -X '$pkg.Version=${{ steps.ver.outputs.version }}' -X '$pkg.GitCommit=${{ steps.ver.outputs.commit }}' -X '$pkg.BuildDate=${{ steps.ver.outputs.date }}'"
           go build -trimpath -ldflags "$ldflags" -o ../bin/echod-arm ./cmd/echod
           go build -tags dot -trimpath -ldflags "$ldflags" -o ../bin/echod-arm-dot ./cmd/echod
+          go build -tags spot -trimpath -ldflags "$ldflags" -o ../bin/echod-arm-spot ./cmd/echod
 
       - name: Checksums
         working-directory: bin
-        run: sha256sum echod-arm echod-arm-dot > SHA256SUMS
+        run: sha256sum echod-arm echod-arm-dot echod-arm-spot > SHA256SUMS
 
-      # Cryptographically ties these two files to this exact workflow run and source commit (Sigstore,
+      # Cryptographically ties these files to this exact workflow run and source commit (Sigstore,
       # keyless). Verify locally with: gh attestation verify bin/echod-arm --repo HuskerMinion/techo5
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -65,6 +68,7 @@ jobs:
           subject-path: |
             bin/echod-arm
             bin/echod-arm-dot
+            bin/echod-arm-spot
 
       - uses: actions/upload-artifact@v4
         with:
@@ -72,5 +76,6 @@ jobs:
           path: |
             bin/echod-arm
             bin/echod-arm-dot
+            bin/echod-arm-spot
             bin/SHA256SUMS
           if-no-files-found: error

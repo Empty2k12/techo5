@@ -15,7 +15,9 @@
 # Environment: HOST (the unit; needed unless --out), KEY (the SSH key the unit accepts; default
 # TECHO5_SSH_KEY, else ~/.ssh/id_ed25519), TECHO5_INPUTS (the Alpine minirootfs, apks312/ and models/;
 # default inputs/ in this repository; tools/fetch-inputs.py), TZ_NAME (a new unit's zone until Home
-# Assistant sets it; UTC), GO (go binary), WSL_DISTRO (Ubuntu).
+# Assistant sets it; UTC), GO (go binary), WSL_DISTRO (Ubuntu), PREBUILT_DAEMON (an already-built,
+# already-attested echod-arm[-tag] from the "Build release binaries" GitHub Actions workflow — skips
+# building it here, so the rootfs carries exactly what CI attested instead of a local rebuild).
 set -euo pipefail
 
 HOST=${HOST:-}
@@ -57,7 +59,11 @@ export GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0
 pkg=github.com/HuskerMinion/techo5/echod/internal/layout
 commit=$(git -C "$ROOT" rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-(cd "$ROOT/echod" && "$GO" build -tags "$BUILD_TAGS" -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
+if [ -n "${PREBUILT_DAEMON:-}" ]; then
+	cp "$PREBUILT_DAEMON" "$ROOT/bin/echod-arm"
+else
+	(cd "$ROOT/echod" && "$GO" build -tags "$BUILD_TAGS" -trimpath -ldflags "-s -w -X $pkg.Version=$VERSION -X $pkg.GitCommit=$commit -X $pkg.BuildDate=$date" -o "$ROOT/bin/echod-arm" ./cmd/echod)
+fi
 for c in fbprobe audioprobe rebootto btbridge; do
 	(cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$ROOT/bin/$c-arm" "./cmd/$c")
 done
