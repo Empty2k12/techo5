@@ -377,6 +377,30 @@ GPIO block: `gpiochip0`, GPIOs 357–511 on `1000b000.pinctrl`.
   framebuffer is 480 wide × 960 tall, 32 bpp, byte order B, G, R, A (BGRA8888,
   the `mmap` offsets fb0 advertises are r16 g8 b0 a24). The device is used in
   landscape, so anything drawn is composed 960×480 and rotated 90° onto the panel.
+- **The panel comes up driving only 945 of its 960 lines.** LK initialises the
+  ST7701S itself and the kernel then takes the running panel over, so neither the
+  LCM init table nor a DSI engine restart ever happens, and the last ~15 lines are
+  never driven: they stay dark whatever is in the framebuffer, which on the
+  landscape device is a dark band a few columns wide at the right-hand edge
+  (`checkers`, measured against a ruler pattern 2026-09-18; the same is expected
+  under LineageOS, where Android's HWC blanks and unblanks the display once during
+  boot and so fixes it by accident). Nothing in the pipeline is misprogrammed, the
+  OVL layer reads 480x960, the DSI has VACT 960, VBP 16, VFP 20 exactly as the LCM
+  driver asks, and the panel's own `LNESET` is 960, so it is the register state LK
+  leaves behind.
+  `FBIOBLANK` powerdown then unblank makes the driver run `lcm_resume`, reset the
+  panel and push its own init table, and all 960 lines drive from then on.
+  `hardware/screen` does that once when it opens the framebuffer, and waits half a
+  second before the first frame: a frame posted straight after the unblank is
+  dropped and the panel then stays black until something repaints. The sysfs
+  `blank` attribute is not a substitute, it powers the panel down and does not
+  bring it back.
+  This belongs in userspace. The same cycle from `mtkfb_probe` does not work, and
+  `primary_display_suspend()` + `primary_display_resume()` there is actively
+  harmful: it leaves the band, varying between boots, and corrupts the driver's
+  state so that a later `FBIOBLANK` cycle blacks the panel out until reboot. The
+  sequence only works once the display stack is fully up, which is why Android does
+  it from HWC.
 - Kernel display stack: MediaTek 4.9 `mtkfb` + `mtk_disp_mgr`
   (`drivers/misc/mediatek/video/mt8163/videox` in
   `amazon-oss/android_kernel_amazon_mt8163`, branch `lineage-18.1`). The overlay

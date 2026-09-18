@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -40,6 +41,12 @@ const (
 	fbioGetVScreenInfo = 0x4600
 	fbioGetFScreenInfo = 0x4602
 	fbioPanDisplay     = 0x4606
+	fbioBlank          = 0x4611
+
+	blankPowerdown = 4
+	blankUnblank   = 0
+
+	panelSettle = 500 * time.Millisecond
 )
 
 // fb_var_screeninfo: 160 bytes on every ABI, all u32.
@@ -151,6 +158,11 @@ func Open() (*Device, error) {
 		}
 		d.pages--
 	}
+	for _, mode := range [2]uintptr{blankPowerdown, blankUnblank} {
+		syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), fbioBlank, mode)
+	}
+	time.Sleep(panelSettle)
+
 	d.page = int(d.v.Yoffset) / max(d.panelH, 1)
 	if d.page >= d.pages {
 		d.page = 0

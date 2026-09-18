@@ -45,12 +45,33 @@ cd "$KSRC"
 head=$(git rev-parse --short=12 HEAD)
 if [ -z "${KPATCHED:-}" ]; then
 	case "$head" in "$KCOMMIT"*) ;; *) echo "kernel tree is at $head, not $KCOMMIT (set KPATCHED=1 for a patched branch)" >&2; exit 1;; esac
-	if [ -n "$(git status --porcelain)" ]; then
-		echo "kernel tree is not clean (LOCALVERSION would get -dirty):" >&2
-		git status --short >&2
+fi
+PATCHES=$(cd "$(dirname "$0")" && pwd)/patches
+expected=$(sed -n 's|^+++ b/||p' "$PATCHES"/*.patch 2>/dev/null | sort -u || true)
+if [ -z "${KPATCHED:-}" ]; then
+	git checkout -- .
+fi
+applied=
+for p in "$PATCHES"/*.patch; do
+	[ -e "$p" ] || continue
+	if git apply --check -R "$p" 2>/dev/null; then
+		echo "patch already applied: $(basename "$p")"
+	else
+		git apply "$p"
+		echo "patch applied: $(basename "$p")"
+	fi
+	applied=1
+done
+if [ -z "${KPATCHED:-}" ]; then
+	changed=$(git status --porcelain | awk '{print $NF}')
+	extra=$(if [ -n "$expected" ]; then echo "$changed" | grep -vxF "$expected" || true; else echo "$changed"; fi)
+	if [ -n "$extra" ]; then
+		echo "kernel tree has changes that are not $PATCHES (LOCALVERSION would get -dirty):" >&2
+		echo "$extra" >&2
 		exit 1
 	fi
 fi
+if [ -n "$applied" ]; then KPATCHED=1; fi
 # The kernel records who built it and on what machine (uname -v, the boot log); keep the builder's
 # account and host name out of an image that may be published. Module loading is unaffected: the
 # vendor modules check the release string and symbol versions, not this.
@@ -66,6 +87,7 @@ scripts/config --file "$KOUT/.config" \
 	-e BT_HCIVHCI -e BT_HCIUART -e BT_HCIUART_H4 -d BT_DEBUGFS
 if [ -n "${KPATCHED:-}" ]; then
 	scripts/config --file "$KOUT/.config" -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g$KCOMMIT"
+	export LOCALVERSION=
 fi
 make -s O="$KOUT" olddefconfig
 grep -E "^CONFIG_(BT|BT_HCIVHCI|LOCALVERSION_AUTO)=" "$KOUT/.config"
